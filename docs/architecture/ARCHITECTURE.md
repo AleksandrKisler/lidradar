@@ -11,6 +11,29 @@ PostgreSQL is the source of truth for durable application state. Caches,
 search indexes, queues, and external systems, if introduced, are derived or
 supporting infrastructure and must not silently become authoritative.
 
+## Technology baseline
+
+The following implementation-level choices are fixed for the backend and are
+not left to individual implementation runs:
+
+- Go 1.26.x
+- `net/http`
+- `chi/v5`
+- `pgx/v5`
+- PostgreSQL 18.x
+- `log/slog`
+- `sqlc`
+- OpenAPI
+- Argon2id
+- Decimal arithmetic for values that require exact decimal representation
+- Prometheus-compatible metrics
+- OpenTelemetry-compatible tracing
+- Docker Compose
+
+The backend does not use an ORM, GraphQL, Redis, or microservices. Replacing or
+adding alternatives to this baseline requires an accepted ADR before
+implementation.
+
 ## Dependency rules
 
 - Business rules belong in the module that owns the relevant capability.
