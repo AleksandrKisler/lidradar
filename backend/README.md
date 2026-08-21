@@ -14,6 +14,17 @@ Build all five runtime binaries from the repository root:
 make build
 ```
 
+Every runtime validates typed configuration before starting. Set the required
+deployment environment to one of `development`, `test`, `staging`, or
+`production`:
+
+```sh
+LIDRADAR_ENV=development ./bin/lidradar-api
+```
+
+An absent or unsupported `LIDRADAR_ENV` prevents the process workload from
+starting and returns a non-zero exit status.
+
 The command writes `lidradar-api`, `lidradar-worker`, `lidradar-scheduler`,
 `lidradar-ai-agent`, and `lidradar-migrate` to `bin/`. The four long-running
 processes wait for `SIGINT` or `SIGTERM` and then shut down cleanly. The migrate
