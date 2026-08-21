@@ -8,6 +8,18 @@ The backend is a modular monolith with five independently built commands:
 * `cmd/ai-agent`
 * `cmd/migrate`
 
+Build all five runtime binaries from the repository root:
+
+```sh
+make build
+```
+
+The command writes `lidradar-api`, `lidradar-worker`, `lidradar-scheduler`,
+`lidradar-ai-agent`, and `lidradar-migrate` to `bin/`. The four long-running
+processes wait for `SIGINT` or `SIGTERM` and then shut down cleanly. The migrate
+command currently completes immediately; migration behavior is introduced by
+the dedicated foundation task.
+
 Business capabilities live below `internal`. The `risk` package is the
 reference module for the canonical layers:
 
