@@ -34,6 +34,10 @@ The backend does not use an ORM, GraphQL, Redis, or microservices. Replacing or
 adding alternatives to this baseline requires an accepted ADR before
 implementation.
 
+The complete list of technologies and product directions prohibited in the MVP,
+together with the required change-control process, is maintained in
+[`NON_GOALS.md`](NON_GOALS.md).
+
 ## Dependency rules
 
 - Business rules belong in the module that owns the relevant capability.

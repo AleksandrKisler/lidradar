@@ -31,3 +31,8 @@ go run ./backend/tools/archcheck -root backend
 The check is also mandatory in `.github/workflows/architecture.yml`. Its unit
 tests include a negative fixture proving that a `domain` import of `pgx/v5` is
 rejected.
+
+Before selecting infrastructure or expanding product scope, check the
+documented [MVP architecture non-goals](../docs/architecture/NON_GOALS.md).
+Introducing a prohibited technology or product direction requires an accepted
+ADR before implementation.
