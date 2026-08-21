@@ -48,6 +48,11 @@ implementation.
 - Transport concerns (HTTP, jobs, or CLI), persistence details, and domain
   behavior remain separate.
 
+These directions are executable constraints. `go test ./...` scans Go imports
+in `domain` and `application` directories and fails when an inner layer imports
+an outer layer. In particular, domain and application packages cannot import
+`pgx`; PostgreSQL adapters belong in infrastructure packages.
+
 ## Change policy
 
 This document records the current guardrails, not every implementation detail.
