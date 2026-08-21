@@ -1,0 +1,27 @@
+name: Architecture
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.mod
+      - name: Test architecture checker
+        run: go test ./backend/tools/archcheck
+      - name: Enforce module dependency direction
+        run: go run ./backend/tools/archcheck -root backend
+      - name: Compile backend skeleton
+        run: go test ./backend/...
+      - name: Build runtime binaries
+        run: go build ./backend/cmd/...

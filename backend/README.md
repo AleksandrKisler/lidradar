@@ -1,0 +1,33 @@
+# Backend layout
+
+The backend is a modular monolith with five independently built commands:
+
+* `cmd/api`
+* `cmd/worker`
+* `cmd/scheduler`
+* `cmd/ai-agent`
+* `cmd/migrate`
+
+Business capabilities live below `internal`. The `risk` package is the
+reference module for the canonical layers:
+
+```text
+transport -> application -> domain
+infrastructure ---------> domain ports
+```
+
+Place business rules and persistence interfaces in `domain`, use-case
+coordination in `application`, adapter implementations in `infrastructure`,
+and protocol-specific handlers and DTOs in `transport`. Shared technical
+adapters belong below `platform`; versioned external contracts belong in the
+repository-level `contracts` directory.
+
+Run the dependency check from the repository root:
+
+```sh
+go run ./backend/tools/archcheck -root backend
+```
+
+The check is also mandatory in `.github/workflows/architecture.yml`. Its unit
+tests include a negative fixture proving that a `domain` import of `pgx/v5` is
+rejected.
