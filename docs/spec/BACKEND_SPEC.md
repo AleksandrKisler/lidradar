@@ -22,8 +22,39 @@ behavior should be added here, or linked from here, before it is implemented.
 
 ## Feature specifications
 
-No feature-level backend contract has been approved yet. A backend change must
-define its observable behavior, data ownership, error behavior, and operational
-requirements before production code is added.
+### NO_RESPONSE risk
+
+The Risk module owns the `Risk` aggregate and active-risk deduplication. A
+`NO_RESPONSE` check uses a versioned deterministic policy; it does not invoke
+AI. The policy creates or refreshes a risk only when all of these conditions
+hold at execution time:
+
+- the last meaningful canonical message is incoming;
+- no outgoing message exists after that triggering message;
+- the related Opportunity is active; and
+- at least the Location response threshold has elapsed in the Location's IANA
+  timezone and weekly business-hours schedule.
+
+The first 45–89 elapsed business minutes have `HIGH` severity and 90 or more
+have `CRITICAL` severity. Closed periods do not contribute to elapsed time. A
+threshold crossing outside the current working period is carried into the next
+working period.
+
+Scheduled work contains tenant and Opportunity identifiers plus its due time,
+not authoritative conversation state. The worker must reload current canonical
+state before evaluation. A reply or an inactive Opportunity prevents creation
+and resolves any active `NO_RESPONSE` risk. Replayed or concurrent checks
+atomically create at most one active risk per tenant, Opportunity, and risk
+type; later positive evaluations refresh its evidence instead.
+
+All repository operations require both tenant and Opportunity identifiers.
+PostgreSQL is the production source of truth and must enforce active-risk
+uniqueness. Cancellation and persistence errors are returned to the worker for
+its normal retry classification; invalid or cross-tenant state is rejected and
+must not mutate a risk.
+
+Feature-level backend contracts added later must likewise define observable
+behavior, data ownership, error behavior, and operational requirements before
+production code is added.
 
 Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
