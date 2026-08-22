@@ -106,3 +106,18 @@ in the audit trail atomically with the fact. Cross-tenant identifiers are
 indistinguishable from missing resources and cannot produce records.
 
 Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
+
+### Revenue and attribution
+
+Revenue confirmation requires `revenue.confirm` and an `Idempotency-Key` and
+stores an exact positive decimal amount as a confirmed RevenueEvent. The
+RevenueEvent, its single attribution, idempotency response, and audit record
+are one atomic write. Key reuse with changed content is a conflict.
+
+Recovered attribution requires a Risk, Action, and Outcome from the same
+tenant and Opportunity, each no later than confirmation and within the central
+30-day attribution window. Organic and unknown revenue carry no corrective
+chain. Confirmed Recovered Revenue sums only confirmed events with a formal
+`RECOVERED` attribution and is returned separately per ISO currency; heuristic
+association never contributes to this KPI. Cross-tenant references are
+indistinguishable from missing resources.

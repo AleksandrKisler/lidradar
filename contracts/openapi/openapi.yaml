@@ -90,6 +90,22 @@ paths:
       responses:
         '200': { description: text/event-stream containing risk.changed, risk.acknowledged, and risk.resolved signals }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/opportunities/{opportunityId}/revenue:
+    parameters:
+      - { name: opportunityId, in: path, required: true, schema: { type: string } }
+      - { $ref: '#/components/parameters/IdempotencyKey' }
+    post:
+      operationId: confirmRevenue
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ConfirmRevenueRequest' } } } }
+      responses:
+        '201': { description: Confirmed revenue and its unique attribution, content: { application/json: { schema: { $ref: '#/components/schemas/RevenueConfirmation' } } } }
+        '409': { description: Idempotency key conflict }
+  /api/v1/revenue/confirmed-recovered:
+    get:
+      operationId: getConfirmedRecoveredRevenue
+      parameters: [{ name: currency, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }]
+      responses:
+        '200': { description: Formal recovered revenue total for one currency, content: { application/json: { schema: { $ref: '#/components/schemas/Money' } } } }
 components:
   parameters:
     RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
@@ -117,6 +133,32 @@ components:
       type: object
       required: [id, opportunityId, actorId, status, createdAt]
       properties: { id: { type: string }, opportunityId: { type: string }, actorId: { type: string }, status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string }, createdAt: { type: string, format: date-time } }
+    Money:
+      type: object
+      required: [amount, currency]
+      properties: { amount: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }, currency: { type: string, pattern: '^[A-Z]{3}$' } }
+    ConfirmRevenueRequest:
+      type: object
+      required: [amount, currency, attributionType]
+      properties:
+        amount: { type: string, pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$' }
+        currency: { type: string, pattern: '^[A-Za-z]{3}$' }
+        attributionType: { type: string, enum: [RECOVERED, ORGANIC, UNKNOWN] }
+        riskId: { type: string }
+        actionId: { type: string }
+        outcomeId: { type: string }
+    RevenueEvent:
+      type: object
+      required: [id, opportunityId, amount, currency, status, confirmedBy, confirmedAt]
+      properties: { id: { type: string }, opportunityId: { type: string }, amount: { type: string }, currency: { type: string }, status: { type: string, enum: [CONFIRMED] }, confirmedBy: { type: string }, confirmedAt: { type: string, format: date-time } }
+    RevenueAttribution:
+      type: object
+      required: [id, revenueEventId, opportunityId, type, createdAt]
+      properties: { id: { type: string }, revenueEventId: { type: string }, opportunityId: { type: string }, type: { type: string, enum: [RECOVERED, ORGANIC, UNKNOWN] }, riskId: { type: string }, actionId: { type: string }, outcomeId: { type: string }, createdAt: { type: string, format: date-time } }
+    RevenueConfirmation:
+      type: object
+      required: [revenue, attribution]
+      properties: { revenue: { $ref: '#/components/schemas/RevenueEvent' }, attribution: { $ref: '#/components/schemas/RevenueAttribution' } }
     Risk:
       type: object
       required: [id, opportunityId, locationId, type, severity, status, source, policyVersion, triggerMessageId, reason, detectedAt, updatedAt]
