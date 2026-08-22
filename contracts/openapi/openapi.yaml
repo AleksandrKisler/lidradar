@@ -57,6 +57,32 @@ paths:
         '200': { description: Idempotently resolved risk, content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/risks/{riskId}/recommendation:
+    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    post:
+      operationId: ensureRiskRecommendation
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [riskType], properties: { riskType: { type: string } } } } } }
+      responses:
+        '200': { description: Deterministic template recommendation, content: { application/json: { schema: { $ref: '#/components/schemas/Recommendation' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/risks/{riskId}/actions:
+    parameters: [{ $ref: '#/components/parameters/RiskId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+    post:
+      operationId: createRiskAction
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [type], properties: { type: { $ref: '#/components/schemas/ActionType' }, note: { type: string } } } } } }
+      responses:
+        '201': { description: Append-only Action created, content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } } }
+        '409': { description: Idempotency key conflict }
+  /api/v1/opportunities/{opportunityId}/outcomes:
+    parameters:
+      - { name: opportunityId, in: path, required: true, schema: { type: string } }
+      - { $ref: '#/components/parameters/IdempotencyKey' }
+    post:
+      operationId: createOpportunityOutcome
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string } } } } } }
+      responses:
+        '201': { description: Append-only Outcome created, content: { application/json: { schema: { $ref: '#/components/schemas/Outcome' } } } }
+        '409': { description: Idempotency key conflict }
   /api/v1/events:
     get:
       operationId: streamInvalidations
@@ -67,6 +93,7 @@ paths:
 components:
   parameters:
     RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
   responses:
     Forbidden: { description: Membership does not grant the required named permission, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     NotFound: { description: Risk does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -76,6 +103,20 @@ components:
       required: [error]
       properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } } }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
+    ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
+    OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }
+    Recommendation:
+      type: object
+      required: [id, riskId, text, source, createdAt]
+      properties: { id: { type: string }, riskId: { type: string }, text: { type: string }, source: { type: string, enum: [TEMPLATE] }, createdAt: { type: string, format: date-time } }
+    Action:
+      type: object
+      required: [id, riskId, actorId, type, createdAt]
+      properties: { id: { type: string }, riskId: { type: string }, actorId: { type: string }, type: { $ref: '#/components/schemas/ActionType' }, note: { type: string }, createdAt: { type: string, format: date-time } }
+    Outcome:
+      type: object
+      required: [id, opportunityId, actorId, status, createdAt]
+      properties: { id: { type: string }, opportunityId: { type: string }, actorId: { type: string }, status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string }, createdAt: { type: string, format: date-time } }
     Risk:
       type: object
       required: [id, opportunityId, locationId, type, severity, status, source, policyVersion, triggerMessageId, reason, detectedAt, updatedAt]

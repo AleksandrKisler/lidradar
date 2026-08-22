@@ -90,4 +90,19 @@ single-use timestamp are stored. Telegram callbacks require a tenant-scoped
 user link and idempotency key and are restricted to `OPEN_RISK`, `ACKNOWLEDGE`,
 and `SNOOZE`; financial mutations are not accepted through this boundary.
 
+### Recommendations, actions, and outcomes
+
+Every supported Risk type has a deterministic template recommendation, so a
+useful corrective instruction does not depend on AI availability. Actions are
+tenant-scoped append-only facts attached to a Risk. Outcomes are tenant-scoped
+append-only facts attached to an Opportunity; a correction creates another
+Outcome rather than rewriting history.
+
+Action and Outcome commands require the `risks.manage` permission and an
+`Idempotency-Key`. The key is scoped by tenant and operation: replaying the
+same request returns the stored response, while reusing it for different
+content returns a conflict. Each successful new Action or Outcome is recorded
+in the audit trail atomically with the fact. Cross-tenant identifiers are
+indistinguishable from missing resources and cannot produce records.
+
 Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
