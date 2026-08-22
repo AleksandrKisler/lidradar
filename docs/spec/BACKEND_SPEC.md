@@ -74,4 +74,20 @@ refetch the authoritative REST read model, and losing an SSE signal never loses
 business data. The versioned HTTP contract is maintained in
 [`../../contracts/openapi/openapi.yaml`](../../contracts/openapi/openapi.yaml).
 
+### Telegram risk notifications
+
+The Notification module owns the logical Notification, transport delivery
+attempts, one-time Telegram link tokens, and installed Telegram user links. A
+risk-opened alert uses the deterministic key `risk:{risk_id}:opened`; replaying
+the event or retrying Telegram cannot create another user-visible notification.
+Notification intent and its initial delivery are persisted atomically before
+the external request. Each retry is retained as a separate delivery attempt,
+using the standard retry schedule, and Telegram failure never changes Risk
+state.
+
+Link token plaintext is never persisted: only its SHA-256 digest, expiry, and
+single-use timestamp are stored. Telegram callbacks require a tenant-scoped
+user link and idempotency key and are restricted to `OPEN_RISK`, `ACKNOWLEDGE`,
+and `SNOOZE`; financial mutations are not accepted through this boundary.
+
 Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
