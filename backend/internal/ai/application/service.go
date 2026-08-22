@@ -27,7 +27,11 @@ type Store interface {
 	Enqueue(context.Context, domain.Job) error
 	Claim(context.Context, string, time.Time, time.Time) (domain.Job, bool, error)
 	Start(context.Context, domain.Run) error
+	Run(context.Context, string) (domain.Run, error)
+	RecordValidationError(context.Context, string, string) (domain.Run, error)
 	Complete(context.Context, string, string, string, domain.JobStatus, domain.ApplicationStatus, string, int64, string, time.Time) (domain.Run, error)
+	SaveSummary(context.Context, domain.ConversationSummary) error
+	RescheduleStale(context.Context, string, int64, string, time.Time) error
 }
 
 type Service struct {
@@ -79,6 +83,7 @@ func (s Service) Heartbeat(ctx context.Context, id, secret string) error {
 type EnqueueCommand struct {
 	TenantID, ConversationID, Prompt, AnalysisThroughMessageID string
 	BaseConversationRevision                                   int64
+	ModelVersion, PromptVersion, SchemaVersion                 string
 }
 
 func (s Service) Enqueue(ctx context.Context, c EnqueueCommand) (domain.Job, error) {
@@ -86,7 +91,16 @@ func (s Service) Enqueue(ctx context.Context, c EnqueueCommand) (domain.Job, err
 		return domain.Job{}, ErrInvalid
 	}
 	now := s.now().UTC()
-	j := domain.Job{ID: s.ids.NewID(), TenantID: c.TenantID, ConversationID: c.ConversationID, Prompt: c.Prompt, BaseConversationRevision: c.BaseConversationRevision, AnalysisThroughMessageID: c.AnalysisThroughMessageID, Status: domain.JobQueued, CreatedAt: now, UpdatedAt: now}
+	if c.ModelVersion == "" {
+		c.ModelVersion = DefaultModelVersion
+	}
+	if c.PromptVersion == "" {
+		c.PromptVersion = AnalysisPromptV1
+	}
+	if c.SchemaVersion == "" {
+		c.SchemaVersion = AnalysisSchemaV1
+	}
+	j := domain.Job{ID: s.ids.NewID(), TenantID: c.TenantID, ConversationID: c.ConversationID, Prompt: c.Prompt, BaseConversationRevision: c.BaseConversationRevision, AnalysisThroughMessageID: c.AnalysisThroughMessageID, ModelVersion: c.ModelVersion, PromptVersion: c.PromptVersion, SchemaVersion: c.SchemaVersion, Status: domain.JobQueued, CreatedAt: now, UpdatedAt: now}
 	return j, s.store.Enqueue(ctx, j)
 }
 
@@ -114,10 +128,35 @@ func (s Service) Complete(ctx context.Context, id, secret, jobID, runID, output 
 		return domain.Run{}, err
 	}
 	status := domain.ApplicationApplied
-	if output == "" {
+	snapshot, err := s.store.Run(ctx, runID)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	result, validationErr := ValidateAnalysisResultV1(output, snapshot.AnalysisThroughMessageID)
+	if validationErr != nil {
 		status = domain.ApplicationRejected
 	}
-	return s.store.Complete(ctx, id, jobID, runID, domain.JobSucceeded, status, output, currentRevision, currentMessageID, s.now().UTC())
+	now := s.now().UTC()
+	run, err := s.store.Complete(ctx, id, jobID, runID, domain.JobSucceeded, status, output, currentRevision, currentMessageID, now)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	if validationErr != nil {
+		return s.store.RecordValidationError(ctx, run.ID, validationErr.Error())
+	}
+	if run.ApplicationStatus == domain.ApplicationStale {
+		if err := s.store.RescheduleStale(ctx, jobID, currentRevision, currentMessageID, now); err != nil {
+			return domain.Run{}, err
+		}
+		return run, nil
+	}
+	if run.ApplicationStatus == domain.ApplicationApplied {
+		summary := domain.ConversationSummary{TenantID: run.TenantID, ConversationID: run.ConversationID, Text: result.Summary, BaseConversationRevision: currentRevision, AnalysisThroughMessageID: currentMessageID, ModelVersion: run.ModelVersion, PromptVersion: run.PromptVersion, SchemaVersion: run.SchemaVersion, RunID: run.ID, UpdatedAt: now}
+		if err := s.store.SaveSummary(ctx, summary); err != nil {
+			return domain.Run{}, err
+		}
+	}
+	return run, nil
 }
 
 func (s Service) Failed(ctx context.Context, id, secret, jobID, runID, reason string) (domain.Run, error) {

@@ -4,6 +4,7 @@ package infrastructure
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,15 +13,16 @@ import (
 )
 
 type MemoryStore struct {
-	mu    sync.Mutex
-	nodes map[string]domain.Node
-	jobs  map[string]domain.Job
-	order []string
-	runs  map[string]domain.Run
+	mu        sync.Mutex
+	nodes     map[string]domain.Node
+	jobs      map[string]domain.Job
+	order     []string
+	runs      map[string]domain.Run
+	summaries map[string]domain.ConversationSummary
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{nodes: map[string]domain.Node{}, jobs: map[string]domain.Job{}, runs: map[string]domain.Run{}}
+	return &MemoryStore{nodes: map[string]domain.Node{}, jobs: map[string]domain.Job{}, runs: map[string]domain.Run{}, summaries: map[string]domain.ConversationSummary{}}
 }
 func (s *MemoryStore) RegisterNode(_ context.Context, n domain.Node) error {
 	s.mu.Lock()
@@ -91,8 +93,65 @@ func (s *MemoryStore) Start(_ context.Context, r domain.Run) error {
 	}
 	r.BaseConversationRevision = j.BaseConversationRevision
 	r.AnalysisThroughMessageID = j.AnalysisThroughMessageID
+	r.TenantID, r.ConversationID = j.TenantID, j.ConversationID
+	r.ModelVersion, r.PromptVersion, r.SchemaVersion = j.ModelVersion, j.PromptVersion, j.SchemaVersion
 	s.runs[r.ID] = r
 	return nil
+}
+func (s *MemoryStore) Run(_ context.Context, id string) (domain.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[id]
+	if !ok {
+		return domain.Run{}, application.ErrNotFound
+	}
+	return r, nil
+}
+func (s *MemoryStore) RecordValidationError(_ context.Context, id, reason string) (domain.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[id]
+	if !ok {
+		return domain.Run{}, application.ErrNotFound
+	}
+	r.ValidationError = reason
+	s.runs[id] = r
+	return r, nil
+}
+
+func (s *MemoryStore) SaveSummary(_ context.Context, summary domain.ConversationSummary) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if summary.TenantID == "" || summary.ConversationID == "" {
+		return application.ErrInvalid
+	}
+	s.summaries[summary.TenantID+":"+summary.ConversationID] = summary
+	return nil
+}
+
+func (s *MemoryStore) RescheduleStale(_ context.Context, oldJobID string, revision int64, messageID string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, ok := s.jobs[oldJobID]
+	if !ok {
+		return application.ErrNotFound
+	}
+	id := oldJobID + ":revision:" + fmt.Sprint(revision)
+	if _, exists := s.jobs[id]; exists {
+		return nil
+	}
+	old.ID, old.BaseConversationRevision, old.AnalysisThroughMessageID = id, revision, messageID
+	old.Status, old.ClaimedBy, old.LeaseUntil, old.CreatedAt, old.UpdatedAt = domain.JobQueued, "", time.Time{}, now, now
+	s.jobs[id] = old
+	s.order = append(s.order, id)
+	return nil
+}
+
+func (s *MemoryStore) Summary(tenantID, conversationID string) (domain.ConversationSummary, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.summaries[tenantID+":"+conversationID]
+	return v, ok
 }
 func (s *MemoryStore) Complete(_ context.Context, node, jobID, runID string, status domain.JobStatus, app domain.ApplicationStatus, value string, currentRevision int64, currentMessage string, now time.Time) (domain.Run, error) {
 	s.mu.Lock()

@@ -138,3 +138,26 @@ chain. Confirmed Recovered Revenue sums only confirmed events with a formal
 `RECOVERED` attribution and is returned separately per ISO currency; heuristic
 association never contributes to this KPI. Cross-tenant references are
 indistinguishable from missing resources.
+
+### AI conversation analysis
+
+Conversation analysis uses the versioned `analyze-conversation.v1` contract in
+`contracts/ai/analyze_conversation_v1.schema.json`. Context is limited to the
+latest 20 messages and a conservative 3,000-token target, and contains the
+company context, prior derived summary, task, and output contract. Tenant IDs
+are not sent to the model.
+
+Provider output is retained for audit and is strictly decoded before use.
+Unknown fields, missing fields, unsupported fact enums, confidence outside
+0–1, missing evidence, and inconsistent price facts are rejected. Confidence
+of 0.85 or above is strong, 0.65–0.849 is weak, and below 0.65 is untrusted;
+untrusted facts are not supplied to domain policies. Model, prompt, schema,
+conversation revision, and last-message versions are retained on jobs, runs,
+and derived summaries.
+
+Freshness is checked against both the conversation revision and last analyzed
+message. A stale run is preserved with `STALE` application status and schedules
+a replacement analysis for the current snapshot. Rejected and stale output
+cannot mutate Opportunity or Risk state. A fresh valid result may update only
+the derived ConversationSummary; later risk features must consume trusted
+semantic facts through deterministic policies.
