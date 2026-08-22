@@ -161,3 +161,21 @@ a replacement analysis for the current snapshot. Rejected and stale output
 cannot mutate Opportunity or Risk state. A fresh valid result may update only
 the derived ConversationSummary; later risk features must consume trusted
 semantic facts through deterministic policies.
+
+### AI benchmark and model freeze
+
+Conversation-analysis models are compared offline with the versioned JSONL
+format `lidradar-ai-benchmark.v1`. Dataset case IDs are unique and cases are
+assigned explicitly to `TRAIN`, `VALIDATION`, or `GOLDEN`; a case with no facts
+uses an empty `expectedFacts` array rather than omitting its labels. Repository
+fixtures contain synthetic content only. The reviewed golden file is protected
+by SHA-256 and the runner fails closed when its digest changes.
+
+The runner sends the same versioned request consumed in production, applies the
+production output validator and confidence policy, and reports precision,
+recall, F1, exact-case rate, invalid output count, p50/p95/p99 latency, and
+throughput. Quality and performance thresholds must be supplied explicitly
+until product owners approve fixed values. A model manifest may be marked
+frozen only after a 300–500 case labelled dataset passes those approved gates on
+the target RTX 4060; a missing artifact digest or hardware run leaves it a
+candidate.

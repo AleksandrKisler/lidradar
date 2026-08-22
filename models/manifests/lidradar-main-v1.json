@@ -1,0 +1,14 @@
+{
+  "name": "lidradar-main-v1",
+  "status": "CANDIDATE_NOT_FROZEN",
+  "contractVersion": "analyze-conversation.v1",
+  "promptVersion": "analyze-conversation.prompt.v1",
+  "datasetVersion": "lidradar-ai-benchmark.v1",
+  "runtime": "llama.cpp",
+  "targetHardware": "RTX 4060 8 GB",
+  "qualityGate": null,
+  "performanceGate": null,
+  "modelArtifact": null,
+  "modelSHA256": null,
+  "freezeReason": "Ожидаются утверждённые gate, 300–500 размеченных случаев и измерение на RTX 4060"
+}
