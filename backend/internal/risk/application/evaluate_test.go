@@ -1,4 +1,4 @@
-package application
+package application_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"lidradar/backend/internal/risk/application"
 	"lidradar/backend/internal/risk/domain"
 	"lidradar/backend/internal/risk/infrastructure"
 )
@@ -33,7 +34,7 @@ func TestEvaluateDueRereadsStateAndAutoResolves(t *testing.T) {
 	repository := infrastructure.NewMemoryRepository()
 	reader := &stateReader{state: evaluationState()}
 	now := time.Date(2026, 8, 21, 10, 45, 0, 0, time.UTC)
-	evaluator := NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk-1" }, func() time.Time { return now })
+	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk-1" }, func() time.Time { return now })
 
 	risk, created, err := evaluator.EvaluateDue(context.Background(), "tenant", "opportunity")
 	if err != nil || !created || risk.Status != domain.StatusOpen {
@@ -56,7 +57,7 @@ func TestEvaluateDueReplayCreatesOneRisk(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	var mu sync.Mutex
 	ids := 0
-	evaluator := NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string {
+	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string {
 		mu.Lock()
 		defer mu.Unlock()
 		ids++
@@ -94,8 +95,8 @@ func TestEvaluateDueRejectsCrossTenantState(t *testing.T) {
 	repository := infrastructure.NewMemoryRepository()
 	reader := &stateReader{state: evaluationState()}
 	reader.state.TenantID = "another-tenant"
-	evaluator := NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk" }, time.Now)
-	if _, _, err := evaluator.EvaluateDue(context.Background(), "tenant", "opportunity"); err != ErrInvalidCheck {
+	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk" }, time.Now)
+	if _, _, err := evaluator.EvaluateDue(context.Background(), "tenant", "opportunity"); err != application.ErrInvalidCheck {
 		t.Fatalf("err = %v", err)
 	}
 }

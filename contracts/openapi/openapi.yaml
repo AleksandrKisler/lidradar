@@ -1,0 +1,115 @@
+openapi: 3.1.0
+info:
+  title: LidRadar API
+  version: 1.0.0
+paths:
+  /api/v1/radar:
+    get:
+      operationId: getRadarSummary
+      responses:
+        '200':
+          description: Tenant Radar totals. Money values are exact decimal strings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RadarSummary' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/risks:
+    get:
+      operationId: listRisks
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/RiskStatus' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Priority-ordered tenant risks and an opaque continuation cursor.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/RiskDetail' } }
+                  nextCursor: { type: [string, 'null'] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/risks/{riskId}:
+    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    get:
+      operationId: getRisk
+      responses:
+        '200':
+          description: Risk and currently available related resources.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RiskDetail' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/risks/{riskId}/acknowledge:
+    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    post:
+      operationId: acknowledgeRisk
+      responses:
+        '200': { description: Idempotently acknowledged risk, content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/risks/{riskId}/resolve:
+    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    post:
+      operationId: resolveRisk
+      responses:
+        '200': { description: Idempotently resolved risk, content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/events:
+    get:
+      operationId: streamInvalidations
+      description: Ephemeral tenant-scoped invalidations; clients refetch authoritative REST resources.
+      responses:
+        '200': { description: text/event-stream containing risk.changed, risk.acknowledged, and risk.resolved signals }
+        '403': { $ref: '#/components/responses/Forbidden' }
+components:
+  parameters:
+    RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
+  responses:
+    Forbidden: { description: Membership does not grant the required named permission, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: Risk does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } } }
+    RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
+    Risk:
+      type: object
+      required: [id, opportunityId, locationId, type, severity, status, source, policyVersion, triggerMessageId, reason, detectedAt, updatedAt]
+      properties:
+        id: { type: string }
+        opportunityId: { type: string }
+        locationId: { type: string }
+        type: { type: string, enum: [NO_RESPONSE] }
+        severity: { type: string, enum: [HIGH, CRITICAL] }
+        status: { $ref: '#/components/schemas/RiskStatus' }
+        source: { type: string, enum: [RULE] }
+        policyVersion: { type: string }
+        triggerMessageId: { type: string }
+        reason: { type: string }
+        detectedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        acknowledgedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+    RiskDetail:
+      type: object
+      required: [risk, actions]
+      properties:
+        risk: { $ref: '#/components/schemas/Risk' }
+        opportunity: { type: object, additionalProperties: true }
+        conversation: { type: object, additionalProperties: true }
+        recommendation: { type: object, additionalProperties: true }
+        actions: { type: array, items: { type: object, additionalProperties: true } }
+        outcome: { type: object, additionalProperties: true }
+        revenue: { type: object, additionalProperties: true }
+    RadarSummary:
+      type: object
+      required: [openRisks, criticalRisks, potentialRevenue, confirmedRecoveredRevenue]
+      properties:
+        openRisks: { type: integer, minimum: 0 }
+        criticalRisks: { type: integer, minimum: 0 }
+        potentialRevenue: { type: string, pattern: '^-?[0-9]+(\.[0-9]+)?$' }
+        confirmedRecoveredRevenue: { type: string, pattern: '^-?[0-9]+(\.[0-9]+)?$' }

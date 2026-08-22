@@ -57,4 +57,21 @@ Feature-level backend contracts added later must likewise define observable
 behavior, data ownership, error behavior, and operational requirements before
 production code is added.
 
+### Radar and Risk realtime API
+
+Radar reads and commands are tenant-scoped and authorized through the named
+`risks.read` and `risks.manage` membership permissions. The list is ordered by
+active state, severity (`CRITICAL` before `HIGH`), oldest detection time, and a
+stable ID tie-breaker, and uses cursor pagination. Risk detail includes related
+Opportunity, Conversation, Recommendation, Action, Outcome, and Revenue data
+only when those owning modules have produced it. Exact money totals are exposed
+as decimal strings.
+
+Acknowledge and resolve commands are idempotent. Cross-tenant identifiers are
+indistinguishable from missing resources and cannot mutate state. SSE carries
+only tenant-scoped invalidation signals after durable changes; clients always
+refetch the authoritative REST read model, and losing an SSE signal never loses
+business data. The versioned HTTP contract is maintained in
+[`../../contracts/openapi/openapi.yaml`](../../contracts/openapi/openapi.yaml).
+
 Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
