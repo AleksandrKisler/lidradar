@@ -21,7 +21,7 @@ func (p FakeProvider) Infer(context.Context, string) (string, error) {
 		return "", p.Err
 	}
 	if p.Output == "" {
-		return `{"facts":[]}`, nil
+		return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"message","summary":"No material facts.","facts":[]}`, nil
 	}
 	return p.Output, nil
 }
