@@ -107,6 +107,23 @@ indistinguishable from missing resources and cannot produce records.
 
 Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
 
+### Home AI node infrastructure
+
+AI inference uses the outbound pull model from ADR 0030. Registered nodes are
+authenticated by a rotatable secret whose SHA-256 digest is the only persisted
+form. A ready heartbeat renews only leases currently owned by that node. Jobs
+carry the tenant, conversation, base conversation revision, and last analyzed
+message identifier.
+
+The default lease is 120 seconds. Claim is atomic, expired work may be reclaimed
+after a node disconnect, and a former owner cannot complete a reclaimed job.
+Each attempt has a durable AI run with snapshot freshness fields. Successful
+inference is recorded independently from application status: invalid output is
+`REJECTED`, and a changed revision or analyzed-message identifier is `STALE`.
+Neither state mutates domain data. The Go AI agent retains no customer text on
+disk, uses outbound calls, and resumes polling after restart. A deterministic
+fake provider supports development and disconnect testing without a GPU.
+
 ### Revenue and attribution
 
 Revenue confirmation requires `revenue.confirm` and an `Idempotency-Key` and
