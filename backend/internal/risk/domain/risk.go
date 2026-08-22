@@ -37,20 +37,21 @@ var ErrInvalidRisk = errors.New("invalid risk")
 // Risk is a condition requiring attention, independent of Opportunity stage.
 // All timestamps are instants and must be persisted as TIMESTAMPTZ in UTC.
 type Risk struct {
-	ID               string
-	TenantID         string
-	OpportunityID    string
-	LocationID       string
-	Type             Type
-	Severity         Severity
-	Status           Status
-	Source           Source
-	PolicyVersion    string
-	TriggerMessageID string
-	Reason           string
-	DetectedAt       time.Time
-	UpdatedAt        time.Time
-	ResolvedAt       *time.Time
+	ID               string     `json:"id"`
+	TenantID         string     `json:"-"`
+	OpportunityID    string     `json:"opportunityId"`
+	LocationID       string     `json:"locationId"`
+	Type             Type       `json:"type"`
+	Severity         Severity   `json:"severity"`
+	Status           Status     `json:"status"`
+	Source           Source     `json:"source"`
+	PolicyVersion    string     `json:"policyVersion"`
+	TriggerMessageID string     `json:"triggerMessageId"`
+	Reason           string     `json:"reason"`
+	DetectedAt       time.Time  `json:"detectedAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+	AcknowledgedAt   *time.Time `json:"acknowledgedAt,omitempty"`
+	ResolvedAt       *time.Time `json:"resolvedAt,omitempty"`
 }
 
 // NewNoResponse creates the deterministic NO_RESPONSE aggregate.
@@ -93,6 +94,25 @@ func (r *Risk) Refresh(finding Finding, now time.Time) error {
 
 func (r Risk) Active() bool {
 	return r.Status == StatusOpen || r.Status == StatusAcknowledged || r.Status == StatusActed
+}
+
+// Acknowledge records that a user has seen an active risk. Replays are
+// deliberately idempotent and never reopen resolved risks.
+func (r *Risk) Acknowledge(now time.Time) error {
+	if now.IsZero() {
+		return ErrInvalidRisk
+	}
+	if r.Status == StatusResolved || r.Status == StatusAcknowledged || r.Status == StatusActed {
+		return nil
+	}
+	if r.Status != StatusOpen {
+		return ErrInvalidRisk
+	}
+	at := now.UTC()
+	r.Status = StatusAcknowledged
+	r.AcknowledgedAt = &at
+	r.UpdatedAt = at
+	return nil
 }
 
 func (r *Risk) Resolve(now time.Time) error {

@@ -25,7 +25,12 @@ type Evaluator struct {
 	policy     domain.Policy
 	newID      IDGenerator
 	now        func() time.Time
+	events     Invalidator
 }
+
+// WithInvalidator emits an ephemeral refetch signal after durable state has
+// changed. Persistence succeeds independently if no realtime hub is wired.
+func (e Evaluator) WithInvalidator(events Invalidator) Evaluator { e.events = events; return e }
 
 func NewEvaluator(repository domain.Repository, states StateReader, policy domain.Policy, newID IDGenerator, now func() time.Time) Evaluator {
 	return Evaluator{repository: repository, states: states, policy: policy, newID: newID, now: now}
@@ -52,14 +57,26 @@ func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID stri
 		return domain.Risk{}, false, err
 	}
 	if decision.Finding == nil {
-		_, err = e.repository.ResolveActive(ctx, tenantID, opportunityID, e.policy.Type(), now)
+		active, _, findErr := e.repository.FindActive(ctx, tenantID, opportunityID, e.policy.Type())
+		if findErr != nil {
+			return domain.Risk{}, false, findErr
+		}
+		resolved, resolveErr := e.repository.ResolveActive(ctx, tenantID, opportunityID, e.policy.Type(), now)
+		if resolveErr == nil && resolved && e.events != nil {
+			e.events.Publish(tenantID, "risk.resolved", active.ID)
+		}
+		err = resolveErr
 		return domain.Risk{}, false, err
 	}
 	risk, err := domain.NewNoResponse(e.newID(), *decision.Finding, now)
 	if err != nil {
 		return domain.Risk{}, false, err
 	}
-	return e.repository.UpsertActive(ctx, risk)
+	stored, created, err := e.repository.UpsertActive(ctx, risk)
+	if err == nil && e.events != nil {
+		e.events.Publish(tenantID, "risk.changed", stored.ID)
+	}
+	return stored, created, err
 }
 
 // DueAt computes the durable scheduled-check time from current state. The job
