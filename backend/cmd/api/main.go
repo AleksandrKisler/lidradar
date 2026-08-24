@@ -8,6 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	catalogapplication "lidradar/backend/internal/catalog/application"
+	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
+	catalogtransport "lidradar/backend/internal/catalog/transport"
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
@@ -40,8 +43,10 @@ func run(ctx context.Context, configuration config.Config) error {
 
 	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
+	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
 	permissionService := tenantapplication.NewPermissionService(tenantRepository)
 	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now)
+	catalogService := catalogapplication.NewService(catalogRepository, permissionService, ids.Generator{}, time.Now)
 	identityService := identityapplication.NewService(
 		identityRepository,
 		cryptoplatform.PasswordHasher{},
@@ -61,6 +66,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		tenantService,
 		identitytransport.CookieConfiguration{Secure: configuration.Auth.CookieSecure, TTL: configuration.Auth.SessionTTL},
 	).Router())
+	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, principalResolver).Router())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, principalResolver).Router())
 	return httpplatform.Serve(ctx, configuration.HTTP, router, logger)
 }

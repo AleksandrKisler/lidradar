@@ -52,6 +52,31 @@ inside another tenant; selecting a tenant without an active Membership is
 forbidden. Browser mutation requests with an Origin header are accepted only
 from the API origin or an explicitly configured trusted origin.
 
+### Service Catalog
+
+The Catalog module owns tenant-scoped `ServiceCatalogItem` records. Every
+repository lookup and mutation requires both the selected tenant and, for a
+single item, its identifier. An optional Location must belong to that same
+tenant; a foreign Location or item is indistinguishable from a missing
+resource. Catalog management requires the centralized `service.manage`
+permission, which is granted to OWNER and not to MANAGER.
+
+Names are stored in cleaned display form and with a deterministic lowercase,
+whitespace-collapsed `normalized_name` for later matching. Price boundaries are
+optional exact decimals: PostgreSQL stores `NUMERIC(14,2)`, Go uses a decimal
+value, and REST sends strings with exactly two fractional digits. JSON numbers,
+negative prices, more than two fractional digits, and a lower boundary above
+the upper boundary are rejected. Currency defaults to `RUB` and is normalized
+to three uppercase ASCII letters.
+
+`DELETE /api/v1/services/{serviceId}` is an idempotent soft deactivation so
+historical references remain valid; `PATCH` may explicitly reactivate an item.
+The list includes active and inactive items for OWNER settings management.
+Nullable price fields may be cleared with JSON `null`. When no trustworthy
+price is configured, both stored boundaries remain SQL `NULL`; later
+Opportunity logic must therefore leave potential revenue `NULL` rather than
+inventing or defaulting an amount.
+
 ### NO_RESPONSE risk
 
 The Risk module owns the `Risk` aggregate and active-risk deduplication. A

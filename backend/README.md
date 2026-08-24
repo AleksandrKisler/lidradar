@@ -49,9 +49,12 @@ This starts PostgreSQL 18, applies migrations, waits for API readiness, and
 starts worker, scheduler, and an AI agent configured with local stubs. The API
 exposes `GET /health/live` and `GET /health/ready` on port 8080. It also exposes
 the `/api/v1/auth` registration/session API plus Organization, Location and
-business-hours setup routes. Tenant-scoped requests select an Organization with
-the `X-Tenant-ID` header obtained from `GET /api/v1/auth/me`. No Telegram or AI
-provider receives data in this configuration.
+business-hours setup routes. OWNER can also manage exact-decimal, optionally
+Location-specific Service Catalog items through `/api/v1/services`; deleting a
+service deactivates it without erasing history. Tenant-scoped requests select
+an Organization with the `X-Tenant-ID` header obtained from
+`GET /api/v1/auth/me`. No Telegram or AI provider receives data in this
+configuration.
 
 Business capabilities live below `internal`. The `risk` package is the
 reference module for the canonical layers:

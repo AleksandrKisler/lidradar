@@ -186,6 +186,64 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/services:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: List Service Catalog items in the selected tenant
+      operationId: listServiceCatalogItems
+      responses:
+        '200':
+          description: All active and inactive tenant services, ordered with active items first.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServiceCatalogList' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Create a Service Catalog item
+      operationId: createServiceCatalogItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateServiceCatalogItemRequest' }
+      responses:
+        '201':
+          description: Service created. Missing price boundaries remain null.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServiceCatalogItem' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/services/{serviceId}:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/ServiceId' }
+    patch:
+      summary: Update a Service Catalog item
+      operationId: updateServiceCatalogItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateServiceCatalogItemRequest' }
+      responses:
+        '200':
+          description: Tenant-scoped service updated.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServiceCatalogItem' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Deactivate a Service Catalog item
+      description: This operation is idempotent and preserves the row for later audit and historical references.
+      operationId: deactivateServiceCatalogItem
+      responses:
+        '204': { description: Service deactivated or already inactive. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/radar:
     get:
       summary: Get Radar summary
@@ -311,6 +369,7 @@ components:
   parameters:
     TenantId: { name: X-Tenant-ID, in: header, required: true, description: Explicit Organization tenant selected from /auth/me memberships., schema: { type: string, format: uuid } }
     LocationId: { name: locationId, in: path, required: true, schema: { type: string, format: uuid } }
+    ServiceId: { name: serviceId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
   responses:
@@ -446,6 +505,49 @@ components:
       properties:
         timezone: { type: string, minLength: 1 }
         days: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/BusinessHour' } }
+    ServiceCatalogItem:
+      type: object
+      required: [id, locationId, name, normalizedName, priceFrom, priceTo, currency, active, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        locationId: { type: [string, 'null'], format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        normalizedName: { type: string, minLength: 1, maxLength: 200, readOnly: true }
+        priceFrom: { $ref: '#/components/schemas/NullableCatalogPrice' }
+        priceTo: { $ref: '#/components/schemas/NullableCatalogPrice' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ServiceCatalogList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/ServiceCatalogItem' } } }
+    NullableCatalogPrice:
+      type: [string, 'null']
+      pattern: '^[0-9]{1,12}\.[0-9]{2}$'
+      description: Exact NUMERIC(14,2) amount as a JSON string, or null when no reliable price is known.
+    CreateServiceCatalogItemRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        locationId: { type: [string, 'null'], format: uuid }
+        priceFrom: { type: [string, 'null'], pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$' }
+        priceTo: { type: [string, 'null'], pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$' }
+        currency: { type: string, pattern: '^[A-Za-z]{3}$', default: RUB }
+    UpdateServiceCatalogItemRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        locationId: { type: [string, 'null'], format: uuid }
+        priceFrom: { type: [string, 'null'], pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$' }
+        priceTo: { type: [string, 'null'], pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$' }
+        currency: { type: string, pattern: '^[A-Za-z]{3}$' }
+        active: { type: boolean, description: May be set true to reactivate an item; DELETE sets it false. }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }

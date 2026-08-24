@@ -72,8 +72,18 @@
 - **LR-BE-0212 — выполнено.** Есть isolated PostgreSQL harness для Tenant A/B и
   integration exit-gate test: onboarding, relogin persistence, MANAGER denial и
   cross-tenant 404/403 без раскрытия данных.
-- **LR-BE-0301 — LR-BE-0305 — не выполнены.** Service Catalog, денежная
-  валидация, миграция, CRUD API и tenant-тесты отсутствуют.
+- **LR-BE-0301 — выполнено.** Добавлен `ServiceCatalogItem` domain с display и
+  normalized name, optional Location, active state и nullable price range.
+- **LR-BE-0302 — выполнено.** Миграция `service_catalog_items` использует
+  tenant/location composite FK, `NUMERIC(14,2)`, DB checks и tenant indexes.
+- **LR-BE-0303 — выполнено.** Точная decimal-модель запрещает JSON number,
+  отрицательные/слишком точные суммы и диапазон `price_from > price_to`;
+  REST всегда возвращает две дробные цифры.
+- **LR-BE-0304 — выполнено.** Подключены OWNER-only list/create/update и
+  idempotent soft-deactivate API `/api/v1/services` с явным `X-Tenant-ID`.
+- **LR-BE-0305 — выполнено.** Unit и isolated PostgreSQL tests покрывают
+  nullable цены без догадок, OWNER/MANAGER, tenant A/B, foreign Location,
+  cross-tenant 404 и отсутствие чужих данных в list.
 - **LR-BE-0401 — LR-BE-0412 — не выполнены.** Нет ChannelConnection,
   connection health, connector interface/implementations, RawEvent persist-first
   хранения, Integration API и обязательных duplicate/invalid-payload тестов.
