@@ -22,6 +22,36 @@ behavior should be added here, or linked from here, before it is implemented.
 
 ## Feature specifications
 
+### Identity and tenant setup
+
+Identity owns platform users and opaque server-side sessions. Registration
+normalizes email with trim plus lowercase, requires a 12-1024 byte password,
+hashes it with Argon2id, and creates the User and initial Session in one
+PostgreSQL transaction. Session tokens contain 256 random bits; only their
+SHA-256 digests are persisted. Login failures use one public error regardless
+of whether the email or password was wrong. Refresh atomically revokes the old
+session and issues a replacement, while logout is idempotent. Session cookies
+are HttpOnly and SameSite=Strict. Secure is mandatory in staging and production
+and may be disabled only for local development and tests over HTTP.
+
+Organization is the tenant boundary. Creating an Organization and its active
+OWNER Membership is one PostgreSQL transaction. Clients obtain active
+membership summaries from `GET /api/v1/auth/me` and explicitly select a tenant
+with `X-Tenant-ID`; repositories never infer a tenant from an entity ID.
+OWNER receives the approved tenant permission set. MANAGER receives only risk,
+conversation, opportunity, action, outcome, and revenue-confirm permissions and
+cannot change Organization, Location, member, integration, notification, or
+analytics settings.
+
+Locations are always queried with tenant and Location identifiers, carry an
+IANA timezone and a 1-1440 minute response threshold, and default to 45
+minutes. Replacing business hours requires exactly one validated entry for each
+weekday 1-7 and atomically replaces the schedule together with the Location
+timezone. Cross-tenant Location identifiers are returned as missing when used
+inside another tenant; selecting a tenant without an active Membership is
+forbidden. Browser mutation requests with an Origin header are accepted only
+from the API origin or an explicitly configured trusted origin.
+
 ### NO_RESPONSE risk
 
 The Risk module owns the `Risk` aggregate and active-risk deduplication. A

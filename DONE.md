@@ -1,6 +1,6 @@
 # Аудит выполнения задач LR-BE-0001 — LR-BE-1509
 
-Дата аудита: 2026-08-24. Статусы сверены с кодом и тестами текущей ветки, а не
+Дата аудита: 2026-08-25. Статусы сверены с кодом и тестами текущей ветки, а не
 только с историей merge. `Частично` означает, что контракт или in-memory
 реализация есть, но production-требование (прежде всего PostgreSQL) не закрыто.
 
@@ -47,9 +47,31 @@
 
 ## Этапы 2–7 — базовые бизнес-модули
 
-- **LR-BE-0201 — LR-BE-0212 — не выполнены.** Нет User, Argon2id-аутентификации,
-  opaque sessions, Organization, Membership, permission service, Location,
-  Business Hours, Auth/Organization/Location API и tenant test harness.
+- **LR-BE-0201 — выполнено.** User и tenant-independent PostgreSQL repository
+  используют UUIDv7-compatible IDs, canonical email и UTC timestamps.
+- **LR-BE-0202 — выполнено.** Пароли хэшируются Argon2id в PHC format;
+  plaintext не сохраняется и не попадает в публичные ответы.
+- **LR-BE-0203 — выполнено.** Реализованы server-side opaque sessions с 256-bit
+  token, SHA-256 digest в PostgreSQL, expiry, revocation и atomic rotation.
+- **LR-BE-0204 — выполнено.** Organization является tenant и создаётся
+  транзакционно вместе с OWNER Membership.
+- **LR-BE-0205 — выполнено.** Membership поддерживает OWNER/MANAGER и active,
+  invited, disabled statuses.
+- **LR-BE-0206 — выполнено.** Центральный permission resolver переводит роль
+  Membership в named permissions; MANAGER не получает settings permissions.
+- **LR-BE-0207 — выполнено.** Location хранится tenant-scoped с IANA timezone,
+  active state и response threshold 1-1440 минут (default 45).
+- **LR-BE-0208 — выполнено.** Полное недельное расписание из семи дней
+  валидируется и заменяется атомарно вместе с timezone Location.
+- **LR-BE-0209 — выполнено.** Подключены register/login/logout/refresh/me,
+  HttpOnly SameSite=Strict cookie и browser Origin validation.
+- **LR-BE-0210 — выполнено.** Подключены create/get/update Organization API;
+  update защищён `organization.manage`.
+- **LR-BE-0211 — выполнено.** Подключены list/create/update Location и replace
+  business-hours API с явным `X-Tenant-ID`.
+- **LR-BE-0212 — выполнено.** Есть isolated PostgreSQL harness для Tenant A/B и
+  integration exit-gate test: onboarding, relogin persistence, MANAGER denial и
+  cross-tenant 404/403 без раскрытия данных.
 - **LR-BE-0301 — LR-BE-0305 — не выполнены.** Service Catalog, денежная
   валидация, миграция, CRUD API и tenant-тесты отсутствуют.
 - **LR-BE-0401 — LR-BE-0412 — не выполнены.** Нет ChannelConnection,

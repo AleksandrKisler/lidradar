@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -73,6 +74,40 @@ func requestLogging(logger *slog.Logger) func(http.Handler) http.Handler {
 				"request_id", RequestID(r.Context()),
 				"trace_id", TraceID(r.Context()),
 			)
+		})
+	}
+}
+
+func originProtection(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		allowed[strings.TrimRight(origin, "/")] = struct{}{}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
+			if origin == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			parsed, err := url.Parse(origin)
+			requestScheme := "http"
+			if r.TLS != nil {
+				requestScheme = "https"
+			}
+			if err == nil && parsed.Scheme == requestScheme && parsed.Host != "" && parsed.Host == r.Host {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if _, ok := allowed[origin]; ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			WriteError(w, r, http.StatusForbidden, "ORIGIN_NOT_ALLOWED", "Request origin is not allowed", nil)
 		})
 	}
 }

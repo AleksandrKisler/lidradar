@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"lidradar/backend/platform/observability"
@@ -64,5 +65,25 @@ func TestRecoveryHidesPanicDetails(t *testing.T) {
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/panic", nil))
 	if response.Code != http.StatusInternalServerError || bytes.Contains(response.Body.Bytes(), []byte("secret detail")) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestRouterRejectsUntrustedMutationOrigin(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "http://api.example/api/v1/test", nil)
+	request.Header.Set("Origin", "https://evil.example")
+	response := httptest.NewRecorder()
+	NewRouter("lidradar-api", observability.NewLogger(&bytes.Buffer{}, "test", "test"), readinessStub{}).ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "ORIGIN_NOT_ALLOWED") {
+		t.Fatalf("response = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRouterAllowsConfiguredMutationOrigin(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "http://api.example/missing", nil)
+	request.Header.Set("Origin", "https://app.example")
+	response := httptest.NewRecorder()
+	NewRouter("lidradar-api", observability.NewLogger(&bytes.Buffer{}, "test", "test"), readinessStub{}, WithAllowedOrigins([]string{"https://app.example"})).ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("response status = %d, want %d", response.Code, http.StatusNotFound)
 	}
 }

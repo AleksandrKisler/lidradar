@@ -1,0 +1,220 @@
+package integration_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	identityapplication "lidradar/backend/internal/identity/application"
+	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
+	identitytransport "lidradar/backend/internal/identity/transport"
+	"lidradar/backend/internal/tenant/application"
+	"lidradar/backend/internal/tenant/domain"
+	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
+	tenanttransport "lidradar/backend/internal/tenant/transport"
+	"lidradar/backend/internal/testsupport"
+	cryptoplatform "lidradar/backend/platform/crypto"
+	httpplatform "lidradar/backend/platform/http"
+	"lidradar/backend/platform/ids"
+)
+
+type apiFixture struct {
+	handler       http.Handler
+	tenantService application.Service
+	pool          *pgxpool.Pool
+}
+
+func newAPIFixture(t *testing.T) apiFixture {
+	t.Helper()
+	pool := testsupport.Postgres(t)
+	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
+	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
+	permissions := application.NewPermissionService(tenantRepository)
+	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now)
+	identityService := identityapplication.NewService(
+		identityRepository, cryptoplatform.PasswordHasher{}, ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
+	)
+	resolver := identitytransport.Resolver{Auth: identityService}
+	router := httpplatform.NewRouter("lidradar-api", slog.New(slog.NewTextHandler(io.Discard, nil)), pool)
+	router.Mount("/api/v1/auth", identitytransport.NewHandler(
+		identityService, tenantService, identitytransport.CookieConfiguration{TTL: 24 * time.Hour},
+	).Router())
+	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
+	return apiFixture{handler: router, tenantService: tenantService, pool: pool}
+}
+
+type registeredUser struct {
+	ID     string
+	Cookie *http.Cookie
+}
+
+func TestIdentityTenantOwnerFlowPermissionsAndIsolation(t *testing.T) {
+	fixture := newAPIFixture(t)
+	owner := register(t, fixture.handler, "owner@example.com", "Owner")
+
+	var plaintextMatches int
+	if err := fixture.pool.QueryRow(context.Background(), `SELECT count(*) FROM sessions WHERE token_hash = $1`, owner.Cookie.Value).Scan(&plaintextMatches); err != nil {
+		t.Fatal(err)
+	}
+	if plaintextMatches != 0 {
+		t.Fatal("PostgreSQL contains a plaintext session token")
+	}
+
+	organizationResponse := request(t, fixture.handler, http.MethodPost, "/api/v1/organizations", `{
+		"name":"LidRadar Detailing","defaultTimezone":"Europe/Moscow","defaultCurrency":"RUB"
+	}`, owner.Cookie, "")
+	requireStatus(t, organizationResponse, http.StatusCreated)
+	organizationID := jsonID(t, organizationResponse)
+
+	locationResponse := request(t, fixture.handler, http.MethodPost, "/api/v1/locations", `{
+		"name":"Main studio","timezone":"Europe/Moscow","responseThresholdMinutes":45
+	}`, owner.Cookie, organizationID)
+	requireStatus(t, locationResponse, http.StatusCreated)
+	locationID := jsonID(t, locationResponse)
+
+	hoursResponse := request(t, fixture.handler, http.MethodPut, "/api/v1/locations/"+locationID+"/business-hours", `{
+		"timezone":"Europe/Moscow","days":[
+			{"weekday":1,"closed":false,"opensAt":"09:00","closesAt":"21:00"},
+			{"weekday":2,"closed":false,"opensAt":"09:00","closesAt":"21:00"},
+			{"weekday":3,"closed":false,"opensAt":"09:00","closesAt":"21:00"},
+			{"weekday":4,"closed":false,"opensAt":"09:00","closesAt":"21:00"},
+			{"weekday":5,"closed":false,"opensAt":"09:00","closesAt":"21:00"},
+			{"weekday":6,"closed":false,"opensAt":"10:00","closesAt":"18:00"},
+			{"weekday":7,"closed":true}
+		]
+	}`, owner.Cookie, organizationID)
+	requireStatus(t, hoursResponse, http.StatusOK)
+	if !strings.Contains(hoursResponse.Body.String(), `"weekday":7,"closed":true`) {
+		t.Fatalf("business hours response = %s", hoursResponse.Body.String())
+	}
+
+	logoutResponse := request(t, fixture.handler, http.MethodPost, "/api/v1/auth/logout", "", owner.Cookie, "")
+	requireStatus(t, logoutResponse, http.StatusNoContent)
+	if response := request(t, fixture.handler, http.MethodGet, "/api/v1/auth/me", "", owner.Cookie, ""); response.Code != http.StatusUnauthorized {
+		t.Fatalf("logged out /me status = %d", response.Code)
+	}
+	owner.Cookie = login(t, fixture.handler, "owner@example.com")
+
+	meResponse := request(t, fixture.handler, http.MethodGet, "/api/v1/auth/me", "", owner.Cookie, "")
+	requireStatus(t, meResponse, http.StatusOK)
+	if !strings.Contains(meResponse.Body.String(), organizationID) || !strings.Contains(meResponse.Body.String(), `"role":"OWNER"`) {
+		t.Fatalf("/me response = %s", meResponse.Body.String())
+	}
+	organizationGet := request(t, fixture.handler, http.MethodGet, "/api/v1/organization", "", owner.Cookie, organizationID)
+	requireStatus(t, organizationGet, http.StatusOK)
+	locationsGet := request(t, fixture.handler, http.MethodGet, "/api/v1/locations", "", owner.Cookie, organizationID)
+	requireStatus(t, locationsGet, http.StatusOK)
+	if !strings.Contains(locationsGet.Body.String(), "Main studio") || !strings.Contains(locationsGet.Body.String(), `"businessHours":[`) {
+		t.Fatalf("locations response after login = %s", locationsGet.Body.String())
+	}
+
+	manager := register(t, fixture.handler, "manager@example.com", "Manager")
+	if _, err := fixture.tenantService.AddMember(context.Background(), owner.ID, organizationID, manager.ID, domain.RoleManager); err != nil {
+		t.Fatalf("AddMember() error = %v", err)
+	}
+	managerUpdate := request(t, fixture.handler, http.MethodPatch, "/api/v1/organization", `{"name":"Unauthorized change"}`, manager.Cookie, organizationID)
+	requireStatus(t, managerUpdate, http.StatusForbidden)
+
+	ownerB := register(t, fixture.handler, "owner-b@example.com", "Owner B")
+	organizationBResponse := request(t, fixture.handler, http.MethodPost, "/api/v1/organizations", `{
+		"name":"Tenant B private","defaultTimezone":"Europe/Moscow"
+	}`, ownerB.Cookie, "")
+	requireStatus(t, organizationBResponse, http.StatusCreated)
+	organizationBID := jsonID(t, organizationBResponse)
+	locationBResponse := request(t, fixture.handler, http.MethodPost, "/api/v1/locations", `{
+		"name":"Tenant B secret location","timezone":"Europe/Moscow"
+	}`, ownerB.Cookie, organizationBID)
+	requireStatus(t, locationBResponse, http.StatusCreated)
+	locationBID := jsonID(t, locationBResponse)
+
+	crossTenant := request(t, fixture.handler, http.MethodPatch, "/api/v1/locations/"+locationBID, `{"name":"Cross tenant"}`, owner.Cookie, organizationID)
+	requireStatus(t, crossTenant, http.StatusNotFound)
+	if strings.Contains(crossTenant.Body.String(), "Tenant B") {
+		t.Fatalf("cross-tenant response disclosed data: %s", crossTenant.Body.String())
+	}
+	forbiddenTenant := request(t, fixture.handler, http.MethodGet, "/api/v1/locations", "", owner.Cookie, organizationBID)
+	requireStatus(t, forbiddenTenant, http.StatusForbidden)
+}
+
+func register(t *testing.T, handler http.Handler, email, displayName string) registeredUser {
+	t.Helper()
+	response := request(t, handler, http.MethodPost, "/api/v1/auth/register", `{
+		"email":"`+email+`","password":"very-secure-password","displayName":"`+displayName+`"
+	}`, nil, "")
+	requireStatus(t, response, http.StatusCreated)
+	cookie := response.Result().Cookies()
+	if len(cookie) != 1 || cookie[0].Name != identitytransport.SessionCookieName || !cookie[0].HttpOnly || cookie[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("registration cookie = %#v", cookie)
+	}
+	return registeredUser{ID: nestedUserID(t, response), Cookie: cookie[0]}
+}
+
+func login(t *testing.T, handler http.Handler, email string) *http.Cookie {
+	t.Helper()
+	response := request(t, handler, http.MethodPost, "/api/v1/auth/login", `{
+		"email":"`+email+`","password":"very-secure-password"
+	}`, nil, "")
+	requireStatus(t, response, http.StatusOK)
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("login cookies = %#v", cookies)
+	}
+	return cookies[0]
+}
+
+func request(t *testing.T, handler http.Handler, method, path, body string, cookie *http.Cookie, tenantID string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(method, "http://api.example"+path, bytes.NewBufferString(body))
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if cookie != nil {
+		request.AddCookie(cookie)
+	}
+	if tenantID != "" {
+		request.Header.Set("X-Tenant-ID", tenantID)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func requireStatus(t *testing.T, response *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if response.Code != want {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, want, response.Body.String())
+	}
+}
+
+func jsonID(t *testing.T, response *httptest.ResponseRecorder) string {
+	t.Helper()
+	var value struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil || value.ID == "" {
+		t.Fatalf("decode ID response: %v; body = %s", err, response.Body.String())
+	}
+	return value.ID
+}
+
+func nestedUserID(t *testing.T, response *httptest.ResponseRecorder) string {
+	t.Helper()
+	var value struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil || value.User.ID == "" {
+		t.Fatalf("decode user response: %v; body = %s", err, response.Body.String())
+	}
+	return value.User.ID
+}

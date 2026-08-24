@@ -11,6 +11,181 @@ servers:
 security:
   - sessionCookie: []
 paths:
+  /api/v1/auth/register:
+    post:
+      summary: Register a LidRadar user
+      operationId: registerUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: User registered and an opaque server-side session created.
+          headers: { Set-Cookie: { $ref: '#/components/headers/SessionCookie' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/auth/login:
+    post:
+      summary: Log in with email and password
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Credentials accepted and an opaque server-side session created.
+          headers: { Set-Cookie: { $ref: '#/components/headers/SessionCookie' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke the current session
+      operationId: logoutUser
+      responses:
+        '204':
+          description: Session revoked or already absent.
+          headers: { Set-Cookie: { $ref: '#/components/headers/SessionCookie' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate the current opaque session
+      operationId: refreshSession
+      responses:
+        '200':
+          description: Current session revoked and replaced.
+          headers: { Set-Cookie: { $ref: '#/components/headers/SessionCookie' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/auth/me:
+    get:
+      summary: Get the authenticated user and active memberships
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Authenticated user and organizations available for explicit tenant selection.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthMeResponse' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/organizations:
+    post:
+      summary: Create an Organization tenant and OWNER membership
+      operationId: createOrganization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrganizationRequest' }
+      responses:
+        '201':
+          description: Organization and OWNER membership created atomically.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Organization' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/organization:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Get the selected Organization
+      operationId: getOrganization
+      responses:
+        '200':
+          description: Selected tenant organization.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Organization' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update OWNER-managed Organization settings
+      operationId: updateOrganization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateOrganizationRequest' }
+      responses:
+        '200':
+          description: Organization updated.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Organization' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/locations:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: List locations in the selected tenant
+      operationId: listLocations
+      responses:
+        '200':
+          description: Tenant-scoped locations with weekly business hours.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LocationList' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Create a tenant Location
+      operationId: createLocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLocationRequest' }
+      responses:
+        '201':
+          description: Location created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Location' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/locations/{locationId}:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/LocationId' }
+    patch:
+      summary: Update a tenant Location
+      operationId: updateLocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateLocationRequest' }
+      responses:
+        '200':
+          description: Location updated.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Location' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/locations/{locationId}/business-hours:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/LocationId' }
+    put:
+      summary: Replace a Location weekly business-hours schedule
+      operationId: replaceLocationBusinessHours
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessHoursRequest' }
+      responses:
+        '200':
+          description: Timezone and complete seven-day schedule replaced atomically.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Location' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/radar:
     get:
       summary: Get Radar summary
@@ -134,16 +309,143 @@ components:
       in: cookie
       name: lidradar_session
   parameters:
+    TenantId: { name: X-Tenant-ID, in: header, required: true, description: Explicit Organization tenant selected from /auth/me memberships., schema: { type: string, format: uuid } }
+    LocationId: { name: locationId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
   responses:
-    Forbidden: { description: Membership does not grant the required named permission, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    NotFound: { description: Risk does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    BadRequest: { description: 'Request body, tenant selector, or domain value is invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Unauthorized: { description: 'Opaque session cookie is missing, expired, revoked, or invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: Request origin is not trusted or Membership does not grant the required named permission., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: Resource does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Conflict: { description: A unique resource already exists., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  headers:
+    SessionCookie:
+      description: HttpOnly SameSite=Strict opaque session cookie; Secure is mandatory in staging and production.
+      schema: { type: string }
   schemas:
     Error:
       type: object
       required: [error]
-      properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } } }
+      properties: { error: { type: object, required: [code, message, traceId], properties: { code: { type: string }, message: { type: string }, details: { type: object, additionalProperties: true }, traceId: { type: string } } } }
+    User:
+      type: object
+      required: [id, email, displayName, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, displayName]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+        displayName: { type: string, minLength: 1, maxLength: 200 }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    AuthResponse:
+      type: object
+      required: [user]
+      properties: { user: { $ref: '#/components/schemas/User' } }
+    MembershipSummary:
+      type: object
+      required: [tenantId, organizationName, role]
+      properties:
+        tenantId: { type: string, format: uuid }
+        organizationName: { type: string }
+        role: { type: string, enum: [OWNER, MANAGER] }
+    AuthMeResponse:
+      type: object
+      required: [user, memberships]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        memberships: { type: array, items: { $ref: '#/components/schemas/MembershipSummary' } }
+    Organization:
+      type: object
+      required: [id, name, defaultTimezone, defaultCurrency, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        defaultTimezone: { type: string, description: IANA timezone name. }
+        defaultCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, ARCHIVED] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required: [name, defaultTimezone]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        defaultTimezone: { type: string, minLength: 1 }
+        defaultCurrency: { type: string, pattern: '^[A-Za-z]{3}$', default: RUB }
+    UpdateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        defaultTimezone: { type: string, minLength: 1 }
+        defaultCurrency: { type: string, pattern: '^[A-Za-z]{3}$' }
+    BusinessHour:
+      type: object
+      additionalProperties: false
+      required: [weekday, closed]
+      properties:
+        weekday: { type: integer, minimum: 1, maximum: 7 }
+        closed: { type: boolean }
+        opensAt: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        closesAt: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+    Location:
+      type: object
+      required: [id, name, timezone, responseThresholdMinutes, active, businessHours, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        timezone: { type: string, description: IANA timezone name. }
+        responseThresholdMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        active: { type: boolean }
+        businessHours: { type: array, items: { $ref: '#/components/schemas/BusinessHour' } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    LocationList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Location' } } }
+    CreateLocationRequest:
+      type: object
+      additionalProperties: false
+      required: [name, timezone]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        timezone: { type: string, minLength: 1 }
+        responseThresholdMinutes: { type: integer, minimum: 1, maximum: 1440, default: 45 }
+    UpdateLocationRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        timezone: { type: string, minLength: 1 }
+        responseThresholdMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        active: { type: boolean }
+    BusinessHoursRequest:
+      type: object
+      additionalProperties: false
+      required: [timezone, days]
+      properties:
+        timezone: { type: string, minLength: 1 }
+        days: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/BusinessHour' } }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }

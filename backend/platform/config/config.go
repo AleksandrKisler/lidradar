@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,10 +18,14 @@ const (
 	databaseMaxConnsKey = "LIDRADAR_DATABASE_MAX_CONNS"
 	databaseMinConnsKey = "LIDRADAR_DATABASE_MIN_CONNS"
 	databaseTimeoutKey  = "LIDRADAR_DATABASE_TIMEOUT"
+	allowedOriginsKey   = "LIDRADAR_ALLOWED_ORIGINS"
+	sessionTTLKey       = "LIDRADAR_SESSION_TTL"
+	cookieSecureKey     = "LIDRADAR_COOKIE_SECURE"
 	defaultHTTPAddress  = ":8080"
 	defaultDatabaseURL  = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
 	defaultShutdown     = 10 * time.Second
 	defaultDatabaseWait = 5 * time.Second
+	defaultSessionTTL   = 30 * 24 * time.Hour
 	defaultDatabaseMax  = int32(10)
 	defaultDatabaseMin  = int32(1)
 )
@@ -45,12 +50,20 @@ type Config struct {
 	Environment Environment
 	HTTP        HTTP
 	Database    Database
+	Auth        Auth
 }
 
 // HTTP contains process-level HTTP server settings.
 type HTTP struct {
 	Address         string
 	ShutdownTimeout time.Duration
+	AllowedOrigins  []string
+}
+
+// Auth contains server-side session and cookie settings.
+type Auth struct {
+	SessionTTL   time.Duration
+	CookieSecure bool
 }
 
 // Database contains PostgreSQL connection-pool settings.
@@ -78,6 +91,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		HTTP: HTTP{
 			Address:         valueOrDefault(lookup, httpAddressKey, defaultHTTPAddress),
 			ShutdownTimeout: defaultShutdown,
+			AllowedOrigins:  stringListValue(lookup, allowedOriginsKey),
 		},
 		Database: Database{
 			URL:            valueOrDefault(lookup, databaseURLKey, ""),
@@ -85,6 +99,7 @@ func Load(lookup LookupEnv) (Config, error) {
 			MinConnections: defaultDatabaseMin,
 			ConnectTimeout: defaultDatabaseWait,
 		},
+		Auth: Auth{SessionTTL: defaultSessionTTL},
 	}
 
 	var err error
@@ -98,6 +113,13 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if configuration.Database.MinConnections, err = int32Value(lookup, databaseMinConnsKey, defaultDatabaseMin); err != nil {
+		return Config{}, err
+	}
+	if configuration.Auth.SessionTTL, err = durationValue(lookup, sessionTTLKey, defaultSessionTTL); err != nil {
+		return Config{}, err
+	}
+	secureDefault := configuration.Environment == EnvironmentStaging || configuration.Environment == EnvironmentProduction
+	if configuration.Auth.CookieSecure, err = boolValue(lookup, cookieSecureKey, secureDefault); err != nil {
 		return Config{}, err
 	}
 
@@ -129,6 +151,18 @@ func (c Config) Validate() error {
 	}
 	if c.Database.MaxConnections <= 0 || c.Database.MinConnections < 0 || c.Database.MinConnections > c.Database.MaxConnections {
 		return fmt.Errorf("database connection limits are invalid")
+	}
+	if c.Auth.SessionTTL <= 0 {
+		return fmt.Errorf("%s must be positive", sessionTTLKey)
+	}
+	if (c.Environment == EnvironmentStaging || c.Environment == EnvironmentProduction) && !c.Auth.CookieSecure {
+		return fmt.Errorf("%s must be true in %s", cookieSecureKey, c.Environment)
+	}
+	for _, origin := range c.HTTP.AllowedOrigins {
+		parsed, err := url.Parse(origin)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("%s contains invalid origin %q", allowedOriginsKey, origin)
+		}
 	}
 	return nil
 }
@@ -162,4 +196,37 @@ func int32Value(lookup LookupEnv, key string, fallback int32) (int32, error) {
 		return 0, fmt.Errorf("%s must be an integer", key)
 	}
 	return int32(value), nil
+}
+
+func boolValue(lookup LookupEnv, key string, fallback bool) (bool, error) {
+	raw, ok := lookup(key)
+	if !ok || raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean", key)
+	}
+	return value, nil
+}
+
+func stringListValue(lookup LookupEnv, key string) []string {
+	raw, ok := lookup(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	values := make([]string, 0)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimRight(strings.TrimSpace(item), "/")
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		values = append(values, item)
+	}
+	return values
 }

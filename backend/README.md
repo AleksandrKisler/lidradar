@@ -25,7 +25,10 @@ LIDRADAR_ENV=development ./bin/lidradar-api
 Database-backed runtimes also require `LIDRADAR_DATABASE_URL`. Development and
 test default to the local Compose DSN; staging and production have no database
 default. `LIDRADAR_HTTP_ADDRESS`, pool sizes, connect timeout, and graceful
-shutdown timeout are optional typed settings.
+shutdown timeout are optional typed settings. Authentication additionally uses
+`LIDRADAR_SESSION_TTL` (default 30 days), `LIDRADAR_COOKIE_SECURE` (mandatory
+in staging/production), and comma-separated
+`LIDRADAR_ALLOWED_ORIGINS` for browser mutation origin validation.
 
 An absent or unsupported `LIDRADAR_ENV` prevents the process workload from
 starting and returns a non-zero exit status.
@@ -44,8 +47,11 @@ docker compose up --build
 
 This starts PostgreSQL 18, applies migrations, waits for API readiness, and
 starts worker, scheduler, and an AI agent configured with local stubs. The API
-exposes `GET /health/live` and `GET /health/ready` on port 8080. No Telegram or
-AI provider receives data in this configuration.
+exposes `GET /health/live` and `GET /health/ready` on port 8080. It also exposes
+the `/api/v1/auth` registration/session API plus Organization, Location and
+business-hours setup routes. Tenant-scoped requests select an Organization with
+the `X-Tenant-ID` header obtained from `GET /api/v1/auth/me`. No Telegram or AI
+provider receives data in this configuration.
 
 Business capabilities live below `internal`. The `risk` package is the
 reference module for the canonical layers:

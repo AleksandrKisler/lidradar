@@ -76,6 +76,59 @@ func TestLoadRejectsInvalidRuntimeSettings(t *testing.T) {
 	}
 }
 
+func TestLoadAuthAndOriginConfiguration(t *testing.T) {
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey:    string(EnvironmentDevelopment),
+		databaseURLKey:    "postgres://example",
+		sessionTTLKey:     "24h",
+		cookieSecureKey:   "false",
+		allowedOriginsKey: "https://app.example.com/, https://app.example.com, http://localhost:5173",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if configuration.Auth.SessionTTL != 24*time.Hour || configuration.Auth.CookieSecure {
+		t.Fatalf("Load().Auth = %#v", configuration.Auth)
+	}
+	if len(configuration.HTTP.AllowedOrigins) != 2 || configuration.HTTP.AllowedOrigins[0] != "https://app.example.com" {
+		t.Fatalf("Load().HTTP.AllowedOrigins = %#v", configuration.HTTP.AllowedOrigins)
+	}
+}
+
+func TestLoadRejectsInsecureProductionCookie(t *testing.T) {
+	_, err := Load(mapLookup(map[string]string{
+		environmentKey:  string(EnvironmentProduction),
+		databaseURLKey:  "postgres://example",
+		cookieSecureKey: "false",
+	}))
+	if err == nil || !strings.Contains(err.Error(), cookieSecureKey) {
+		t.Fatalf("Load() error = %v, want secure cookie error", err)
+	}
+}
+
+func TestLoadDefaultsSecureCookiesOutsideDevelopment(t *testing.T) {
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey: string(EnvironmentStaging),
+		databaseURLKey: "postgres://example",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !configuration.Auth.CookieSecure {
+		t.Fatal("staging cookie must be Secure by default")
+	}
+}
+
+func TestLoadRejectsInvalidAllowedOrigin(t *testing.T) {
+	_, err := Load(mapLookup(map[string]string{
+		environmentKey:    string(EnvironmentTest),
+		allowedOriginsKey: "javascript:alert(1)",
+	}))
+	if err == nil || !strings.Contains(err.Error(), allowedOriginsKey) {
+		t.Fatalf("Load() error = %v, want allowed origin error", err)
+	}
+}
+
 func TestLoadRejectsNilLookup(t *testing.T) {
 	if _, err := Load(nil); err == nil {
 		t.Fatal("Load() error = nil, want lookup error")
