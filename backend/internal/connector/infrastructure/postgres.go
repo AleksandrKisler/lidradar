@@ -1,4 +1,4 @@
-// Package infrastructure provides PostgreSQL persistence and provider adapters for Connector Core.
+// Package infrastructure содержит PostgreSQL-хранилище и адаптеры каналов.
 package infrastructure
 
 import (
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -199,6 +200,129 @@ func (repository *PostgresRepository) PersistEvent(
 		return domain.PersistResult{}, fmt.Errorf("commit raw event receipt: %w", err)
 	}
 	return domain.PersistResult{Event: persisted, Inserted: inserted}, nil
+}
+
+func (repository *PostgresRepository) PendingNormalization(
+	ctx context.Context,
+	limit int,
+) ([]domain.NormalizationItem, error) {
+	if repository == nil || repository.pool == nil || limit < 1 || limit > 100 {
+		return nil, domain.ErrInvalid
+	}
+	rows, err := repository.pool.Query(ctx, `
+		SELECT
+			w.id, w.tenant_id, w.connection_id, w.raw_event_id, w.status, w.created_at,
+			c.id, c.tenant_id, c.location_id, c.provider, c.name, c.status, c.capabilities,
+			c.verification_secret_hash, c.last_event_at, c.last_success_at, c.last_error_at,
+			c.last_error_code, c.created_at, c.updated_at,
+			r.id, r.tenant_id, r.connection_id, r.provider, r.external_event_id, r.payload,
+			r.payload_hash, r.status, r.error_code, r.received_at, r.processed_at, r.created_at
+		FROM raw_event_normalization_work w
+		JOIN channel_connections c
+		  ON c.tenant_id = w.tenant_id AND c.id = w.connection_id
+		JOIN raw_events r
+		  ON r.tenant_id = w.tenant_id AND r.id = w.raw_event_id AND r.connection_id = w.connection_id
+		WHERE w.status = 'PENDING' AND r.status = 'RECEIVED'
+		ORDER BY w.created_at, w.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("список заданий канонизации: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.NormalizationItem, 0)
+	for rows.Next() {
+		var item domain.NormalizationItem
+		var capabilitiesJSON []byte
+		if err := rows.Scan(
+			&item.Work.ID, &item.Work.TenantID, &item.Work.ConnectionID, &item.Work.RawEventID,
+			&item.Work.Status, &item.Work.CreatedAt,
+			&item.Connection.ID, &item.Connection.TenantID, &item.Connection.LocationID,
+			&item.Connection.Provider, &item.Connection.Name, &item.Connection.Status, &capabilitiesJSON,
+			&item.Connection.VerificationSecretHash, &item.Connection.LastEventAt, &item.Connection.LastSuccessAt,
+			&item.Connection.LastErrorAt, &item.Connection.LastErrorCode, &item.Connection.CreatedAt, &item.Connection.UpdatedAt,
+			&item.Event.ID, &item.Event.TenantID, &item.Event.ConnectionID, &item.Event.Provider,
+			&item.Event.ExternalEventID, &item.Event.Payload, &item.Event.PayloadHash, &item.Event.Status,
+			&item.Event.ErrorCode, &item.Event.ReceivedAt, &item.Event.ProcessedAt, &item.Event.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("чтение задания канонизации: %w", err)
+		}
+		if err := json.Unmarshal(capabilitiesJSON, &item.Connection.Capabilities); err != nil ||
+			item.Connection.Validate() != nil || item.Event.Validate() != nil || item.Work.Validate(item.Event) != nil {
+			return nil, domain.ErrInvalid
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("обход заданий канонизации: %w", err)
+	}
+	return items, nil
+}
+
+func (repository *PostgresRepository) CompleteNormalization(
+	ctx context.Context,
+	tenantID, rawEventID string,
+	at time.Time,
+) error {
+	return repository.finishNormalization(ctx, tenantID, rawEventID, domain.RawEventProcessed, nil, at)
+}
+
+func (repository *PostgresRepository) FailNormalization(
+	ctx context.Context,
+	tenantID, rawEventID, errorCode string,
+	at time.Time,
+) error {
+	errorCode = strings.TrimSpace(errorCode)
+	if errorCode == "" || len(errorCode) > 100 {
+		return domain.ErrInvalid
+	}
+	return repository.finishNormalization(ctx, tenantID, rawEventID, domain.RawEventFailed, &errorCode, at)
+}
+
+func (repository *PostgresRepository) finishNormalization(
+	ctx context.Context,
+	tenantID, rawEventID string,
+	status domain.RawEventStatus,
+	errorCode *string,
+	at time.Time,
+) error {
+	if repository == nil || repository.pool == nil || tenantID == "" || rawEventID == "" || at.IsZero() ||
+		(status != domain.RawEventProcessed && status != domain.RawEventFailed) {
+		return domain.ErrInvalid
+	}
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начало завершения канонизации: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var connectionID string
+	err = tx.QueryRow(ctx, `
+		UPDATE raw_events
+		SET status = $3, error_code = $4, processed_at = $5
+		WHERE tenant_id = $1 AND id = $2 AND status = 'RECEIVED'
+		RETURNING connection_id`, tenantID, rawEventID, status, errorCode, at.UTC()).Scan(&connectionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrNotFound
+	}
+	if err != nil {
+		return mapPostgresError("завершение RawEvent", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM raw_event_normalization_work
+		WHERE tenant_id = $1 AND raw_event_id = $2`, tenantID, rawEventID); err != nil {
+		return mapPostgresError("удаление задания канонизации", err)
+	}
+	if status == domain.RawEventFailed {
+		if _, err := tx.Exec(ctx, `
+			UPDATE channel_connections
+			SET status = 'ERROR', last_error_at = $4, last_error_code = $3, updated_at = $4
+			WHERE tenant_id = $1 AND id = $2`, tenantID, connectionID, *errorCode, at.UTC()); err != nil {
+			return mapPostgresError("обновление ошибки подключения", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("фиксация завершения канонизации: %w", err)
+	}
+	return nil
 }
 
 type rowScanner interface{ Scan(...any) error }

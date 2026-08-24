@@ -28,6 +28,8 @@ type testConnector struct {
 	verifyErr      error
 	identifierErr  error
 	normalizeCalls int
+	normalized     []domain.CanonicalEvent
+	normalizeErr   error
 }
 
 func (*testConnector) Provider() domain.Provider { return domain.ProviderTest }
@@ -39,7 +41,7 @@ func (connector *testConnector) ExternalEventID([]byte, domain.Headers) (string,
 }
 func (connector *testConnector) NormalizeEvent(context.Context, domain.ChannelConnection, domain.RawEvent) ([]domain.CanonicalEvent, error) {
 	connector.normalizeCalls++
-	return nil, nil
+	return connector.normalized, connector.normalizeErr
 }
 func (*testConnector) Health(context.Context, domain.ChannelConnection) domain.ConnectionHealth {
 	return domain.ConnectionHealth{Status: domain.ConnectionActive, CheckedAt: time.Now()}
@@ -60,6 +62,9 @@ type testRepository struct {
 	connections map[string]domain.ChannelConnection
 	events      []domain.RawEvent
 	works       []*domain.NormalizationWork
+	pending     []domain.NormalizationItem
+	completed   []string
+	failed      []string
 }
 
 func newTestRepository() *testRepository {
@@ -113,6 +118,27 @@ func (repository *testRepository) PersistEvent(
 	repository.events = append(repository.events, event)
 	repository.works = append(repository.works, work)
 	return domain.PersistResult{Event: event, Inserted: true}, nil
+}
+func (repository *testRepository) PendingNormalization(context.Context, int) ([]domain.NormalizationItem, error) {
+	return append([]domain.NormalizationItem(nil), repository.pending...), nil
+}
+func (repository *testRepository) CompleteNormalization(_ context.Context, _, rawEventID string, _ time.Time) error {
+	repository.completed = append(repository.completed, rawEventID)
+	return nil
+}
+func (repository *testRepository) FailNormalization(_ context.Context, _, rawEventID, _ string, _ time.Time) error {
+	repository.failed = append(repository.failed, rawEventID)
+	return nil
+}
+
+type testCanonicalSink struct {
+	events []domain.CanonicalEvent
+	err    error
+}
+
+func (sink *testCanonicalSink) IngestCanonical(_ context.Context, event domain.CanonicalEvent) error {
+	sink.events = append(sink.events, event)
+	return sink.err
 }
 
 func TestReceivePersistsBeforeNormalization(t *testing.T) {
@@ -182,5 +208,77 @@ func TestManagerCannotManageConnections(t *testing.T) {
 		Provider: "TEST", Name: "Fixture", WebhookSecret: "fixture-secret-123",
 	}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("Connect() error = %v", err)
+	}
+}
+
+func TestNormalizationCompletesOnlyAfterCanonicalIngestion(t *testing.T) {
+	repository, connector, item := normalizationFixture(t)
+	connector.normalized = []domain.CanonicalEvent{canonicalFixture(item)}
+	sink := &testCanonicalSink{}
+	service := NewNormalizationService(repository, testRegistry{connector}, sink, time.Now)
+
+	processed, err := service.ProcessBatch(context.Background(), 10)
+	if err != nil || processed != 1 || len(sink.events) != 1 || len(repository.completed) != 1 || len(repository.failed) != 0 {
+		t.Fatalf("ProcessBatch() = %d, %v; sink=%d completed=%v failed=%v", processed, err, len(sink.events), repository.completed, repository.failed)
+	}
+}
+
+func TestNormalizationMarksInvalidCanonicalEventFailed(t *testing.T) {
+	repository, connector, _ := normalizationFixture(t)
+	connector.normalized = []domain.CanonicalEvent{{}}
+	service := NewNormalizationService(repository, testRegistry{connector}, &testCanonicalSink{}, time.Now)
+
+	processed, err := service.ProcessBatch(context.Background(), 10)
+	if err != nil || processed != 1 || len(repository.failed) != 1 || len(repository.completed) != 0 {
+		t.Fatalf("ProcessBatch() = %d, %v; completed=%v failed=%v", processed, err, repository.completed, repository.failed)
+	}
+}
+
+func TestNormalizationKeepsWorkPendingOnTemporarySinkFailure(t *testing.T) {
+	repository, connector, item := normalizationFixture(t)
+	connector.normalized = []domain.CanonicalEvent{canonicalFixture(item)}
+	wantErr := errors.New("временная ошибка PostgreSQL")
+	service := NewNormalizationService(repository, testRegistry{connector}, &testCanonicalSink{err: wantErr}, time.Now)
+
+	processed, err := service.ProcessBatch(context.Background(), 10)
+	if !errors.Is(err, wantErr) || processed != 0 || len(repository.completed) != 0 || len(repository.failed) != 0 {
+		t.Fatalf("ProcessBatch() = %d, %v; completed=%v failed=%v", processed, err, repository.completed, repository.failed)
+	}
+}
+
+func normalizationFixture(t *testing.T) (*testRepository, *testConnector, domain.NormalizationItem) {
+	t.Helper()
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	health := domain.ConnectionHealth{Status: domain.ConnectionActive, CheckedAt: now}
+	connection, err := domain.NewChannelConnection(
+		"connection", "tenant", nil, domain.ProviderTest, "Тест", []domain.Capability{domain.CapabilityReceiveMessages},
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", health, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := domain.NewRawEvent(
+		"raw", "tenant", "connection", domain.ProviderTest, "external", []byte(`{"fixture":true}`),
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		domain.RawEventReceived, nil, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := domain.NormalizationItem{Connection: connection, Event: raw}
+	repository := newTestRepository()
+	repository.pending = []domain.NormalizationItem{item}
+	return repository, &testConnector{}, item
+}
+
+func canonicalFixture(item domain.NormalizationItem) domain.CanonicalEvent {
+	text := "Здравствуйте"
+	return domain.CanonicalEvent{
+		SourceEventID: "external", Type: domain.CanonicalMessageReceived,
+		TenantID: item.Event.TenantID, ConnectionID: item.Connection.ID, Provider: item.Connection.Provider,
+		ConversationExternalID: "dialog", MessageExternalID: "message", ContactExternalID: "contact",
+		Direction: domain.CanonicalIncoming, MessageType: domain.CanonicalText, Text: &text,
+		SentAt: item.Event.ReceivedAt, OccurredAt: item.Event.ReceivedAt, ReceivedAt: item.Event.ReceivedAt,
+		Attachments: []domain.CanonicalAttachment{}, Metadata: []byte(`{}`),
 	}
 }

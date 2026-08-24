@@ -1,0 +1,1 @@
+{"id":"test-event-3","type":"message.deleted.v1","occurredAt":"2026-08-25T10:02:00Z","data":{"conversationExternalId":"dialog-1","messageExternalId":"message-1","attachments":[],"metadata":{"fixture":"test"}}}

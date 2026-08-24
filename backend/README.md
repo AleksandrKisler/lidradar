@@ -1,91 +1,117 @@
-# Backend layout
+# Устройство серверной части
 
-The backend is a modular monolith with five independently built commands:
+Серверная часть — модульный монолит с пятью независимо собираемыми командами:
 
-* `cmd/api`
-* `cmd/worker`
-* `cmd/scheduler`
-* `cmd/ai-agent`
-* `cmd/migrate`
+- `cmd/api` — HTTP API;
+- `cmd/worker` — фоновая обработка сохранённых событий;
+- `cmd/scheduler` — планировщик;
+- `cmd/ai-agent` — узел локального анализа;
+- `cmd/migrate` — применение миграций PostgreSQL.
 
-Build all five runtime binaries from the repository root:
+Собрать все рабочие файлы из корня репозитория:
 
 ```sh
 make build
 ```
 
-Every runtime validates typed configuration before starting. Set the required
-deployment environment to one of `development`, `test`, `staging`, or
+Перед запуском каждая команда проверяет типизированные настройки. Обязательная
+переменная `LIDRADAR_ENV` принимает `development`, `test`, `staging` или
 `production`:
 
 ```sh
 LIDRADAR_ENV=development ./bin/lidradar-api
 ```
 
-Database-backed runtimes also require `LIDRADAR_DATABASE_URL`. Development and
-test default to the local Compose DSN; staging and production have no database
-default. `LIDRADAR_HTTP_ADDRESS`, pool sizes, connect timeout, and graceful
-shutdown timeout are optional typed settings. Authentication additionally uses
-`LIDRADAR_SESSION_TTL` (default 30 days), `LIDRADAR_COOKIE_SECURE` (mandatory
-in staging/production), and comma-separated
-`LIDRADAR_ALLOWED_ORIGINS` for browser mutation origin validation.
+Командам, работающим с базой, также нужна `LIDRADAR_DATABASE_URL`. Для локальной
+разработки и тестов используется адрес из Compose; для испытательного и
+рабочего окружений значения по умолчанию нет. Дополнительно настраиваются адрес
+HTTP, размеры пула, время подключения и время плавной остановки. Проверка
+личности использует `LIDRADAR_SESSION_TTL` (по умолчанию 30 дней),
+`LIDRADAR_COOKIE_SECURE` (обязательно вне локальной среды) и список доверенных
+источников `LIDRADAR_ALLOWED_ORIGINS`.
 
-An absent or unsupported `LIDRADAR_ENV` prevents the process workload from
-starting and returns a non-zero exit status.
+При отсутствии обязательной настройки команда завершается с ненулевым кодом.
+Долго работающие процессы обрабатывают `SIGINT` и `SIGTERM`. API, фоновый
+обработчик и планировщик проверяют PostgreSQL при запуске. Команда миграций
+применяет встроенные неизменяемые SQL-файлы в транзакциях и отклоняет изменение
+контрольной суммы уже применённого файла.
 
-The command writes `lidradar-api`, `lidradar-worker`, `lidradar-scheduler`,
-`lidradar-ai-agent`, and `lidradar-migrate` to `bin/`. The long-running
-processes handle `SIGINT` or `SIGTERM` and shut down cleanly. API, worker, and
-scheduler verify PostgreSQL during startup. The migrate command applies
-embedded immutable SQL migrations and rejects changed checksums.
-
-Start the complete local backend foundation with:
+## Локальный запуск
 
 ```sh
 docker compose up --build
 ```
 
-This starts PostgreSQL 18, applies migrations, waits for API readiness, and
-starts worker, scheduler, and an AI agent configured with local stubs. The API
-exposes `GET /health/live` and `GET /health/ready` on port 8080. It also exposes
-the `/api/v1/auth` registration/session API plus Organization, Location and
-business-hours setup routes. OWNER can also manage exact-decimal, optionally
-Location-specific Service Catalog items through `/api/v1/services`; deleting a
-service deactivates it without erasing history. Tenant-scoped requests select
-an Organization with the `X-Tenant-ID` header obtained from
-`GET /api/v1/auth/me`. OWNER can manage channel connections through
-`/api/v1/integrations`; authenticated provider events enter through
-`/api/v1/webhooks/{provider}/{tenantId}/{connectionId}` and are persisted before
-normalization work is scheduled. TEST, IMPORT, and GENERIC_WEBHOOK use local
-adapters. The Telegram Connected Business adapter validates fixtures only and
-reports `DEGRADED` until the real-account spike is completed. No Telegram or AI
-provider receives data in this configuration.
+Команда запускает PostgreSQL 18, миграции, API, фоновый обработчик, планировщик
+и узел анализа с локальной заглушкой. Готовность доступна по адресам
+`GET /health/live` и `GET /health/ready` на порту 8080.
 
-Business capabilities live below `internal`. The `risk` package is the
-reference module for the canonical layers:
+Организация выбирается явно заголовком `X-Tenant-ID`, значение которого
+возвращает `GET /api/v1/auth/me`. OWNER управляет организацией, точками,
+расписанием, каталогом услуг и подключениями. MANAGER имеет только разрешения на
+рабочие бизнес-операции.
+
+Подключения каналов доступны в `/api/v1/integrations`. Событие поставщика входит
+через `/api/v1/webhooks/{provider}/{tenantId}/{connectionId}`, проверяется и
+сохраняется до постановки работы по преобразованию. TEST, IMPORT и
+GENERIC_WEBHOOK используют локальные адаптеры. Адаптер Telegram Connected
+Business пока является макетом и сообщает состояние
+`DEGRADED/TELEGRAM_SPIKE_NOT_VERIFIED`, пока проверка на настоящем аккаунте не
+завершена. В этой конфигурации данные не отправляются во внешний Telegram или
+сервис искусственного интеллекта.
+
+Фоновый обработчик преобразует ожидающие события в независимую от канала модель
+контактов и переписок. Доступны маршруты:
+
+```text
+GET /api/v1/conversations
+GET /api/v1/conversations/{conversationId}
+GET /api/v1/conversations/{conversationId}/messages
+```
+
+Повтор одного события безопасен. Изменение сообщения обновляет его состояние,
+удаление оставляет историю с отметкой времени, а версия переписки увеличивается
+только при фактическом изменении. PostgreSQL хранит лишь метаданные вложений;
+передача двоичных файлов в S3-совместимое хранилище пока заменена заглушкой.
+
+## Границы модулей
+
+Бизнес-возможности находятся в `internal`. Эталонное направление зависимостей:
 
 ```text
 transport -> application -> domain
 infrastructure ---------> domain ports
 ```
 
-Place business rules and persistence interfaces in `domain`, use-case
-coordination in `application`, adapter implementations in `infrastructure`,
-and protocol-specific handlers and DTOs in `transport`. Shared technical
-adapters belong below `platform`; versioned external contracts belong in the
-repository-level `contracts` directory.
+- `domain` — правила предметной области и порты хранения;
+- `application` — сценарии использования и согласование операций;
+- `infrastructure` — PostgreSQL и адаптеры внешних систем;
+- `transport` — HTTP, команды и структуры обмена;
+- `platform` — общие технические средства;
+- `contracts` — версионированные внешние контракты.
 
-Run the dependency check from the repository root:
+Проверка направлений зависимостей:
 
 ```sh
 go run ./backend/tools/archcheck -root backend
 ```
 
-The check is also mandatory in `.github/workflows/architecture.yml`. Its unit
-tests include a negative fixture proving that a `domain` import of `pgx/v5` is
-rejected.
+Она также обязательна в `.github/workflows/architecture.yml`. Перед расширением
+архитектуры проверьте [запреты MVP](../docs/architecture/NON_GOALS.md). Изменение
+зафиксированного решения требует принятого ADR.
 
-Before selecting infrastructure or expanding product scope, check the
-documented [MVP architecture non-goals](../docs/architecture/NON_GOALS.md).
-Introducing a prohibited technology or product direction requires an accepted
-ADR before implementation.
+## Проверки
+
+Полная локальная проверка с работающей PostgreSQL:
+
+```sh
+LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable' go test -race -count=1 ./...
+go vet ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...
+go run ./backend/tools/archcheck -root backend
+npx --yes @redocly/cli@1.34.5 lint contracts/openapi/openapi.yaml
+```
+
+Актуальный аудит выполнения задач находится в [`../DONE.md`](../DONE.md), а
+сроки подключения Telegram и локального узла анализа — в
+[`../docs/roadmap/EXTERNAL_SERVICES.md`](../docs/roadmap/EXTERNAL_SERVICES.md).

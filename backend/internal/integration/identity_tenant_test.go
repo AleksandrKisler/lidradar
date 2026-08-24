@@ -20,6 +20,9 @@ import (
 	connectorapplication "lidradar/backend/internal/connector/application"
 	connectorinfrastructure "lidradar/backend/internal/connector/infrastructure"
 	connectortransport "lidradar/backend/internal/connector/transport"
+	conversationapplication "lidradar/backend/internal/conversation/application"
+	conversationinfrastructure "lidradar/backend/internal/conversation/infrastructure"
+	conversationtransport "lidradar/backend/internal/conversation/transport"
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
@@ -36,6 +39,7 @@ import (
 type apiFixture struct {
 	handler       http.Handler
 	tenantService application.Service
+	normalization connectorapplication.NormalizationService
 	pool          *pgxpool.Pool
 }
 
@@ -46,11 +50,16 @@ func newAPIFixture(t *testing.T) apiFixture {
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
 	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
+	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
 	permissions := application.NewPermissionService(tenantRepository)
 	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now)
 	catalogService := catalogapplication.NewService(catalogRepository, permissions, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
 		connectorRepository, permissions, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
+	)
+	conversationService := conversationapplication.NewService(conversationRepository, permissions, ids.Generator{})
+	normalization := connectorapplication.NewNormalizationService(
+		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
 	)
 	identityService := identityapplication.NewService(
 		identityRepository, cryptoplatform.PasswordHasher{}, ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
@@ -61,11 +70,12 @@ func newAPIFixture(t *testing.T) apiFixture {
 		identityService, tenantService, identitytransport.CookieConfiguration{TTL: 24 * time.Hour},
 	).Router())
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, resolver).Router())
+	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, resolver).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, resolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
-	return apiFixture{handler: router, tenantService: tenantService, pool: pool}
+	return apiFixture{handler: router, tenantService: tenantService, normalization: normalization, pool: pool}
 }
 
 type registeredUser struct {

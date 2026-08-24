@@ -1,0 +1,1 @@
+{"id":"test-event-1","type":"message.received.v1","occurredAt":"2026-08-25T10:00:00Z","data":{"conversationExternalId":"dialog-1","messageExternalId":"message-1","contactExternalId":"contact-1","contactDisplayName":"Ирина","direction":"INCOMING","messageType":"TEXT","text":"Здравствуйте","sentAt":"2026-08-25T09:59:00Z","attachments":[],"metadata":{"fixture":"test"}}}

@@ -1,4 +1,4 @@
-// Package transport adapts Connector Core management and webhook receipt to HTTP.
+// Package transport публикует управление подключениями и приём событий через HTTP.
 package transport
 
 import (

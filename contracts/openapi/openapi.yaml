@@ -343,6 +343,57 @@ paths:
         '409': { description: The external event ID already exists with a different payload., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { description: Webhook body exceeds 1 MiB., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: Connection is disconnected or its provider adapter is unavailable., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/conversations:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+    get:
+      summary: Получить список переписок выбранной организации
+      description: Требует разрешение conversation.read. Порядок — от недавно изменённых переписок; постраничное чтение использует непрозрачный курсор.
+      operationId: listConversations
+      parameters:
+        - { name: limit, in: query, description: Размер страницы; по умолчанию 50., schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, description: Непрозрачный курсор из предыдущего ответа., schema: { type: string } }
+      responses:
+        '200':
+          description: Переписки только выбранной организации.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConversationPage' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/conversations/{conversationId}:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/ConversationId' }
+    get:
+      summary: Получить переписку и связанный контакт
+      operationId: getConversation
+      responses:
+        '200':
+          description: Каноническая переписка и контакт без сведений, зависящих от конкретного канала.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConversationDetail' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/conversations/{conversationId}/messages:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/ConversationId' }
+    get:
+      summary: Получить сообщения переписки
+      description: Сообщения возвращаются от новых к старым; удаление у поставщика отмечается временем providerDeletedAt и не стирает историю.
+      operationId: listConversationMessages
+      parameters:
+        - { name: limit, in: query, description: Размер страницы; по умолчанию 50., schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, description: Непрозрачный курсор из предыдущего ответа., schema: { type: string } }
+      responses:
+        '200':
+          description: Канонические сообщения с метаданными вложений.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MessagePage' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/radar:
     get:
       summary: Get Radar summary
@@ -471,6 +522,7 @@ components:
     ServiceId: { name: serviceId, in: path, required: true, schema: { type: string, format: uuid } }
     ConnectorProvider: { name: provider, in: path, required: true, schema: { $ref: '#/components/schemas/ConnectorProvider' } }
     ConnectionId: { name: connectionId, in: path, required: true, schema: { type: string, format: uuid } }
+    ConversationId: { name: conversationId, in: path, required: true, schema: { type: string, format: uuid } }
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
@@ -712,6 +764,107 @@ components:
         rawEventId: { type: string, format: uuid }
         status: { type: string, enum: [RECEIVED, FAILED] }
         duplicate: { type: boolean }
+    Contact:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, phoneNormalized, emailNormalized, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: [string, 'null'], maxLength: 200 }
+        phoneNormalized: { type: [string, 'null'], maxLength: 40 }
+        emailNormalized: { type: [string, 'null'], format: email, maxLength: 254 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ConversationStatus:
+      type: string
+      enum: [ACTIVE, ARCHIVED]
+    MessageDirection:
+      type: string
+      enum: [INCOMING, OUTGOING, SYSTEM]
+    MessageType:
+      type: string
+      enum: [TEXT, IMAGE, VOICE, AUDIO, VIDEO, DOCUMENT, OTHER]
+    Conversation:
+      type: object
+      additionalProperties: false
+      required: [id, locationId, connectionId, contactId, externalId, status, firstMessageAt, lastMessageAt, lastMessageDirection, revision, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        locationId: { type: [string, 'null'], format: uuid }
+        connectionId: { type: string, format: uuid }
+        contactId: { type: string, format: uuid }
+        externalId: { type: string, minLength: 1, maxLength: 512 }
+        status: { $ref: '#/components/schemas/ConversationStatus' }
+        firstMessageAt: { type: [string, 'null'], format: date-time }
+        lastMessageAt: { type: [string, 'null'], format: date-time }
+        lastMessageDirection:
+          oneOf:
+            - { $ref: '#/components/schemas/MessageDirection' }
+            - { type: 'null' }
+        revision: { type: integer, format: int64, minimum: 0, description: Атомарно увеличивается при каждом фактическом изменении сообщения. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ConversationDetail:
+      type: object
+      additionalProperties: false
+      required: [conversation, contact]
+      properties:
+        conversation: { $ref: '#/components/schemas/Conversation' }
+        contact: { $ref: '#/components/schemas/Contact' }
+    ConversationPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Conversation' } }
+        nextCursor: { type: [string, 'null'], description: Непрозрачный курсор следующей страницы или null. }
+    Message:
+      type: object
+      additionalProperties: false
+      required: [id, conversationId, connectionId, externalId, direction, type, text, senderExternalId, replyToMessageId, sentAt, receivedAt, providerDeletedAt, metadata, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        connectionId: { type: string, format: uuid }
+        externalId: { type: string, minLength: 1, maxLength: 512 }
+        direction: { $ref: '#/components/schemas/MessageDirection' }
+        type: { $ref: '#/components/schemas/MessageType' }
+        text: { type: [string, 'null'] }
+        senderExternalId: { type: [string, 'null'], maxLength: 512 }
+        replyToMessageId: { type: [string, 'null'], format: uuid }
+        sentAt: { type: string, format: date-time }
+        receivedAt: { type: string, format: date-time }
+        providerDeletedAt: { type: [string, 'null'], format: date-time }
+        metadata: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    Attachment:
+      type: object
+      additionalProperties: false
+      required: [id, messageId, objectKey, mimeType, sizeBytes, sha256, providerFileId, createdAt]
+      description: Только метаданные. Двоичное содержимое хранится в S3-совместимом объектном хранилище.
+      properties:
+        id: { type: string, format: uuid }
+        messageId: { type: string, format: uuid }
+        objectKey: { type: string, minLength: 1, maxLength: 1024 }
+        mimeType: { type: [string, 'null'] }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        sha256: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        providerFileId: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    MessageView:
+      type: object
+      additionalProperties: false
+      required: [message, attachments]
+      properties:
+        message: { $ref: '#/components/schemas/Message' }
+        attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+    MessagePage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MessageView' } }
+        nextCursor: { type: [string, 'null'], description: Непрозрачный курсор следующей страницы или null. }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }

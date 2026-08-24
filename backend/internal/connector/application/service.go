@@ -1,4 +1,4 @@
-// Package application coordinates integration management and persist-first event receipt.
+// Package application управляет подключениями и приёмом событий с сохранением до обработки.
 package application
 
 import (
@@ -153,8 +153,8 @@ type Receipt struct {
 	Duplicate  bool                  `json:"duplicate"`
 }
 
-// Receive verifies the event and persists RawEvent plus normalization work in
-// one short transaction. NormalizeEvent is deliberately not called here.
+// Receive проверяет событие и сохраняет RawEvent вместе с заданием преобразования
+// в одной короткой транзакции. Само преобразование здесь не запускается.
 func (service Service) Receive(
 	ctx context.Context,
 	providerValue, tenantID, connectionID string,

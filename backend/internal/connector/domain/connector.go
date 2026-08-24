@@ -1,4 +1,5 @@
-// Package domain owns channel-independent connections, raw events and connector contracts.
+// Package domain содержит независимые от каналов подключения, исходные события
+// и контракты адаптеров.
 package domain
 
 import (
@@ -339,15 +340,136 @@ func (work NormalizationWork) Validate(event RawEvent) error {
 	return nil
 }
 
-type CanonicalEvent struct {
-	ExternalEventID string          `json:"externalEventId"`
-	Type            string          `json:"type"`
-	OccurredAt      time.Time       `json:"occurredAt"`
-	Data            json.RawMessage `json:"data"`
+// CanonicalEventType определяет версионированное изменение сообщения.
+type CanonicalEventType string
+
+const (
+	CanonicalMessageReceived CanonicalEventType = "message.received.v1"
+	CanonicalMessageEdited   CanonicalEventType = "message.edited.v1"
+	CanonicalMessageDeleted  CanonicalEventType = "message.deleted.v1"
+)
+
+func (eventType CanonicalEventType) Valid() bool {
+	switch eventType {
+	case CanonicalMessageReceived, CanonicalMessageEdited, CanonicalMessageDeleted:
+		return true
+	default:
+		return false
+	}
 }
 
-// Headers keeps the domain contract independent from net/http while allowing
-// an HTTP header implementation to be passed by the transport adapter.
+// CanonicalDirection показывает сторону делового диалога.
+type CanonicalDirection string
+
+const (
+	CanonicalIncoming CanonicalDirection = "INCOMING"
+	CanonicalOutgoing CanonicalDirection = "OUTGOING"
+	CanonicalSystem   CanonicalDirection = "SYSTEM"
+)
+
+func (direction CanonicalDirection) Valid() bool {
+	switch direction {
+	case CanonicalIncoming, CanonicalOutgoing, CanonicalSystem:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanonicalMessageType описывает вид содержимого независимо от поставщика.
+type CanonicalMessageType string
+
+const (
+	CanonicalText     CanonicalMessageType = "TEXT"
+	CanonicalImage    CanonicalMessageType = "IMAGE"
+	CanonicalVoice    CanonicalMessageType = "VOICE"
+	CanonicalAudio    CanonicalMessageType = "AUDIO"
+	CanonicalVideo    CanonicalMessageType = "VIDEO"
+	CanonicalDocument CanonicalMessageType = "DOCUMENT"
+	CanonicalOther    CanonicalMessageType = "OTHER"
+)
+
+func (messageType CanonicalMessageType) Valid() bool {
+	switch messageType {
+	case CanonicalText, CanonicalImage, CanonicalVoice, CanonicalAudio,
+		CanonicalVideo, CanonicalDocument, CanonicalOther:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanonicalAttachment переносит только метаданные файла между модулями.
+type CanonicalAttachment struct {
+	ObjectKey      string  `json:"objectKey"`
+	MIMEType       *string `json:"mimeType"`
+	SizeBytes      int64   `json:"sizeBytes"`
+	SHA256         *string `json:"sha256"`
+	ProviderFileID *string `json:"providerFileId"`
+}
+
+func (attachment CanonicalAttachment) Validate() error {
+	if strings.TrimSpace(attachment.ObjectKey) == "" || attachment.ObjectKey != strings.TrimSpace(attachment.ObjectKey) ||
+		attachment.SizeBytes < 0 {
+		return ErrInvalidPayload
+	}
+	if attachment.SHA256 != nil && !sha256Pattern.MatchString(*attachment.SHA256) {
+		return ErrInvalidPayload
+	}
+	return nil
+}
+
+// CanonicalEvent — независимый от канала контракт между адаптером источника и
+// модулем переписок. Поля провайдера не должны проходить дальше этого рубежа.
+type CanonicalEvent struct {
+	SourceEventID            string                `json:"sourceEventId"`
+	Type                     CanonicalEventType    `json:"type"`
+	TenantID                 string                `json:"-"`
+	ConnectionID             string                `json:"connectionId"`
+	LocationID               *string               `json:"locationId"`
+	Provider                 Provider              `json:"provider"`
+	ConversationExternalID   string                `json:"conversationExternalId"`
+	MessageExternalID        string                `json:"messageExternalId"`
+	ContactExternalID        string                `json:"contactExternalId"`
+	ContactDisplayName       *string               `json:"contactDisplayName"`
+	ContactPhoneNormalized   *string               `json:"contactPhoneNormalized"`
+	ContactEmailNormalized   *string               `json:"contactEmailNormalized"`
+	Direction                CanonicalDirection    `json:"direction"`
+	MessageType              CanonicalMessageType  `json:"messageType"`
+	Text                     *string               `json:"text"`
+	SenderExternalID         *string               `json:"senderExternalId"`
+	ReplyToMessageExternalID *string               `json:"replyToMessageExternalId"`
+	SentAt                   time.Time             `json:"sentAt"`
+	OccurredAt               time.Time             `json:"occurredAt"`
+	ReceivedAt               time.Time             `json:"receivedAt"`
+	Attachments              []CanonicalAttachment `json:"attachments"`
+	Metadata                 json.RawMessage       `json:"metadata"`
+}
+
+func (event CanonicalEvent) Validate() error {
+	if event.SourceEventID == "" || !event.Type.Valid() || event.TenantID == "" || event.ConnectionID == "" ||
+		!event.Provider.Valid() || event.ConversationExternalID == "" || len(event.ConversationExternalID) > 512 ||
+		event.MessageExternalID == "" || len(event.MessageExternalID) > 512 || event.OccurredAt.IsZero() ||
+		event.ReceivedAt.IsZero() || !json.Valid(event.Metadata) || !jsonObject(event.Metadata) {
+		return ErrInvalidPayload
+	}
+	if event.Type != CanonicalMessageDeleted {
+		if !event.Direction.Valid() || !event.MessageType.Valid() || event.SentAt.IsZero() {
+			return ErrInvalidPayload
+		}
+	}
+	if event.Type == CanonicalMessageReceived && event.ContactExternalID == "" {
+		return ErrInvalidPayload
+	}
+	for _, attachment := range event.Attachments {
+		if attachment.Validate() != nil {
+			return ErrInvalidPayload
+		}
+	}
+	return nil
+}
+
+// Headers сохраняет доменный контракт независимым от net/http.
 type Headers interface{ Get(string) string }
 
 type Connector interface {
@@ -361,11 +483,13 @@ type EventIdentifier interface {
 	ExternalEventID([]byte, Headers) (string, error)
 }
 
+// ConnectorRegistration объединяет адаптер и подтверждённые им возможности.
 type ConnectorRegistration struct {
 	Connector    Connector
 	Capabilities []Capability
 }
 
+// ConnectorRegistry находит адаптер по поставщику канала.
 type ConnectorRegistry interface {
 	Lookup(Provider) (ConnectorRegistration, bool)
 }
@@ -375,13 +499,23 @@ type PersistResult struct {
 	Inserted bool
 }
 
-// Repository requires tenant scope for every connection and raw-event access.
+// NormalizationItem объединяет исходное событие и его подключение для обработки.
+type NormalizationItem struct {
+	Work       NormalizationWork
+	Connection ChannelConnection
+	Event      RawEvent
+}
+
+// Repository требует tenant scope для каждого доступа к подключению и событию.
 type Repository interface {
 	ListConnections(context.Context, string) ([]ChannelConnection, error)
 	Connection(context.Context, string, string) (ChannelConnection, bool, error)
 	CreateConnection(context.Context, string, ChannelConnection) error
 	DisconnectConnection(context.Context, string, string, time.Time) (ChannelConnection, bool, error)
 	PersistEvent(context.Context, string, string, RawEvent, *NormalizationWork, ConnectionHealth) (PersistResult, error)
+	PendingNormalization(context.Context, int) ([]NormalizationItem, error)
+	CompleteNormalization(context.Context, string, string, time.Time) error
+	FailNormalization(context.Context, string, string, string, time.Time) error
 }
 
 func cleanCapabilities(capabilities []Capability) []Capability {
@@ -436,4 +570,9 @@ func utcTime(value *time.Time) *time.Time {
 	}
 	result := value.UTC()
 	return &result
+}
+
+func jsonObject(value json.RawMessage) bool {
+	var object map[string]json.RawMessage
+	return json.Unmarshal(value, &object) == nil && object != nil
 }

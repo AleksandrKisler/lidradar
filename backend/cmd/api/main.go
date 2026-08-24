@@ -1,4 +1,4 @@
-// Command api runs the LidRadar HTTP API process.
+// Command api запускает HTTP API LidRadar.
 package main
 
 import (
@@ -14,6 +14,9 @@ import (
 	connectorapplication "lidradar/backend/internal/connector/application"
 	connectorinfrastructure "lidradar/backend/internal/connector/infrastructure"
 	connectortransport "lidradar/backend/internal/connector/transport"
+	conversationapplication "lidradar/backend/internal/conversation/application"
+	conversationinfrastructure "lidradar/backend/internal/conversation/infrastructure"
+	conversationtransport "lidradar/backend/internal/conversation/transport"
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
@@ -42,18 +45,20 @@ func run(ctx context.Context, configuration config.Config) error {
 	}
 	defer pool.Close()
 	logger := bootstrap.Logger(ctx)
-	logger.Info("PostgreSQL ready", "event", "postgres.ready")
+	logger.Info("PostgreSQL готов", "event", "postgres.ready")
 
 	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
 	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
+	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
 	permissionService := tenantapplication.NewPermissionService(tenantRepository)
 	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now)
 	catalogService := catalogapplication.NewService(catalogRepository, permissionService, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
 		connectorRepository, permissionService, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
 	)
+	conversationService := conversationapplication.NewService(conversationRepository, permissionService, ids.Generator{})
 	identityService := identityapplication.NewService(
 		identityRepository,
 		cryptoplatform.PasswordHasher{},
@@ -74,6 +79,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		identitytransport.CookieConfiguration{Secure: configuration.Auth.CookieSecure, TTL: configuration.Auth.SessionTTL},
 	).Router())
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, principalResolver).Router())
+	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, principalResolver).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, principalResolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
