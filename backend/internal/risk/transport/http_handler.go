@@ -3,7 +3,6 @@ package transport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 
 	"lidradar/backend/internal/risk/application"
 	"lidradar/backend/internal/risk/domain"
+	httpplatform "lidradar/backend/platform/http"
 )
 
 // PrincipalResolver is implemented by the identity transport. Authentication
@@ -42,12 +42,12 @@ func (h Handler) Router() http.Handler {
 
 func (h Handler) principal(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	if h.principals == nil {
-		writeError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required")
+		writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required")
 		return "", "", false
 	}
 	a, t, ok := h.principals.Principal(r)
 	if !ok || a == "" || t == "" {
-		writeError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required")
+		writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required")
 		return "", "", false
 	}
 	return a, t, true
@@ -62,12 +62,12 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 		var err error
 		limit, err = strconv.Atoi(raw)
 		if err != nil {
-			writeError(w, 400, "INVALID_ARGUMENT", "invalid limit")
+			writeError(w, r, 400, "INVALID_ARGUMENT", "invalid limit")
 			return
 		}
 	}
 	page, err := h.radar.List(r.Context(), a, t, application.ListQuery{Status: domain.Status(r.URL.Query().Get("status")), Limit: limit, After: r.URL.Query().Get("cursor")})
-	if handleError(w, err) {
+	if handleError(w, r, err) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"items": page.Items, "nextCursor": emptyNil(page.NextCursor)})
@@ -78,7 +78,7 @@ func (h Handler) detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, err := h.radar.Get(r.Context(), a, t, r.PathValue("riskID"))
-	if handleError(w, err) {
+	if handleError(w, r, err) {
 		return
 	}
 	writeJSON(w, 200, d)
@@ -89,7 +89,7 @@ func (h Handler) summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, err := h.radar.Summary(r.Context(), a, t)
-	if handleError(w, err) {
+	if handleError(w, r, err) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"openRisks": s.OpenRisks, "criticalRisks": s.CriticalRisks, "potentialRevenue": s.PotentialRevenue, "confirmedRecoveredRevenue": s.ConfirmedRecoveredRevenue})
@@ -104,33 +104,31 @@ func (h Handler) command(w http.ResponseWriter, r *http.Request, fn func(context
 		return
 	}
 	risk, err := fn(r.Context(), a, t, r.PathValue("riskID"))
-	if handleError(w, err) {
+	if handleError(w, r, err) {
 		return
 	}
 	writeJSON(w, 200, risk)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	httpplatform.WriteJSON(w, status, v)
 }
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	httpplatform.WriteError(w, r, status, code, message, nil)
 }
-func handleError(w http.ResponseWriter, err error) bool {
+func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return false
 	}
 	switch {
 	case errors.Is(err, application.ErrForbidden):
-		writeError(w, 403, "FORBIDDEN", "permission denied")
+		writeError(w, r, 403, "FORBIDDEN", "permission denied")
 	case errors.Is(err, application.ErrNotFound):
-		writeError(w, 404, "NOT_FOUND", "risk not found")
+		writeError(w, r, 404, "NOT_FOUND", "risk not found")
 	case errors.Is(err, application.ErrInvalidCommand):
-		writeError(w, 400, "INVALID_ARGUMENT", "invalid request")
+		writeError(w, r, 400, "INVALID_ARGUMENT", "invalid request")
 	default:
-		writeError(w, 500, "INTERNAL", "internal error")
+		writeError(w, r, 500, "INTERNAL", "internal error")
 	}
 	return true
 }

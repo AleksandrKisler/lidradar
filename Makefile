@@ -1,4 +1,4 @@
-.PHONY: build clean test
+.PHONY: build check clean fmt test vet
 
 BIN_DIR ?= bin
 COMMANDS := api worker scheduler ai-agent migrate
@@ -11,6 +11,15 @@ build:
 
 test:
 	go test ./...
+
+fmt:
+	gofmt -w backend
+
+vet:
+	go vet ./...
+
+check: vet test
+	go run ./backend/tools/archcheck -root backend
 
 clean:
 	rm -rf "$(BIN_DIR)"

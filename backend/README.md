@@ -22,14 +22,30 @@ deployment environment to one of `development`, `test`, `staging`, or
 LIDRADAR_ENV=development ./bin/lidradar-api
 ```
 
+Database-backed runtimes also require `LIDRADAR_DATABASE_URL`. Development and
+test default to the local Compose DSN; staging and production have no database
+default. `LIDRADAR_HTTP_ADDRESS`, pool sizes, connect timeout, and graceful
+shutdown timeout are optional typed settings.
+
 An absent or unsupported `LIDRADAR_ENV` prevents the process workload from
 starting and returns a non-zero exit status.
 
 The command writes `lidradar-api`, `lidradar-worker`, `lidradar-scheduler`,
-`lidradar-ai-agent`, and `lidradar-migrate` to `bin/`. The four long-running
-processes wait for `SIGINT` or `SIGTERM` and then shut down cleanly. The migrate
-command currently completes immediately; migration behavior is introduced by
-the dedicated foundation task.
+`lidradar-ai-agent`, and `lidradar-migrate` to `bin/`. The long-running
+processes handle `SIGINT` or `SIGTERM` and shut down cleanly. API, worker, and
+scheduler verify PostgreSQL during startup. The migrate command applies
+embedded immutable SQL migrations and rejects changed checksums.
+
+Start the complete local backend foundation with:
+
+```sh
+docker compose up --build
+```
+
+This starts PostgreSQL 18, applies migrations, waits for API readiness, and
+starts worker, scheduler, and an AI agent configured with local stubs. The API
+exposes `GET /health/live` and `GET /health/ready` on port 8080. No Telegram or
+AI provider receives data in this configuration.
 
 Business capabilities live below `internal`. The `risk` package is the
 reference module for the canonical layers:

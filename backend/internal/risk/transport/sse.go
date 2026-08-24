@@ -59,16 +59,16 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.radar.CanRead(r.Context(), a, t); handleError(w, err) {
+	if err := h.radar.CanRead(r.Context(), a, t); handleError(w, r, err) {
 		return
 	}
 	if h.events == nil {
-		writeError(w, 503, "UNAVAILABLE", "event stream unavailable")
+		writeError(w, r, 503, "UNAVAILABLE", "event stream unavailable")
 		return
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, 500, "INTERNAL", "streaming unsupported")
+		writeError(w, r, 500, "INTERNAL", "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")

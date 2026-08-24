@@ -8,11 +8,12 @@ import (
 	"syscall"
 
 	"lidradar/backend/platform/bootstrap"
+	platformruntime "lidradar/backend/platform/runtime"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	os.Exit(bootstrap.Run(ctx, "lidradar-scheduler", os.Stderr, bootstrap.Wait))
+	os.Exit(bootstrap.Run(ctx, "lidradar-scheduler", os.Stderr, platformruntime.WaitForDatabase))
 }

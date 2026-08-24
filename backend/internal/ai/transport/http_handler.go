@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"lidradar/backend/internal/ai/application"
+	httpplatform "lidradar/backend/platform/http"
 )
 
 type Handler struct{ Service application.Service }
@@ -50,11 +51,11 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			result, err = h.Service.Failed(r.Context(), id, secret, jobID(path, "/failed"), in.RunID, in.Error)
 		}
 	default:
-		http.NotFound(w, r)
+		httpplatform.WriteError(w, r, http.StatusNotFound, "ROUTE_NOT_FOUND", "Route not found", nil)
 		return
 	}
 	if err != nil {
-		writeError(w, err)
+		writeError(w, r, err)
 		return
 	}
 	if result == nil {
@@ -67,16 +68,22 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func jobID(path, suffix string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(path, "jobs/"), suffix)
 }
-func writeError(w http.ResponseWriter, err error) {
+func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusInternalServerError
+	code := "INTERNAL"
+	message := "Internal server error"
 	if errors.Is(err, application.ErrUnauthorized) {
 		status = http.StatusUnauthorized
+		code, message = "UNAUTHENTICATED", "Authentication required"
 	} else if errors.Is(err, application.ErrInvalid) {
 		status = http.StatusBadRequest
+		code, message = "INVALID_ARGUMENT", "Invalid request"
 	} else if errors.Is(err, application.ErrNotFound) {
 		status = http.StatusNotFound
+		code, message = "NOT_FOUND", "Resource not found"
 	} else if errors.Is(err, application.ErrLeaseLost) {
 		status = http.StatusConflict
+		code, message = "LEASE_LOST", "AI job lease was lost"
 	}
-	http.Error(w, http.StatusText(status), status)
+	httpplatform.WriteError(w, r, status, code, message, nil)
 }

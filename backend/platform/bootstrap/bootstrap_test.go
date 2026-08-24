@@ -17,8 +17,8 @@ func TestRunSuccess(t *testing.T) {
 	if code := Run(context.Background(), "test-service", &stderr, Complete); code != 0 {
 		t.Fatalf("Run() code = %d, want 0", code)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("Run() stderr = %q, want empty", stderr.String())
+	if !strings.Contains(stderr.String(), `"event":"runtime.starting"`) || !strings.Contains(stderr.String(), `"event":"runtime.stopped"`) {
+		t.Fatalf("Run() logs = %q", stderr.String())
 	}
 }
 
@@ -34,8 +34,8 @@ func TestRunFailure(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("Run() code = %d, want 1", code)
 	}
-	if got := stderr.String(); got != "test-service: startup failed\n" {
-		t.Fatalf("Run() stderr = %q", got)
+	if got := stderr.String(); !strings.Contains(got, `"event":"runtime.failed"`) || !strings.Contains(got, "startup failed") {
+		t.Fatalf("Run() logs = %q", got)
 	}
 }
 
@@ -48,8 +48,8 @@ func TestWaitTreatsCancellationAsGracefulShutdown(t *testing.T) {
 	if code := Run(ctx, "test-service", &stderr, Wait); code != 0 {
 		t.Fatalf("Run() code = %d, want 0", code)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("Run() stderr = %q, want empty", stderr.String())
+	if !strings.Contains(stderr.String(), `"event":"runtime.stopped"`) {
+		t.Fatalf("Run() logs = %q", stderr.String())
 	}
 }
 

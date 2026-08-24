@@ -1,6 +1,6 @@
 # Аудит выполнения задач LR-BE-0001 — LR-BE-1509
 
-Дата аудита: 2026-08-22. Статусы сверены с кодом и тестами текущей ветки, а не
+Дата аудита: 2026-08-24. Статусы сверены с кодом и тестами текущей ветки, а не
 только с историей merge. `Частично` означает, что контракт или in-memory
 реализация есть, но production-требование (прежде всего PostgreSQL) не закрыто.
 
@@ -22,18 +22,20 @@
   компилируются.
 - **LR-BE-0102 — выполнено.** Реализована типизированная конфигурация с
   валидацией и тестами.
-- **LR-BE-0103 — частично.** Bootstrap использует `slog`, но сквозной JSON
-  logging и политика редактирования чувствительных полей не проверены.
-- **LR-BE-0104 — не выполнено.** PostgreSQL platform и pgx-подключение
-  отсутствуют.
-- **LR-BE-0105 — не выполнено.** Нет migration framework и SQL-миграций.
-- **LR-BE-0106 — частично.** HTTP server поднимается, но общей platform-обвязки
-  chi/middleware нет.
-- **LR-BE-0107 — частично.** Отдельные handlers формируют JSON-ошибки, единого
-  error envelope с trace ID нет.
-- **LR-BE-0108 — не выполнено.** Docker Compose отсутствует.
-- **LR-BE-0109 — частично.** Есть GitHub workflow architecture check; полной CI
-  проверки build/test/migrations нет.
+- **LR-BE-0103 — выполнено.** Все runtime используют JSON `slog` с полями
+  service/environment/event; HTTP middleware добавляет request/trace correlation.
+- **LR-BE-0104 — выполнено.** Добавлен `pgxpool` с типизированными limits,
+  connect timeout, startup ping, readiness и graceful close.
+- **LR-BE-0105 — выполнено.** Embedded SQL migrations применяются транзакционно,
+  сериализуются advisory lock и защищены immutable SHA-256 checksum.
+- **LR-BE-0106 — выполнено.** Общий `chi` HTTP platform поднимает live/ready,
+  middleware и graceful shutdown с таймаутом.
+- **LR-BE-0107 — выполнено.** Platform и feature handlers используют единый
+  error envelope с безопасным message и trace ID.
+- **LR-BE-0108 — выполнено.** `compose.yaml` поднимает PostgreSQL 18, migrate,
+  API, worker, scheduler и AI agent со stub provider; конфигурация Compose валидна.
+- **LR-BE-0109 — выполнено.** Backend CI проверяет gofmt, vet, staticcheck,
+  race tests, architecture, migrations, API readiness, OpenAPI, binaries и Docker image.
 
 ## Telegram feasibility spike
 
@@ -217,7 +219,7 @@
 ## Итог аудита
 
 Этап 15 предоставляет воспроизводимый benchmark-контур, но его Exit Gate ещё не
-пройден. Главный общий долг этапов 1–14 — отсутствие PostgreSQL persistence,
-миграций, tenant RLS/composite FK и реальных connector E2E. Поэтому имеющиеся
+пройден. Главный общий долг этапов 2–14 — отсутствие PostgreSQL business repositories,
+tenant RLS/composite FK и реальных connector E2E. Поэтому имеющиеся
 in-memory реализации и unit tests нельзя считать production-ready вертикальным
 slice, даже когда отдельная логика задачи реализована полностью.

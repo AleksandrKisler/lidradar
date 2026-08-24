@@ -1,0 +1,67 @@
+name: Backend
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: lidradar
+          POSTGRES_USER: lidradar
+          POSTGRES_PASSWORD: lidradar
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lidradar -d lidradar"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      LIDRADAR_ENV: test
+      LIDRADAR_DATABASE_URL: postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable
+      LIDRADAR_HTTP_ADDRESS: 127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Check formatting
+        run: test -z "$(gofmt -l backend)"
+      - name: Vet
+        run: go vet ./...
+      - name: Static analysis
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...
+      - name: Unit tests
+        run: go test -race -count=1 ./...
+      - name: Architecture check
+        run: go run ./backend/tools/archcheck -root backend
+      - name: Migration smoke
+        run: go run ./backend/cmd/migrate
+      - name: API readiness smoke
+        run: |
+          go build -o /tmp/lidradar-api ./backend/cmd/api
+          /tmp/lidradar-api >api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:8080/health/ready && exit 0
+            sleep 1
+          done
+          cat api.log
+          exit 1
+      - name: Validate OpenAPI
+        run: npx --yes @redocly/cli@1.34.5 lint contracts/openapi/openapi.yaml
+      - name: Build runtime binaries
+        run: go build ./backend/cmd/...
+      - name: Build API image
+        run: docker build --build-arg COMMAND=api -t lidradar-api:test .
