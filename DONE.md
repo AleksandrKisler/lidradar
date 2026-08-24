@@ -84,9 +84,41 @@
 - **LR-BE-0305 — выполнено.** Unit и isolated PostgreSQL tests покрывают
   nullable цены без догадок, OWNER/MANAGER, tenant A/B, foreign Location,
   cross-tenant 404 и отсутствие чужих данных в list.
-- **LR-BE-0401 — LR-BE-0412 — не выполнены.** Нет ChannelConnection,
-  connection health, connector interface/implementations, RawEvent persist-first
-  хранения, Integration API и обязательных duplicate/invalid-payload тестов.
+- **LR-BE-0401 — выполнено.** Добавлен tenant-scoped `ChannelConnection` с
+  provider, capabilities, optional Location, безопасным verifier hash и
+  PostgreSQL constraints/composite tenant FK.
+- **LR-BE-0402 — выполнено.** Health хранит `ACTIVE`, `DEGRADED`, `ERROR` или
+  `DISCONNECTED`, timestamps последнего события/успеха/ошибки и безопасный error
+  code; valid event восстанавливает здоровье development-коннектора.
+- **LR-BE-0403 — выполнено.** Domain-контракт Connector определяет Provider,
+  VerifyEvent, NormalizeEvent и Health; отдельная capability извлекает внешний
+  event ID до постановки normalize work.
+- **LR-BE-0404 — выполнено.** `raw_events` хранит JSONB payload и SHA-256,
+  tenant/connection/provider scope, processing status и уникальность
+  `(connection_id, external_event_id)`.
+- **LR-BE-0405 — выполнено.** Короткая PostgreSQL-транзакция атомарно сохраняет
+  новый RawEvent, ровно один `raw_event_normalization_work` и health; webhook
+  отвечает до Normalize/AI. Общая leased job queue остаётся задачей этапа 6.
+- **LR-BE-0406 — LR-BE-0408 — выполнены.** TEST, IMPORT и GENERIC_WEBHOOK имеют
+  детерминированные local adapters с secret verification, строгим fixture
+  envelope, external ID и normalization fixture.
+- **LR-BE-0409 — частично.** Connected Business Bot stub проверяет официальный
+  secret-token header и fixture updates `business_connection`,
+  `business_message`, edit/delete без сетевых вызовов. Health намеренно
+  `DEGRADED/TELEGRAM_SPIKE_NOT_VERIFIED`: обязательный real-account spike выше
+  по-прежнему не выполнен.
+- **LR-BE-0410 — выполнено.** OWNER-only connect/list/idempotent disconnect/health
+  API подключён к runtime; cross-tenant ID возвращается как missing. Webhook
+  endpoint аутентифицируется provider secret без user session.
+- **LR-BE-0411 — выполнено.** Unit, repository и сквозной HTTP/PostgreSQL tests
+  доказывают, что 10 одинаковых доставок дают один RawEvent и одну normalize
+  work запись; тот же external ID с другими bytes даёт conflict.
+- **LR-BE-0412 — выполнено.** Неверный secret ничего не сохраняет; корректно
+  аутентифицированный malformed payload сохраняется один раз как `FAILED` без
+  normalize work, включая lossless base64 wrapper для non-JSON bytes.
+- **Exit Gate этапа 4 — частично.** Persist-once, быстрый `202` и независимость
+  от downstream AI доказаны для local/fixture adapters. Настоящий Telegram
+  update нельзя подтвердить до выполнения feasibility spike с credentials.
 - **LR-BE-0501 — LR-BE-0512 — не выполнены.** Contact, ExternalIdentity,
   Conversation, Message, canonical ingestion, revision/read API и connector
   fixtures отсутствуют.

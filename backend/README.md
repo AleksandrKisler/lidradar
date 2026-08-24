@@ -53,8 +53,13 @@ business-hours setup routes. OWNER can also manage exact-decimal, optionally
 Location-specific Service Catalog items through `/api/v1/services`; deleting a
 service deactivates it without erasing history. Tenant-scoped requests select
 an Organization with the `X-Tenant-ID` header obtained from
-`GET /api/v1/auth/me`. No Telegram or AI provider receives data in this
-configuration.
+`GET /api/v1/auth/me`. OWNER can manage channel connections through
+`/api/v1/integrations`; authenticated provider events enter through
+`/api/v1/webhooks/{provider}/{tenantId}/{connectionId}` and are persisted before
+normalization work is scheduled. TEST, IMPORT, and GENERIC_WEBHOOK use local
+adapters. The Telegram Connected Business adapter validates fixtures only and
+reports `DEGRADED` until the real-account spike is completed. No Telegram or AI
+provider receives data in this configuration.
 
 Business capabilities live below `internal`. The `risk` package is the
 reference module for the canonical layers:

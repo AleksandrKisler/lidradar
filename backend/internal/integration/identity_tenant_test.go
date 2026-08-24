@@ -17,6 +17,9 @@ import (
 	catalogapplication "lidradar/backend/internal/catalog/application"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	catalogtransport "lidradar/backend/internal/catalog/transport"
+	connectorapplication "lidradar/backend/internal/connector/application"
+	connectorinfrastructure "lidradar/backend/internal/connector/infrastructure"
+	connectortransport "lidradar/backend/internal/connector/transport"
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
@@ -42,9 +45,13 @@ func newAPIFixture(t *testing.T) apiFixture {
 	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
+	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
 	permissions := application.NewPermissionService(tenantRepository)
 	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now)
 	catalogService := catalogapplication.NewService(catalogRepository, permissions, ids.Generator{}, time.Now)
+	connectorService := connectorapplication.NewService(
+		connectorRepository, permissions, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
+	)
 	identityService := identityapplication.NewService(
 		identityRepository, cryptoplatform.PasswordHasher{}, ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
 	)
@@ -54,6 +61,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 		identityService, tenantService, identitytransport.CookieConfiguration{TTL: 24 * time.Hour},
 	).Router())
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, resolver).Router())
+	connectorHandler := connectortransport.NewHandler(connectorService, resolver)
+	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
+	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
 	return apiFixture{handler: router, tenantService: tenantService, pool: pool}
 }

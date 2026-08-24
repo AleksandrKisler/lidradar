@@ -244,6 +244,105 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/integrations:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: List channel connections in the selected tenant
+      operationId: listChannelConnections
+      responses:
+        '200':
+          description: Tenant-scoped channel connections and their last persisted health state.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ChannelConnectionList' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/integrations/{provider}/connect:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/ConnectorProvider' }
+    post:
+      summary: Create a channel connection
+      description: OWNER-only. The webhook secret is accepted once and persisted only as a SHA-256 verifier.
+      operationId: connectChannel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectChannelRequest' }
+      responses:
+        '201':
+          description: Connection created. Telegram remains DEGRADED until its real-account spike is verified.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ChannelConnection' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/integrations/{connectionId}:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/ConnectionId' }
+    delete:
+      summary: Disconnect a channel connection
+      description: OWNER-only, idempotent soft disconnect. Raw-event history is preserved.
+      operationId: disconnectChannel
+      responses:
+        '204': { description: Connection disconnected or already disconnected. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/integrations/{connectionId}/health:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/ConnectionId' }
+    get:
+      summary: Get the last persisted channel health
+      operationId: getChannelHealth
+      responses:
+        '200':
+          description: Tenant-scoped connection health.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionHealth' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/webhooks/{provider}/{tenantId}/{connectionId}:
+    parameters:
+      - { $ref: '#/components/parameters/ConnectorProvider' }
+      - { $ref: '#/components/parameters/WebhookTenantId' }
+      - { $ref: '#/components/parameters/ConnectionId' }
+      - name: X-LidRadar-Webhook-Secret
+        in: header
+        required: false
+        description: Required for TEST, IMPORT, and GENERIC_WEBHOOK connections.
+        schema: { type: string, minLength: 16, maxLength: 256 }
+      - name: X-Telegram-Bot-Api-Secret-Token
+        in: header
+        required: false
+        description: Required for CONNECTED_BUSINESS_BOT fixture events.
+        schema: { type: string, minLength: 16, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$' }
+    post:
+      summary: Persist a provider webhook event
+      description: Authenticates first, then atomically persists the raw event and pending normalization work. Returns before normalization or AI processing. Body limit is 1 MiB.
+      operationId: receiveChannelWebhook
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '202':
+          description: Event persisted, or a validly authenticated malformed event persisted as FAILED.
+          content: { application/json: { schema: { $ref: '#/components/schemas/WebhookReceipt' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/WebhookUnauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The external event ID already exists with a different payload., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Webhook body exceeds 1 MiB., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: Connection is disconnected or its provider adapter is unavailable., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/radar:
     get:
       summary: Get Radar summary
@@ -370,11 +469,15 @@ components:
     TenantId: { name: X-Tenant-ID, in: header, required: true, description: Explicit Organization tenant selected from /auth/me memberships., schema: { type: string, format: uuid } }
     LocationId: { name: locationId, in: path, required: true, schema: { type: string, format: uuid } }
     ServiceId: { name: serviceId, in: path, required: true, schema: { type: string, format: uuid } }
+    ConnectorProvider: { name: provider, in: path, required: true, schema: { $ref: '#/components/schemas/ConnectorProvider' } }
+    ConnectionId: { name: connectionId, in: path, required: true, schema: { type: string, format: uuid } }
+    WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
   responses:
     BadRequest: { description: 'Request body, tenant selector, or domain value is invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Unauthorized: { description: 'Opaque session cookie is missing, expired, revoked, or invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    WebhookUnauthorized: { description: The provider webhook secret is missing or invalid. The payload is not persisted., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Forbidden: { description: Request origin is not trusted or Membership does not grant the required named permission., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     NotFound: { description: Resource does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: A unique resource already exists., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -548,6 +651,67 @@ components:
         priceTo: { type: [string, 'null'], pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$' }
         currency: { type: string, pattern: '^[A-Za-z]{3}$' }
         active: { type: boolean, description: May be set true to reactivate an item; DELETE sets it false. }
+    ConnectorProvider:
+      type: string
+      enum: [TEST, IMPORT, GENERIC_WEBHOOK, CONNECTED_BUSINESS_BOT]
+    ConnectionStatus:
+      type: string
+      enum: [ACTIVE, DEGRADED, ERROR, DISCONNECTED]
+    ConnectorCapability:
+      type: string
+      enum:
+        - CAN_RECEIVE_MESSAGES
+        - CAN_SEND_MESSAGES
+        - CAN_IMPORT_HISTORY
+        - CAN_RECEIVE_EDITS
+        - CAN_RECEIVE_DELETES
+        - CAN_RECEIVE_ATTACHMENTS
+        - CAN_IDENTIFY_CONTACT
+    ChannelConnection:
+      type: object
+      required: [id, locationId, provider, name, status, capabilities, lastEventAt, lastSuccessAt, lastErrorAt, lastErrorCode, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        locationId: { type: [string, 'null'], format: uuid }
+        provider: { $ref: '#/components/schemas/ConnectorProvider' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        status: { $ref: '#/components/schemas/ConnectionStatus' }
+        capabilities: { type: array, minItems: 1, uniqueItems: true, items: { $ref: '#/components/schemas/ConnectorCapability' } }
+        lastEventAt: { type: [string, 'null'], format: date-time }
+        lastSuccessAt: { type: [string, 'null'], format: date-time }
+        lastErrorAt: { type: [string, 'null'], format: date-time }
+        lastErrorCode: { type: [string, 'null'], maxLength: 100 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ChannelConnectionList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/ChannelConnection' } } }
+    ConnectionHealth:
+      type: object
+      required: [status, lastEventAt, lastSuccessAt, lastErrorAt, lastErrorCode, checkedAt]
+      properties:
+        status: { $ref: '#/components/schemas/ConnectionStatus' }
+        lastEventAt: { type: [string, 'null'], format: date-time }
+        lastSuccessAt: { type: [string, 'null'], format: date-time }
+        lastErrorAt: { type: [string, 'null'], format: date-time }
+        lastErrorCode: { type: [string, 'null'], maxLength: 100 }
+        checkedAt: { type: string, format: date-time }
+    ConnectChannelRequest:
+      type: object
+      additionalProperties: false
+      required: [name, webhookSecret]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        locationId: { type: [string, 'null'], format: uuid }
+        webhookSecret: { type: string, minLength: 16, maxLength: 256, writeOnly: true }
+    WebhookReceipt:
+      type: object
+      required: [rawEventId, status, duplicate]
+      properties:
+        rawEventId: { type: string, format: uuid }
+        status: { type: string, enum: [RECEIVED, FAILED] }
+        duplicate: { type: boolean }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }

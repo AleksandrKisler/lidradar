@@ -77,6 +77,43 @@ price is configured, both stored boundaries remain SQL `NULL`; later
 Opportunity logic must therefore leave potential revenue `NULL` rather than
 inventing or defaulting an amount.
 
+### Connector Core
+
+Connector Core owns tenant-scoped `ChannelConnection`, its persisted health,
+immutable provider `RawEvent` receipts, and the durable handoff to later
+normalization. Supported connection states are `ACTIVE`, `DEGRADED`, `ERROR`,
+and `DISCONNECTED`. Every repository operation carries both tenant and entity
+identifiers; an optional Location must belong to the same tenant. Disconnect is
+an idempotent soft operation so receipt history remains available.
+
+Every provider adapter implements `Provider`, `VerifyEvent`, `NormalizeEvent`,
+and `Health`; an event-identifier capability extracts the provider dedup key
+before normalization. The webhook path verifies the stored SHA-256 secret
+digest first. An authentication failure returns `401` and persists nothing.
+For an authenticated request, one short PostgreSQL transaction locks the
+connection, inserts the `RawEvent`, inserts exactly one pending normalization
+work record for a valid new event, and updates connection health. The unique
+key is `(connection_id, external_event_id)`. A duplicate with the same payload
+returns the original receipt; reuse of that external identifier with different
+bytes is a conflict.
+
+The HTTP handler returns `202` after this transaction and never calls
+normalization, downstream AI, or another external service. An authenticated
+malformed payload is retained once as `FAILED` with `INVALID_PAYLOAD` and
+creates no normalization work. Non-JSON bytes are represented losslessly by a
+base64 JSON wrapper because PostgreSQL owns the raw payload as `JSONB`. The
+stage-four `raw_event_normalization_work` table is only the durable handoff;
+the generic leased job runtime remains owned by stage six.
+
+OWNER manages list/connect/disconnect/health under `/api/v1/integrations`.
+TEST, IMPORT, and GENERIC_WEBHOOK are deterministic local adapters sharing the
+versioned fixture envelope. The Connected Business Bot adapter only validates
+the current Telegram update/header shape from fixtures and performs no network
+request. Its health remains `DEGRADED` with
+`TELEGRAM_SPIKE_NOT_VERIFIED` until the required real-account feasibility spike
+and its report exist; therefore the real-Telegram exit gate is not claimed by
+the stub implementation.
+
 ### NO_RESPONSE risk
 
 The Risk module owns the `Risk` aggregate and active-risk deduplication. A

@@ -11,6 +11,9 @@ import (
 	catalogapplication "lidradar/backend/internal/catalog/application"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	catalogtransport "lidradar/backend/internal/catalog/transport"
+	connectorapplication "lidradar/backend/internal/connector/application"
+	connectorinfrastructure "lidradar/backend/internal/connector/infrastructure"
+	connectortransport "lidradar/backend/internal/connector/transport"
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
@@ -44,9 +47,13 @@ func run(ctx context.Context, configuration config.Config) error {
 	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
+	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
 	permissionService := tenantapplication.NewPermissionService(tenantRepository)
 	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now)
 	catalogService := catalogapplication.NewService(catalogRepository, permissionService, ids.Generator{}, time.Now)
+	connectorService := connectorapplication.NewService(
+		connectorRepository, permissionService, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
+	)
 	identityService := identityapplication.NewService(
 		identityRepository,
 		cryptoplatform.PasswordHasher{},
@@ -67,6 +74,9 @@ func run(ctx context.Context, configuration config.Config) error {
 		identitytransport.CookieConfiguration{Secure: configuration.Auth.CookieSecure, TTL: configuration.Auth.SessionTTL},
 	).Router())
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, principalResolver).Router())
+	connectorHandler := connectortransport.NewHandler(connectorService, principalResolver)
+	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
+	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, principalResolver).Router())
 	return httpplatform.Serve(ctx, configuration.HTTP, router, logger)
 }
