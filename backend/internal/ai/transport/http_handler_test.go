@@ -17,7 +17,7 @@ type ids struct{ n int }
 func (i *ids) NewID() string { i.n++; return fmt.Sprint(i.n) }
 func TestClaimAPIAuthenticatesNode(t *testing.T) {
 	ctx := context.Background()
-	s := application.NewService(infrastructure.NewMemoryStore(), &ids{}, func() time.Time { return time.Now().UTC() }, 0)
+	s := application.NewService(infrastructure.NewTestMemoryStore(), &ids{}, func() time.Time { return time.Now().UTC() }, 0)
 	n, err := s.RegisterNode(ctx, "home", "secret")
 	if err != nil {
 		t.Fatal(err)

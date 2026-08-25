@@ -12,6 +12,8 @@ import (
 	"lidradar/backend/internal/ai/domain"
 )
 
+// MemoryStore — внутрипроцессный испытательный адаптер. Рабочим командам нельзя
+// использовать его: метаданные ИИ требуют долговечного хранения в PostgreSQL.
 type MemoryStore struct {
 	mu        sync.Mutex
 	nodes     map[string]domain.Node
@@ -21,7 +23,7 @@ type MemoryStore struct {
 	summaries map[string]domain.ConversationSummary
 }
 
-func NewMemoryStore() *MemoryStore {
+func NewTestMemoryStore() *MemoryStore {
 	return &MemoryStore{nodes: map[string]domain.Node{}, jobs: map[string]domain.Job{}, runs: map[string]domain.Run{}, summaries: map[string]domain.ConversationSummary{}}
 }
 func (s *MemoryStore) RegisterNode(_ context.Context, n domain.Node) error {

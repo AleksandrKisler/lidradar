@@ -12,14 +12,15 @@ import (
 	"lidradar/backend/internal/risk/domain"
 )
 
-// MemoryRepository is a concurrency-safe adapter for tests and local wiring.
-// PostgreSQL remains the required production source of truth.
+// MemoryRepository — потокобезопасный испытательный адаптер. Он намеренно
+// исключён из рабочих команд: производственным источником истины остаётся
+// PostgreSQL.
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]domain.Risk
 }
 
-func NewMemoryRepository() *MemoryRepository {
+func NewTestMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string]domain.Risk)}
 }
 

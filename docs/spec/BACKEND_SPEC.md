@@ -19,6 +19,11 @@ behavior should be added here, or linked from here, before it is implemented.
   transaction with a clearly identified owner.
 - External or asynchronous side effects must account for retries and
   idempotency; they must not override PostgreSQL as the authoritative state.
+- `GET /health/ready` подтверждает не только доступность PostgreSQL, но и точное
+  совпадение встроенных миграций с журналом `schema_migrations`. Успешный ответ
+  сообщает безопасные версию/ревизию сборки и последнюю миграцию.
+- Хранилища `NewTestMemory...` являются только испытательными адаптерами.
+  Рабочим командам в `backend/cmd` запрещено использовать их вместо PostgreSQL.
 
 ## Feature specifications
 
@@ -292,6 +297,11 @@ Scheduler захватывает наступившие `scheduled_checks` с п
 строк, создаёт дедуплицированное задание и отмечает проверку поставленной в
 очередь в одной транзакции. Повторный запуск не создаёт второе задание.
 
+До появления административной панели worker раз в минуту журналирует только
+сводные количества `PENDING`, `PROCESSING`, `RETRY`, `DEAD`, истёкших аренд и
+просроченных `scheduled_checks`. Полезные нагрузки, сообщения и другие данные
+организаций в диагностическую запись не попадают.
+
 Изменение состояния и `outbox_events` записываются одной транзакцией владельца
 бизнес-операции. Событие имеет неизменяемые ID, type, version, occurredAt,
 tenantId, aggregate, traceId и data. Диспетчер доставляет его как минимум один
@@ -323,6 +333,9 @@ only tenant-scoped invalidation signals after durable changes; clients always
 refetch the authoritative REST read model, and losing an SSE signal never loses
 business data. The versioned HTTP contract is maintained in
 [`../../contracts/openapi/openapi.yaml`](../../contracts/openapi/openapi.yaml).
+Целевые операции, ещё не подключённые в `cmd/api`, имеют расширение
+`x-lidradar-runtime-status: planned`; пути без этого расширения входят в
+действующую поверхность API.
 
 ### Telegram risk notifications
 

@@ -33,7 +33,7 @@ func storeRisk(t *testing.T, repo *infrastructure.MemoryRepository, id, tenant s
 }
 
 func TestRadarOrdersSummarizesAndChangesRisk(t *testing.T) {
-	repo := infrastructure.NewMemoryRepository()
+	repo := infrastructure.NewTestMemoryRepository()
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	storeRisk(t, repo, "high", "tenant", domain.SeverityHigh, now.Add(-2*time.Hour))
 	storeRisk(t, repo, "critical", "tenant", domain.SeverityCritical, now.Add(-time.Hour))
@@ -66,7 +66,7 @@ func TestRadarOrdersSummarizesAndChangesRisk(t *testing.T) {
 }
 
 func TestRadarRejectsCrossTenantAndMissingPermission(t *testing.T) {
-	repo := infrastructure.NewMemoryRepository()
+	repo := infrastructure.NewTestMemoryRepository()
 	storeRisk(t, repo, "foreign", "other", domain.SeverityHigh, time.Now())
 	radar := application.NewRadar(repo, permissions{"user/tenant/risks.read": true}, nil, time.Now)
 	if _, err := radar.Get(context.Background(), "user", "tenant", "foreign"); !errors.Is(err, application.ErrNotFound) {

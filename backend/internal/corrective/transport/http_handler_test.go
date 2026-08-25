@@ -25,7 +25,7 @@ type ids struct{ n int }
 
 func (i *ids) NewID() string { i.n++; return fmt.Sprintf("id-%d", i.n) }
 func TestHTTPFlowAndRequiredIdempotencyKey(t *testing.T) {
-	store := infrastructure.NewMemoryStore()
+	store := infrastructure.NewTestMemoryStore()
 	store.AddRisk("tenant", "risk", "opportunity")
 	handler := transport.NewHandler(application.NewService(store, allow{}, &ids{}, func() time.Time { return time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC) }), principal{}).Router()
 	req := httptest.NewRequest("POST", "/api/v1/risks/risk/recommendation", strings.NewReader(`{"riskType":"NO_RESPONSE"}`))

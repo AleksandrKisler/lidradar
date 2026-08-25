@@ -2,6 +2,10 @@ openapi: 3.1.0
 info:
   title: LidRadar API
   version: 1.0.0
+  description: >-
+    Целевой контракт MVP. Пути без расширения x-lidradar-runtime-status уже
+    подключены к рабочему API. Значение planned означает, что контракт
+    зафиксирован для будущего этапа, но маршрут ещё не доступен в cmd/api.
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -429,6 +433,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Переход назад, повторное открытие или преждевременный WON запрещены.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/radar:
+    x-lidradar-runtime-status: planned
     get:
       summary: Get Radar summary
       operationId: getRadarSummary
@@ -440,6 +445,7 @@ paths:
               schema: { $ref: '#/components/schemas/RadarSummary' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks:
+    x-lidradar-runtime-status: planned
     get:
       summary: List tenant risks
       operationId: listRisks
@@ -460,6 +466,7 @@ paths:
                   nextCursor: { type: [string, 'null'] }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks/{riskId}:
+    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
     get:
       summary: Get Risk detail
@@ -470,6 +477,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/RiskDetail' } } }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/acknowledge:
+    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
     post:
       summary: Acknowledge a Risk
@@ -479,6 +487,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/resolve:
+    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
     post:
       summary: Resolve a Risk
@@ -488,6 +497,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/recommendation:
+    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
     post:
       summary: Ensure a deterministic Risk recommendation
@@ -497,6 +507,7 @@ paths:
         '200': { description: Deterministic template recommendation, content: { application/json: { schema: { $ref: '#/components/schemas/Recommendation' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/actions:
+    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
     post:
       summary: Record a corrective Action
@@ -506,6 +517,7 @@ paths:
         '201': { description: Append-only Action created, content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } } }
         '409': { description: Idempotency key conflict }
   /api/v1/opportunities/{opportunityId}/outcomes:
+    x-lidradar-runtime-status: planned
     parameters:
       - { name: opportunityId, in: path, required: true, schema: { type: string } }
       - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -517,6 +529,7 @@ paths:
         '201': { description: Append-only Outcome created, content: { application/json: { schema: { $ref: '#/components/schemas/Outcome' } } } }
         '409': { description: Idempotency key conflict }
   /api/v1/events:
+    x-lidradar-runtime-status: planned
     get:
       summary: Stream tenant invalidation signals
       operationId: streamInvalidations
@@ -525,6 +538,7 @@ paths:
         '200': { description: "text/event-stream containing risk.changed, risk.acknowledged, and risk.resolved signals" }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/opportunities/{opportunityId}/revenue:
+    x-lidradar-runtime-status: planned
     parameters:
       - { name: opportunityId, in: path, required: true, schema: { type: string } }
       - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -536,6 +550,7 @@ paths:
         '201': { description: Confirmed revenue and its unique attribution, content: { application/json: { schema: { $ref: '#/components/schemas/RevenueConfirmation' } } } }
         '409': { description: Idempotency key conflict }
   /api/v1/revenue/confirmed-recovered:
+    x-lidradar-runtime-status: planned
     get:
       summary: Get confirmed recovered revenue
       operationId: getConfirmedRecoveredRevenue

@@ -41,6 +41,7 @@ import (
 	cryptoplatform "lidradar/backend/platform/crypto"
 	httpplatform "lidradar/backend/platform/http"
 	"lidradar/backend/platform/ids"
+	platformpostgres "lidradar/backend/platform/postgres"
 )
 
 type apiFixture struct {
@@ -95,7 +96,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 		identityRepository, cryptoplatform.PasswordHasher{}, ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
 	)
 	resolver := identitytransport.Resolver{Auth: identityService}
-	router := httpplatform.NewRouter("lidradar-api", slog.New(slog.NewTextHandler(io.Discard, nil)), pool)
+	router := httpplatform.NewRouter(
+		"lidradar-api", slog.New(slog.NewTextHandler(io.Discard, nil)),
+		platformpostgres.NewSchemaReadiness(pool),
+	)
 	router.Mount("/api/v1/auth", identitytransport.NewHandler(
 		identityService, tenantService, identitytransport.CookieConfiguration{TTL: 24 * time.Hour},
 	).Router())

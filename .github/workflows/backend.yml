@@ -41,8 +41,8 @@ jobs:
         run: go vet ./...
       - name: Static analysis
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...
-      - name: Unit tests
-        run: go test -race -count=1 ./...
+      - name: Full tests with PostgreSQL
+        run: make test-db GO_TEST_FLAGS="-race -count=1"
       - name: Architecture check
         run: go run ./backend/tools/archcheck -root backend
       - name: Migration smoke
@@ -64,4 +64,9 @@ jobs:
       - name: Build runtime binaries
         run: go build ./backend/cmd/...
       - name: Build API image
-        run: docker build --build-arg COMMAND=api -t lidradar-api:test .
+        run: >-
+          docker build
+          --build-arg COMMAND=api
+          --build-arg VERSION=ci
+          --build-arg REVISION=${{ github.sha }}
+          -t lidradar-api:test .

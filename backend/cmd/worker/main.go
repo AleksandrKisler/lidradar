@@ -26,8 +26,9 @@ import (
 )
 
 const (
-	idleInterval  = 500 * time.Millisecond
-	errorInterval = time.Second
+	idleInterval       = 500 * time.Millisecond
+	errorInterval      = time.Second
+	diagnosticInterval = time.Minute
 )
 
 func main() {
@@ -81,8 +82,14 @@ func run(ctx context.Context, configuration config.Config) error {
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)
+	nextDiagnostics := time.Time{}
 
 	for {
+		now := time.Now().UTC()
+		if !now.Before(nextDiagnostics) {
+			logQueueStats(ctx, logger, jobStore, now)
+			nextDiagnostics = now.Add(diagnosticInterval)
+		}
 		dispatched, dispatchErr := dispatcher.RunOne(ctx)
 		if dispatchErr != nil && ctx.Err() == nil {
 			logger.Error("Ошибка исходящего журнала", "event", "outbox.failed", "error", dispatchErr)
@@ -107,6 +114,32 @@ func run(ctx context.Context, configuration config.Config) error {
 			return nil
 		}
 	}
+}
+
+func logQueueStats(
+	ctx context.Context,
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+	},
+	store *jobsinfrastructure.PostgresStore,
+	at time.Time,
+) {
+	stats, err := store.QueueStats(ctx, at)
+	if err != nil {
+		logger.Warn("Не удалось прочитать состояние очереди", "event", "background.queue.diagnostics_failed", "error", err)
+		return
+	}
+	logger.Info(
+		"Состояние очереди фоновых заданий",
+		"event", "background.queue.status",
+		"jobs_pending", stats.Pending,
+		"jobs_processing", stats.Processing,
+		"jobs_retry", stats.Retry,
+		"jobs_dead", stats.Dead,
+		"jobs_expired_leases", stats.ExpiredLeases,
+		"scheduled_checks_overdue", stats.OverdueScheduled,
+	)
 }
 
 func wait(ctx context.Context, duration time.Duration) bool {

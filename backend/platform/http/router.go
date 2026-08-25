@@ -1,19 +1,15 @@
 package httpplatform
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	"lidradar/backend/platform/buildinfo"
+	"lidradar/backend/platform/health"
 	"lidradar/backend/platform/ids"
 )
-
-// Readiness is implemented by critical runtime dependencies such as PostgreSQL.
-type Readiness interface {
-	Ping(context.Context) error
-}
 
 type routerOptions struct{ allowedOrigins []string }
 
@@ -30,7 +26,7 @@ func WithAllowedOrigins(origins []string) RouterOption {
 
 // NewRouter creates the shared platform router. Feature routers are mounted by
 // the API composition root after these platform routes and middleware exist.
-func NewRouter(service string, logger *slog.Logger, readiness Readiness, options ...RouterOption) *chi.Mux {
+func NewRouter(service string, logger *slog.Logger, readiness health.Checker, options ...RouterOption) *chi.Mux {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -51,11 +47,23 @@ func NewRouter(service string, logger *slog.Logger, readiness Readiness, options
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": service})
 	})
 	router.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
-		if readiness == nil || readiness.Ping(r.Context()) != nil {
+		if readiness == nil {
 			WriteError(w, r, http.StatusServiceUnavailable, "SERVICE_NOT_READY", "Service is not ready", nil)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "ready", "service": service})
+		status, err := readiness.Check(r.Context())
+		if err != nil {
+			WriteError(w, r, http.StatusServiceUnavailable, "SERVICE_NOT_READY", "Service is not ready", nil)
+			return
+		}
+		build := buildinfo.Current()
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"status": "ready", "service": service,
+			"build": map[string]any{
+				"version": build.Version, "revision": build.Revision, "modified": build.Modified,
+			},
+			"databaseMigration": status.DatabaseMigration,
+		})
 	})
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, http.StatusNotFound, "ROUTE_NOT_FOUND", "Route not found", nil)

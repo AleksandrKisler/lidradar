@@ -13,6 +13,9 @@ type idempotency struct {
 	hash   [32]byte
 	result application.Confirmation
 }
+
+// MemoryStore — внутрипроцессный испытательный адаптер. Рабочим командам нельзя
+// использовать его: выручка требует транзакционного хранения в PostgreSQL.
 type MemoryStore struct {
 	mu                       sync.Mutex
 	opportunities            map[string]bool
@@ -22,7 +25,7 @@ type MemoryStore struct {
 	audits                   []application.AuditRecord
 }
 
-func NewMemoryStore() *MemoryStore {
+func NewTestMemoryStore() *MemoryStore {
 	return &MemoryStore{opportunities: map[string]bool{}, risks: map[string]application.RelatedFact{}, actions: map[string]application.RelatedFact{}, outcomes: map[string]application.RelatedFact{}, idempotency: map[string]idempotency{}}
 }
 func scoped(tenant, id string) string { return tenant + "\x00" + id }

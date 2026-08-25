@@ -68,6 +68,21 @@ var _ transport.Handler`)
 	}
 }
 
+func TestCheckTreeRejectsMemoryAdapterInRuntimeCommand(t *testing.T) {
+	root := t.TempDir()
+	writeGoFile(t, root, "cmd/api/main.go", `package main
+import "example/internal/risk/infrastructure"
+var _ = infrastructure.NewTestMemoryRepository()`)
+
+	violations, err := checkTree(root)
+	if err != nil {
+		t.Fatalf("checkTree() error = %v", err)
+	}
+	if len(violations) != 1 || !strings.Contains(violations[0], "in-memory adapters are test-only") {
+		t.Fatalf("checkTree() violations = %v, want memory adapter violation", violations)
+	}
+}
+
 func writeGoFile(t *testing.T, root, name, contents string) {
 	t.Helper()
 	path := filepath.Join(root, name)

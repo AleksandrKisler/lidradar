@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -34,6 +36,22 @@ func checkTree(root string) ([]string, error) {
 		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+		if isRuntimeCommand(path) {
+			constructors, err := memoryAdapterReferences(path)
+			if err != nil {
+				return err
+			}
+			for _, constructor := range constructors {
+				relative, relErr := filepath.Rel(root, path)
+				if relErr != nil {
+					return relErr
+				}
+				violations = append(violations, fmt.Sprintf(
+					"%s: runtime command references %s (in-memory adapters are test-only)",
+					relative, constructor,
+				))
+			}
+		}
 
 		layer := packageLayer(path)
 		if layer == "" {
@@ -55,6 +73,42 @@ func checkTree(root string) ([]string, error) {
 		return nil
 	})
 	return violations, err
+}
+
+func isRuntimeCommand(path string) bool {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for _, part := range parts {
+		if part == "cmd" {
+			return true
+		}
+	}
+	return false
+}
+
+func memoryAdapterReferences(path string) ([]string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	seen := make(map[string]struct{})
+	ast.Inspect(file, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		name := selector.Sel.Name
+		if strings.HasPrefix(name, "NewMemory") || strings.HasPrefix(name, "NewTestMemory") ||
+			name == "MemoryStore" || name == "MemoryRepository" {
+			seen[name] = struct{}{}
+		}
+		return true
+	})
+	references := make([]string, 0, len(seen))
+	for name := range seen {
+		references = append(references, name)
+	}
+	sort.Strings(references)
+	return references, nil
 }
 
 func packageLayer(path string) string {

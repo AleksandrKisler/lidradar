@@ -25,7 +25,7 @@ type allowAll struct{}
 func (allowAll) Allowed(context.Context, string, string, string) (bool, error) { return true, nil }
 
 func TestRiskHTTPListAndTenantIsNotExposed(t *testing.T) {
-	repo := infrastructure.NewMemoryRepository()
+	repo := infrastructure.NewTestMemoryRepository()
 	at := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
 	risk, err := domain.NewNoResponse("risk", domain.Finding{TenantID: "tenant", OpportunityID: "opp", LocationID: "loc", TriggerMessageID: "msg", Severity: domain.SeverityHigh, PolicyVersion: "v1", Reason: "waiting"}, at)
 	if err != nil {
@@ -52,7 +52,7 @@ func TestRiskHTTPRequiresPrincipal(t *testing.T) {
 
 func TestSSEPublishesTenantInvalidation(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(application.NewRadar(infrastructure.NewMemoryRepository(), allowAll{}, hub, time.Now), testPrincipal{"user", "tenant"}, hub).Router()
+	handler := NewHandler(application.NewRadar(infrastructure.NewTestMemoryRepository(), allowAll{}, hub, time.Now), testPrincipal{"user", "tenant"}, hub).Router()
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

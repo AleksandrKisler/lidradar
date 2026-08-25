@@ -44,7 +44,10 @@ docker compose up --build
 
 Команда запускает PostgreSQL 18, миграции, API, фоновый обработчик, планировщик
 и узел анализа с локальной заглушкой. Готовность доступна по адресам
-`GET /health/live` и `GET /health/ready` на порту 8080.
+`GET /health/live` и `GET /health/ready` на порту 8080. Ответ готовности содержит
+версию и ревизию сборки, а также последнюю миграцию PostgreSQL. API возвращает
+`503`, если набор или контрольная сумма применённых миграций отличается от
+встроенного в запущенную сборку.
 
 Организация выбирается явно заголовком `X-Tenant-ID`, значение которого
 возвращает `GET /api/v1/auth/me`. OWNER управляет организацией, точками,
@@ -73,26 +76,26 @@ LIDRADAR_INTEGRATION_ENCRYPTION_KEY=<32 случайных байта в Base64>
 
 Ключ создаётся один раз командой `openssl rand -base64 32`. Его потеря лишит
 сервер возможности расшифровать сохранённые токены; смена ключа требует отдельной
-процедуры перешифрования. Токен бота в `.env`, журнале или репозитории хранить не
-нужно: OWNER передаёт его только в теле запроса подключения. Поле является
-одноразовым входом и никогда не возвращается API.
+процедуры перешифрования. Переменная `LIDAR_TELEGRAM_TOKEN` в локальном `.env`
+предназначена только для помощника подключения и не читается рабочим API.
+Значение передаётся однократно в теле запроса, никогда не возвращается API и
+после подключения хранится в PostgreSQL только в зашифрованном виде.
 
 ```sh
-read -rs TELEGRAM_BOT_TOKEN
-read -rs TELEGRAM_WEBHOOK_SECRET
-curl --fail-with-body \
-  -X POST 'http://127.0.0.1:8080/api/v1/integrations/CONNECTED_BUSINESS_BOT/connect' \
-  -H 'Content-Type: application/json' \
-  -H "X-Tenant-ID: $LIDRADAR_TENANT_ID" \
-  -H "Cookie: lidradar_session=$LIDRADAR_SESSION" \
-  --data-binary @- <<JSON
-{"name":"Telegram разработки","webhookSecret":"$TELEGRAM_WEBHOOK_SECRET","botToken":"$TELEGRAM_BOT_TOKEN"}
-JSON
-unset TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
+export LIDRADAR_TENANT_ID='<идентификатор организации>'
+read -rs LIDRADAR_SESSION
+export LIDRADAR_SESSION
+./scripts/telegram-connect-safe.sh
+unset LIDRADAR_SESSION
 ```
 
-`TELEGRAM_WEBHOOK_SECRET` должен содержать 16–256 латинских букв, цифр,
-подчёркиваний или дефисов; его удобно создать командой `openssl rand -hex 32`.
+Помощник читает токен без вывода, передаёт токен и сеанс через стандартный ввод
+и временный файл с правами текущего пользователя, а затем удаляет этот файл.
+Секрет webhook создаётся автоматически; при необходимости можно заранее задать
+`LIDRADAR_TELEGRAM_WEBHOOK_SECRET`. Для связи с точкой задаётся
+`LIDRADAR_TELEGRAM_LOCATION_ID`. Помощник не удаляет старое подключение:
+отключение остаётся отдельным явным действием OWNER.
+
 Успешный ответ имеет состояние `ACTIVE`. Ошибка внешней настройки оставляет
 запись подключения в `ERROR/TELEGRAM_WEBHOOK_SETUP_FAILED`, не раскрывая ответ
 Telegram или токен. Перед повтором следует удалить это подключение и создать
@@ -157,6 +160,11 @@ webhook
 действительно завершает отдельный процесс через `kill -9` после захвата, затем
 проверяет повторный захват и запрет подтверждения прежним владельцем.
 
+Worker раз в минуту пишет безопасное событие `background.queue.status` с
+количеством `PENDING`, `PROCESSING`, `RETRY`, `DEAD`, истёкших аренд и
+просроченных проверок по расписанию. Содержимое заданий и данные организаций в
+эту запись не попадают.
+
 ## Границы модулей
 
 Бизнес-возможности находятся в `internal`. Эталонное направление зависимостей:
@@ -183,12 +191,25 @@ go run ./backend/tools/archcheck -root backend
 архитектуры проверьте [запреты MVP](../docs/architecture/NON_GOALS.md). Изменение
 зафиксированного решения требует принятого ADR.
 
+Адаптеры с именами `NewTestMemory...` предназначены только для тестов. Проверка
+архитектуры запрещает подключать их из любой рабочей команды в `backend/cmd`.
+Маршруты будущих этапов сохраняются в OpenAPI с расширением
+`x-lidradar-runtime-status: planned`; отсутствие расширения означает, что
+маршрут уже подключён к рабочему API.
+
 ## Проверки
 
-Полная локальная проверка с работающей PostgreSQL:
+Обычная проверка допускает пропуск PostgreSQL-тестов, когда адрес базы не задан:
 
 ```sh
-LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable' go test -race -count=1 ./...
+make test
+```
+
+Полная проверка намеренно завершается ошибкой без `LIDRADAR_DATABASE_URL`:
+
+```sh
+LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable' \
+  make test-db GO_TEST_FLAGS='-race -count=1'
 go vet ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...
 go run ./backend/tools/archcheck -root backend

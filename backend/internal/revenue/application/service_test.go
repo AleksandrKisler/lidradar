@@ -20,7 +20,7 @@ type ids struct{ n int }
 func (i *ids) NewID() string { i.n++; return fmt.Sprintf("id-%d", i.n) }
 func fixture() (application.Service, *infrastructure.MemoryStore, time.Time) {
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
-	s := infrastructure.NewMemoryStore()
+	s := infrastructure.NewTestMemoryStore()
 	s.AddOpportunity("tenant", "opportunity")
 	f := application.RelatedFact{OpportunityID: "opportunity", At: now.Add(-time.Hour)}
 	s.AddRisk("tenant", "risk", f)

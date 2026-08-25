@@ -89,7 +89,7 @@ func run(ctx context.Context, configuration config.Config) error {
 	principalResolver := identitytransport.Resolver{Auth: identityService}
 
 	router := httpplatform.NewRouter(
-		"lidradar-api", logger, pool,
+		"lidradar-api", logger, postgres.NewSchemaReadiness(pool),
 		httpplatform.WithAllowedOrigins(configuration.HTTP.AllowedOrigins),
 	)
 	router.Mount("/api/v1/auth", identitytransport.NewHandler(

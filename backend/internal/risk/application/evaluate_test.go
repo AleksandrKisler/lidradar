@@ -31,7 +31,7 @@ func evaluationState() domain.ConversationState {
 }
 
 func TestEvaluateDueRereadsStateAndAutoResolves(t *testing.T) {
-	repository := infrastructure.NewMemoryRepository()
+	repository := infrastructure.NewTestMemoryRepository()
 	reader := &stateReader{state: evaluationState()}
 	now := time.Date(2026, 8, 21, 10, 45, 0, 0, time.UTC)
 	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk-1" }, func() time.Time { return now })
@@ -52,7 +52,7 @@ func TestEvaluateDueRereadsStateAndAutoResolves(t *testing.T) {
 }
 
 func TestEvaluateDueReplayCreatesOneRisk(t *testing.T) {
-	repository := infrastructure.NewMemoryRepository()
+	repository := infrastructure.NewTestMemoryRepository()
 	reader := &stateReader{state: evaluationState()}
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	var mu sync.Mutex
@@ -92,7 +92,7 @@ func TestEvaluateDueReplayCreatesOneRisk(t *testing.T) {
 }
 
 func TestEvaluateDueRejectsCrossTenantState(t *testing.T) {
-	repository := infrastructure.NewMemoryRepository()
+	repository := infrastructure.NewTestMemoryRepository()
 	reader := &stateReader{state: evaluationState()}
 	reader.state.TenantID = "another-tenant"
 	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk" }, time.Now)

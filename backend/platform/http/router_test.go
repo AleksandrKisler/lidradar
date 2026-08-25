@@ -10,18 +10,21 @@ import (
 	"strings"
 	"testing"
 
+	"lidradar/backend/platform/health"
 	"lidradar/backend/platform/observability"
 )
 
 type readinessStub struct{ err error }
 
-func (s readinessStub) Ping(context.Context) error { return s.err }
+func (s readinessStub) Check(context.Context) (health.Status, error) {
+	return health.Status{DatabaseMigration: "000008_opportunity_domain"}, s.err
+}
 
 func TestHealthEndpoints(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		path      string
-		readiness Readiness
+		readiness health.Checker
 		status    int
 	}{
 		{name: "live", path: "/health/live", readiness: readinessStub{}, status: http.StatusOK},
@@ -37,6 +40,21 @@ func TestHealthEndpoints(t *testing.T) {
 			}
 			if response.Header().Get(requestIDHeader) == "" {
 				t.Fatal("response has no request ID")
+			}
+			if test.path == "/health/ready" && test.status == http.StatusOK {
+				var body struct {
+					DatabaseMigration string `json:"databaseMigration"`
+					Build             struct {
+						Version  string `json:"version"`
+						Revision string `json:"revision"`
+					} `json:"build"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if body.DatabaseMigration == "" || body.Build.Version == "" || body.Build.Revision == "" {
+					t.Fatalf("readiness metadata = %#v", body)
+				}
 			}
 		})
 	}

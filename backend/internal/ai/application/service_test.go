@@ -18,7 +18,7 @@ func (i *ids) NewID() string { i.n++; return fmt.Sprint(i.n) }
 func setup(t *testing.T) (application.Service, *infrastructure.MemoryStore, *time.Time) {
 	t.Helper()
 	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
-	store := infrastructure.NewMemoryStore()
+	store := infrastructure.NewTestMemoryStore()
 	svc := application.NewService(store, &ids{}, func() time.Time { return now }, application.DefaultLease)
 	if _, err := svc.RegisterNode(context.Background(), "home", "secret"); err != nil {
 		t.Fatal(err)

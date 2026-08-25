@@ -14,6 +14,9 @@ type idem struct {
 	action  *domain.Action
 	outcome *domain.Outcome
 }
+
+// MemoryStore — внутрипроцессный испытательный адаптер. Рабочим командам нельзя
+// использовать его: корректирующие факты требуют транзакционного PostgreSQL.
 type MemoryStore struct {
 	mu              sync.Mutex
 	risks           map[string]string
@@ -25,7 +28,7 @@ type MemoryStore struct {
 	audits          []application.AuditRecord
 }
 
-func NewMemoryStore() *MemoryStore {
+func NewTestMemoryStore() *MemoryStore {
 	return &MemoryStore{risks: map[string]string{}, opportunities: map[string]bool{}, recommendations: map[string]domain.Recommendation{}, idempotency: map[string]idem{}}
 }
 func scoped(tenant, id string) string { return tenant + "\x00" + id }
