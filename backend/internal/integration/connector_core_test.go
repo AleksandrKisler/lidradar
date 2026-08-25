@@ -180,7 +180,15 @@ func requireEventCounts(t *testing.T, fixture apiFixture, connectionID string, w
 	if err := fixture.pool.QueryRow(context.Background(), `SELECT count(*) FROM raw_events WHERE connection_id = $1`, connectionID).Scan(&rawCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.pool.QueryRow(context.Background(), `SELECT count(*) FROM raw_event_normalization_work WHERE connection_id = $1`, connectionID).Scan(&workCount); err != nil {
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT
+			(SELECT count(*) FROM outbox_events event
+			 JOIN raw_events raw ON raw.id = event.aggregate_id
+			 WHERE raw.connection_id = $1 AND event.status IN ('PENDING', 'PROCESSING', 'RETRY'))
+			+
+			(SELECT count(*) FROM jobs job
+			 JOIN raw_events raw ON raw.id::text = job.payload->>'rawEventId'
+			 WHERE raw.connection_id = $1 AND job.status IN ('PENDING', 'PROCESSING', 'RETRY'))`, connectionID).Scan(&workCount); err != nil {
 		t.Fatal(err)
 	}
 	if rawCount != wantRaw || workCount != wantWork {

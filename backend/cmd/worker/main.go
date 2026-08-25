@@ -12,6 +12,10 @@ import (
 	connectorinfrastructure "lidradar/backend/internal/connector/infrastructure"
 	conversationapplication "lidradar/backend/internal/conversation/application"
 	conversationinfrastructure "lidradar/backend/internal/conversation/infrastructure"
+	eventsapplication "lidradar/backend/internal/events/application"
+	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
+	jobsapplication "lidradar/backend/internal/jobs/application"
+	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
 	"lidradar/backend/platform/bootstrap"
 	"lidradar/backend/platform/config"
 	"lidradar/backend/platform/ids"
@@ -19,9 +23,8 @@ import (
 )
 
 const (
-	normalizationBatch = 50
-	idleInterval       = 500 * time.Millisecond
-	errorInterval      = time.Second
+	idleInterval  = 500 * time.Millisecond
+	errorInterval = time.Second
 )
 
 func main() {
@@ -40,26 +43,54 @@ func run(ctx context.Context, configuration config.Config) error {
 	logger := bootstrap.Logger(ctx)
 	logger.Info("PostgreSQL готов", "event", "postgres.ready")
 
+	generator := ids.Generator{}
+	ownerID, err := generator.NewID()
+	if err != nil {
+		return err
+	}
 	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
-	conversationService := conversationapplication.NewService(conversationRepository, nil, ids.Generator{})
+	conversationService := conversationapplication.NewService(conversationRepository, nil, generator)
 	normalization := connectorapplication.NewNormalizationService(
 		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
 	)
+	jobStore := jobsinfrastructure.NewPostgresStore(pool)
+	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+
+	dispatcher := eventsapplication.NewDispatcher(
+		eventStore, ownerID+":outbox",
+		map[string]eventsapplication.Handler{
+			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, generator),
+		},
+		time.Now, eventsapplication.DefaultLease,
+	)
+	worker := jobsapplication.NewWorker(
+		jobStore, ownerID+":jobs",
+		map[string]jobsapplication.Handler{
+			connectorapplication.NormalizationJobType: connectorapplication.NormalizationJobHandler(normalization),
+		},
+		time.Now, jobsapplication.DefaultLease,
+	)
 
 	for {
-		processed, processErr := normalization.ProcessBatch(ctx, normalizationBatch)
-		if processErr != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			logger.Error("Ошибка канонизации", "event", "normalization.failed", "error", processErr)
+		dispatched, dispatchErr := dispatcher.RunOne(ctx)
+		if dispatchErr != nil && ctx.Err() == nil {
+			logger.Error("Ошибка исходящего журнала", "event", "outbox.failed", "error", dispatchErr)
+		}
+		processed, processErr := worker.RunOne(ctx)
+		if processErr != nil && ctx.Err() == nil {
+			logger.Error("Ошибка фонового задания", "event", "job.failed", "error", processErr)
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if dispatchErr != nil || processErr != nil {
 			if !wait(ctx, errorInterval) {
 				return nil
 			}
 			continue
 		}
-		if processed == normalizationBatch {
+		if dispatched || processed {
 			continue
 		}
 		if !wait(ctx, idleInterval) {

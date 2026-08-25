@@ -324,6 +324,9 @@ type NormalizationWork struct {
 	CreatedAt    time.Time
 }
 
+// NewNormalizationWork создаёт идентичность намерения канонизации. Начиная с
+// этапа 6 хранилище записывает его как событие исходящего журнала, а не во
+// временную специализированную очередь.
 func NewNormalizationWork(id string, event RawEvent, at time.Time) (NormalizationWork, error) {
 	work := NormalizationWork{
 		ID: id, TenantID: event.TenantID, ConnectionID: event.ConnectionID,
@@ -514,7 +517,6 @@ type PersistResult struct {
 
 // NormalizationItem объединяет исходное событие и его подключение для обработки.
 type NormalizationItem struct {
-	Work       NormalizationWork
 	Connection ChannelConnection
 	Event      RawEvent
 }
@@ -527,7 +529,7 @@ type Repository interface {
 	UpdateConnectionHealth(context.Context, string, string, ConnectionHealth) (ChannelConnection, bool, error)
 	DisconnectConnection(context.Context, string, string, time.Time) (ChannelConnection, bool, error)
 	PersistEvent(context.Context, string, string, RawEvent, *NormalizationWork, ConnectionHealth) (PersistResult, error)
-	PendingNormalization(context.Context, int) ([]NormalizationItem, error)
+	Normalization(context.Context, string, string) (NormalizationItem, bool, error)
 	CompleteNormalization(context.Context, string, string, time.Time) error
 	FailNormalization(context.Context, string, string, string, time.Time) error
 }

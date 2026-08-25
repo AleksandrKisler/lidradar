@@ -202,8 +202,13 @@ func (repository *testRepository) PersistEvent(
 	repository.works = append(repository.works, work)
 	return domain.PersistResult{Event: event, Inserted: true}, nil
 }
-func (repository *testRepository) PendingNormalization(context.Context, int) ([]domain.NormalizationItem, error) {
-	return append([]domain.NormalizationItem(nil), repository.pending...), nil
+func (repository *testRepository) Normalization(_ context.Context, tenantID, rawEventID string) (domain.NormalizationItem, bool, error) {
+	for _, item := range repository.pending {
+		if item.Event.TenantID == tenantID && item.Event.ID == rawEventID {
+			return item, true, nil
+		}
+	}
+	return domain.NormalizationItem{}, false, nil
 }
 func (repository *testRepository) CompleteNormalization(_ context.Context, _, rawEventID string, _ time.Time) error {
 	repository.completed = append(repository.completed, rawEventID)
@@ -379,20 +384,20 @@ func TestNormalizationCompletesOnlyAfterCanonicalIngestion(t *testing.T) {
 	sink := &testCanonicalSink{}
 	service := NewNormalizationService(repository, testRegistry{connector: connector}, sink, time.Now)
 
-	processed, err := service.ProcessBatch(context.Background(), 10)
-	if err != nil || processed != 1 || len(sink.events) != 1 || len(repository.completed) != 1 || len(repository.failed) != 0 {
-		t.Fatalf("ProcessBatch() = %d, %v; sink=%d completed=%v failed=%v", processed, err, len(sink.events), repository.completed, repository.failed)
+	err := service.Process(context.Background(), item.Event.TenantID, item.Event.ID)
+	if err != nil || len(sink.events) != 1 || len(repository.completed) != 1 || len(repository.failed) != 0 {
+		t.Fatalf("Process() = %v; sink=%d completed=%v failed=%v", err, len(sink.events), repository.completed, repository.failed)
 	}
 }
 
 func TestNormalizationMarksInvalidCanonicalEventFailed(t *testing.T) {
-	repository, connector, _ := normalizationFixture(t)
+	repository, connector, item := normalizationFixture(t)
 	connector.normalized = []domain.CanonicalEvent{{}}
 	service := NewNormalizationService(repository, testRegistry{connector: connector}, &testCanonicalSink{}, time.Now)
 
-	processed, err := service.ProcessBatch(context.Background(), 10)
-	if err != nil || processed != 1 || len(repository.failed) != 1 || len(repository.completed) != 0 {
-		t.Fatalf("ProcessBatch() = %d, %v; completed=%v failed=%v", processed, err, repository.completed, repository.failed)
+	err := service.Process(context.Background(), item.Event.TenantID, item.Event.ID)
+	if err != nil || len(repository.failed) != 1 || len(repository.completed) != 0 {
+		t.Fatalf("Process() = %v; completed=%v failed=%v", err, repository.completed, repository.failed)
 	}
 }
 
@@ -402,9 +407,9 @@ func TestNormalizationKeepsWorkPendingOnTemporarySinkFailure(t *testing.T) {
 	wantErr := errors.New("временная ошибка PostgreSQL")
 	service := NewNormalizationService(repository, testRegistry{connector: connector}, &testCanonicalSink{err: wantErr}, time.Now)
 
-	processed, err := service.ProcessBatch(context.Background(), 10)
-	if !errors.Is(err, wantErr) || processed != 0 || len(repository.completed) != 0 || len(repository.failed) != 0 {
-		t.Fatalf("ProcessBatch() = %d, %v; completed=%v failed=%v", processed, err, repository.completed, repository.failed)
+	err := service.Process(context.Background(), item.Event.TenantID, item.Event.ID)
+	if !errors.Is(err, wantErr) || len(repository.completed) != 0 || len(repository.failed) != 0 {
+		t.Fatalf("Process() = %v; completed=%v failed=%v", err, repository.completed, repository.failed)
 	}
 }
 

@@ -58,7 +58,11 @@ func TestPostgresRepositoryPersistsOnceAndKeepsTenantScope(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM raw_events WHERE tenant_id = $1 AND connection_id = $2`, pair.A.TenantID, connection.ID).Scan(&rawCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM raw_event_normalization_work WHERE tenant_id = $1 AND connection_id = $2`, pair.A.TenantID, connection.ID).Scan(&workCount); err != nil {
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM outbox_events event
+		JOIN raw_events raw ON raw.id = event.aggregate_id
+		WHERE event.tenant_id = $1 AND raw.connection_id = $2`, pair.A.TenantID, connection.ID).Scan(&workCount); err != nil {
 		t.Fatal(err)
 	}
 	if rawCount != 1 || workCount != 1 {
@@ -123,11 +127,48 @@ func TestPostgresRepositoryInvalidPayloadUpdatesHealthWithoutWork(t *testing.T) 
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM raw_events WHERE connection_id = $1`, connection.ID).Scan(&rawCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM raw_event_normalization_work WHERE connection_id = $1`, connection.ID).Scan(&workCount); err != nil {
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM outbox_events event
+		JOIN raw_events raw ON raw.id = event.aggregate_id
+		WHERE raw.connection_id = $1`, connection.ID).Scan(&workCount); err != nil {
 		t.Fatal(err)
 	}
 	if rawCount != 2 || workCount != 1 {
 		t.Fatalf("invalid/valid persistence created raw=%d, work=%d; want 2, 1", rawCount, workCount)
+	}
+}
+
+func TestRawEventAndOutboxIntentAreOneTransaction(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	pair := testsupport.TwoTenants(t, ctx, pool)
+	repository := NewPostgresRepository(pool)
+	generator := ids.Generator{}
+	connection := newConnection(t, generator, pair.A.TenantID, nil, domain.ProviderGenericWebhook)
+	if err := repository.CreateConnection(ctx, pair.A.TenantID, connection); err != nil {
+		t.Fatal(err)
+	}
+	first := newRawEvent(t, generator, connection, "atomic-1", json.RawMessage(`{"id":"atomic-1"}`), domain.RawEventReceived, nil)
+	firstWork := newWork(t, generator, first)
+	if _, err := repository.PersistEvent(ctx, pair.A.TenantID, connection.ID, first, &firstWork, activeHealth()); err != nil {
+		t.Fatal(err)
+	}
+	second := newRawEvent(t, generator, connection, "atomic-2", json.RawMessage(`{"id":"atomic-2"}`), domain.RawEventReceived, nil)
+	secondWork := newWork(t, generator, second)
+	secondWork.ID = firstWork.ID // Принудительный конфликт исходящего журнала.
+	if _, err := repository.PersistEvent(ctx, pair.A.TenantID, connection.ID, second, &secondWork, activeHealth()); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("PersistEvent() error = %v", err)
+	}
+	var rawCount, eventCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM raw_events WHERE connection_id = $1`, connection.ID).Scan(&rawCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE tenant_id = $1`, pair.A.TenantID).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if rawCount != 1 || eventCount != 1 {
+		t.Fatalf("после отката raw=%d outbox=%d, нужно 1 и 1", rawCount, eventCount)
 	}
 }
 
@@ -221,39 +262,25 @@ func newWork(t *testing.T, generator ids.Generator, event domain.RawEvent) domai
 	return work
 }
 
-func TestPostgresNormalizationWorkRejectsMismatchedConnection(t *testing.T) {
+func TestPostgresNormalizationLookupKeepsTenantScope(t *testing.T) {
 	pool := testsupport.Postgres(t)
 	ctx := context.Background()
 	pair := testsupport.TwoTenants(t, ctx, pool)
 	repository := NewPostgresRepository(pool)
 	generator := ids.Generator{}
 	first := newConnection(t, generator, pair.A.TenantID, nil, domain.ProviderGenericWebhook)
-	second := newConnection(t, generator, pair.A.TenantID, nil, domain.ProviderGenericWebhook)
 	if err := repository.CreateConnection(ctx, pair.A.TenantID, first); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.CreateConnection(ctx, pair.A.TenantID, second); err != nil {
-		t.Fatal(err)
-	}
 	event := newRawEvent(t, generator, first, "unpaired-event", json.RawMessage(`{"id":"unpaired-event"}`), domain.RawEventReceived, nil)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO raw_events(
-			id, tenant_id, connection_id, provider, external_event_id, payload,
-			payload_hash, status, received_at, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'RECEIVED', $8, $8)`,
-		event.ID, event.TenantID, event.ConnectionID, event.Provider, event.ExternalEventID,
-		string(event.Payload), event.PayloadHash, event.ReceivedAt,
-	); err != nil {
+	work := newWork(t, generator, event)
+	if _, err := repository.PersistEvent(ctx, pair.A.TenantID, first.ID, event, &work, activeHealth()); err != nil {
 		t.Fatal(err)
 	}
-	workID, err := generator.NewID()
-	if err != nil {
-		t.Fatal(err)
+	if item, found, err := repository.Normalization(ctx, pair.A.TenantID, event.ID); err != nil || !found || item.Event.ID != event.ID {
+		t.Fatalf("Normalization() = %#v, found=%v, error=%v", item, found, err)
 	}
-	_, err = pool.Exec(ctx, `
-		INSERT INTO raw_event_normalization_work(id, tenant_id, connection_id, raw_event_id, status)
-		VALUES ($1, $2, $3, $4, 'PENDING')`, workID, pair.A.TenantID, second.ID, event.ID)
-	if err == nil {
-		t.Fatalf("database accepted raw event from %s as work for %s", first.ID, second.ID)
+	if _, found, err := repository.Normalization(ctx, pair.B.TenantID, event.ID); err != nil || found {
+		t.Fatalf("cross-tenant Normalization() = found=%v, error=%v", found, err)
 	}
 }

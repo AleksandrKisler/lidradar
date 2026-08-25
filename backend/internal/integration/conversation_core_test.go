@@ -146,9 +146,15 @@ func canonicalWebhook(
 
 func processExactly(t *testing.T, fixture apiFixture, want int) {
 	t.Helper()
-	processed, err := fixture.normalization.ProcessBatch(context.Background(), 50)
-	if err != nil || processed != want {
-		t.Fatalf("ProcessBatch() = %d, %v; нужно %d", processed, err, want)
+	for processed := 0; processed < want; processed++ {
+		dispatched, err := fixture.dispatcher.RunOne(context.Background())
+		if err != nil || !dispatched {
+			t.Fatalf("Dispatcher.RunOne() = %v, %v; обработано %d из %d", dispatched, err, processed, want)
+		}
+		done, err := fixture.worker.RunOne(context.Background())
+		if err != nil || !done {
+			t.Fatalf("Worker.RunOne() = %v, %v; обработано %d из %d", done, err, processed, want)
+		}
 	}
 }
 
@@ -215,7 +221,15 @@ func requireRawState(t *testing.T, fixture apiFixture, connectionID string, want
 		t.Fatal(err)
 	}
 	if err := fixture.pool.QueryRow(
-		context.Background(), `SELECT count(*) FROM raw_event_normalization_work WHERE connection_id = $1`, connectionID,
+		context.Background(), `
+		SELECT
+			(SELECT count(*) FROM outbox_events event
+			 JOIN raw_events raw ON raw.id = event.aggregate_id
+			 WHERE raw.connection_id = $1 AND event.status IN ('PENDING', 'PROCESSING', 'RETRY'))
+			+
+			(SELECT count(*) FROM jobs job
+			 JOIN raw_events raw ON raw.id::text = job.payload->>'rawEventId'
+			 WHERE raw.connection_id = $1 AND job.status IN ('PENDING', 'PROCESSING', 'RETRY'))`, connectionID,
 	).Scan(&work); err != nil {
 		t.Fatal(err)
 	}

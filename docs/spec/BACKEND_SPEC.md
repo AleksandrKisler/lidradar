@@ -91,8 +91,8 @@ and `Health`; an event-identifier capability extracts the provider dedup key
 before normalization. The webhook path verifies the stored SHA-256 secret
 digest first. An authentication failure returns `401` and persists nothing.
 For an authenticated request, one short PostgreSQL transaction locks the
-connection, inserts the `RawEvent`, inserts exactly one pending normalization
-work record for a valid new event, and updates connection health. The unique
+connection, inserts the `RawEvent`, inserts exactly one versioned outbox event
+for a valid new event, and updates connection health. The unique
 key is `(connection_id, external_event_id)`. A duplicate with the same payload
 returns the original receipt; reuse of that external identifier with different
 bytes is a conflict.
@@ -100,10 +100,10 @@ bytes is a conflict.
 The HTTP handler returns `202` after this transaction and never calls
 normalization, downstream AI, or another external service. An authenticated
 malformed payload is retained once as `FAILED` with `INVALID_PAYLOAD` and
-creates no normalization work. Non-JSON bytes are represented losslessly by a
-base64 JSON wrapper because PostgreSQL owns the raw payload as `JSONB`. The
-stage-four `raw_event_normalization_work` table is only the durable handoff;
-the generic leased job runtime remains owned by stage six.
+creates no normalization intent. Non-JSON bytes are represented losslessly by a
+base64 JSON wrapper because PostgreSQL owns the raw payload as `JSONB`.
+Миграция этапа 6 переносит ожидающие записи временной таблицы
+`raw_event_normalization_work` в исходящий журнал и удаляет эту таблицу.
 
 OWNER manages list/connect/disconnect/health under `/api/v1/integrations`.
 TEST, IMPORT, and GENERIC_WEBHOOK are deterministic local adapters sharing the
@@ -137,8 +137,8 @@ report remain mandatory.
 чего исходное событие отмечается как обработанное. Некорректные канонические
 данные получают состояние `FAILED` и код `NORMALIZATION_INVALID_PAYLOAD`.
 Временная ошибка базы не удаляет ожидающую работу: безопасный повтор опирается
-на уникальные внешние идентификаторы и идемпотентные операции. Общая очередь с
-арендой, параллельным захватом и политикой повторов относится к этапу 6.
+на уникальные внешние идентификаторы, идемпотентные операции и общую очередь
+этапа 6 с арендой, параллельным захватом и ограниченной политикой повторов.
 
 Первая встреча внешней личности атомарно создаёт `Contact`,
 `ExternalIdentity`, `Conversation` и `Message`. Пространство внешнего
@@ -215,6 +215,41 @@ must not mutate a risk.
 Feature-level backend contracts added later must likewise define observable
 behavior, data ownership, error behavior, and operational requirements before
 production code is added.
+
+### Фоновая обработка
+
+Общая очередь, проверки по расписанию и исходящий журнал хранятся в PostgreSQL
+в таблицах `jobs`, `scheduled_checks` и `outbox_events`. Жизненный цикл задания:
+`PENDING → PROCESSING → SUCCEEDED`; временная ошибка переводит его в `RETRY`, а
+постоянная ошибка либо пятая неудачная попытка — в `DEAD`.
+
+Захват выполняется атомарно через `FOR UPDATE SKIP LOCKED`. Он увеличивает номер
+попытки, записывает уникального владельца процесса и устанавливает аренду на 30
+секунд. Подтвердить результат может только текущий владелец до истечения аренды.
+После истечения другой worker вправе повторно захватить то же задание; прежний
+владелец получает ошибку потери аренды. Базовые задержки после неудачных попыток:
+5 секунд, 30 секунд, 2 минуты и 10 минут. Неизвестная ошибка считается временной,
+чтобы работа не потерялась; некорректные данные и неподдерживаемые типы явно
+помечаются постоянными.
+
+Scheduler захватывает наступившие `scheduled_checks` с пропуском заблокированных
+строк, создаёт дедуплицированное задание и отмечает проверку поставленной в
+очередь в одной транзакции. Повторный запуск не создаёт второе задание.
+
+Изменение состояния и `outbox_events` записываются одной транзакцией владельца
+бизнес-операции. Событие имеет неизменяемые ID, type, version, occurredAt,
+tenantId, aggregate, traceId и data. Диспетчер доставляет его как минимум один
+раз и применяет ту же аренду и ограниченную политику повторов. Обработчики
+обязаны использовать ID задания или устойчивый ключ дедупликации при записи
+побочного эффекта: падение после эффекта, но до подтверждения неизбежно приводит
+к повторному вызову, который не должен создавать второй Message, Risk,
+RevenueEvent, Notification или критическое действие.
+
+Путь канонизации использует этот механизм полностью: webhook атомарно сохраняет
+`RawEvent` и `connector.raw-event.received` версии 1; диспетчер создаёт уникальное
+`connector.normalize-raw-event.v1`; worker при выполнении повторно читает
+актуальные RawEvent и ChannelConnection из PostgreSQL. Успешное и ошибочное
+завершение RawEvent идемпотентно.
 
 ### Radar and Risk realtime API
 

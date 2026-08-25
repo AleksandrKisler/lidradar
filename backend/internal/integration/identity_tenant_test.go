@@ -23,9 +23,13 @@ import (
 	conversationapplication "lidradar/backend/internal/conversation/application"
 	conversationinfrastructure "lidradar/backend/internal/conversation/infrastructure"
 	conversationtransport "lidradar/backend/internal/conversation/transport"
+	eventsapplication "lidradar/backend/internal/events/application"
+	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
+	jobsapplication "lidradar/backend/internal/jobs/application"
+	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
 	"lidradar/backend/internal/tenant/application"
 	"lidradar/backend/internal/tenant/domain"
 	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
@@ -39,7 +43,8 @@ import (
 type apiFixture struct {
 	handler       http.Handler
 	tenantService application.Service
-	normalization connectorapplication.NormalizationService
+	dispatcher    eventsapplication.Dispatcher
+	worker        jobsapplication.Worker
 	pool          *pgxpool.Pool
 }
 
@@ -61,6 +66,20 @@ func newAPIFixture(t *testing.T) apiFixture {
 	normalization := connectorapplication.NewNormalizationService(
 		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
 	)
+	jobStore := jobsinfrastructure.NewPostgresStore(pool)
+	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+	dispatcher := eventsapplication.NewDispatcher(
+		eventStore, "integration-outbox",
+		map[string]eventsapplication.Handler{
+			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, ids.Generator{}),
+		}, time.Now, eventsapplication.DefaultLease,
+	)
+	worker := jobsapplication.NewWorker(
+		jobStore, "integration-jobs",
+		map[string]jobsapplication.Handler{
+			connectorapplication.NormalizationJobType: connectorapplication.NormalizationJobHandler(normalization),
+		}, time.Now, jobsapplication.DefaultLease,
+	)
 	identityService := identityapplication.NewService(
 		identityRepository, cryptoplatform.PasswordHasher{}, ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
 	)
@@ -75,7 +94,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
-	return apiFixture{handler: router, tenantService: tenantService, normalization: normalization, pool: pool}
+	return apiFixture{
+		handler: router, tenantService: tenantService, dispatcher: dispatcher,
+		worker: worker, pool: pool,
+	}
 }
 
 type registeredUser struct {

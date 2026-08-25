@@ -14,12 +14,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"lidradar/backend/internal/connector/domain"
+	eventsdomain "lidradar/backend/internal/events/domain"
+	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 )
 
-type PostgresRepository struct{ pool *pgxpool.Pool }
+type PostgresRepository struct {
+	pool   *pgxpool.Pool
+	outbox *eventsinfrastructure.PostgresStore
+}
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+	return &PostgresRepository{pool: pool, outbox: eventsinfrastructure.NewPostgresStore(pool)}
 }
 
 func (repository *PostgresRepository) ListConnections(ctx context.Context, tenantID string) ([]domain.ChannelConnection, error) {
@@ -191,13 +196,26 @@ func (repository *PostgresRepository) PersistEvent(
 	}
 
 	if inserted && work != nil {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO raw_event_normalization_work(
-				id, tenant_id, connection_id, raw_event_id, status, created_at
-			) VALUES ($1, $2, $3, $4, $5, $6)`,
-			work.ID, tenantID, connectionID, event.ID, work.Status, work.CreatedAt,
-		); err != nil {
-			return domain.PersistResult{}, mapPostgresError("insert raw event normalization work", err)
+		data, marshalErr := json.Marshal(map[string]string{"rawEventId": event.ID})
+		if marshalErr != nil {
+			return domain.PersistResult{}, domain.ErrInvalid
+		}
+		outboxEvent, eventErr := eventsdomain.NewEvent(
+			work.ID, "connector.raw-event.received", 1, tenantID,
+			"raw_event", event.ID, event.ID, data, work.CreatedAt,
+		)
+		if eventErr != nil {
+			return domain.PersistResult{}, domain.ErrInvalid
+		}
+		if _, _, err := repository.outbox.AppendTx(ctx, tx, outboxEvent); err != nil {
+			switch {
+			case errors.Is(err, eventsdomain.ErrConflict):
+				return domain.PersistResult{}, domain.ErrConflict
+			case errors.Is(err, eventsdomain.ErrInvalid):
+				return domain.PersistResult{}, domain.ErrInvalid
+			default:
+				return domain.PersistResult{}, fmt.Errorf("добавление события канонизации: %w", err)
+			}
 		}
 	}
 
@@ -225,60 +243,46 @@ func (repository *PostgresRepository) PersistEvent(
 	return domain.PersistResult{Event: persisted, Inserted: inserted}, nil
 }
 
-func (repository *PostgresRepository) PendingNormalization(
+func (repository *PostgresRepository) Normalization(
 	ctx context.Context,
-	limit int,
-) ([]domain.NormalizationItem, error) {
-	if repository == nil || repository.pool == nil || limit < 1 || limit > 100 {
-		return nil, domain.ErrInvalid
+	tenantID, rawEventID string,
+) (domain.NormalizationItem, bool, error) {
+	if repository == nil || repository.pool == nil || tenantID == "" || rawEventID == "" {
+		return domain.NormalizationItem{}, false, domain.ErrInvalid
 	}
-	rows, err := repository.pool.Query(ctx, `
+	var item domain.NormalizationItem
+	var capabilitiesJSON []byte
+	err := repository.pool.QueryRow(ctx, `
 		SELECT
-			w.id, w.tenant_id, w.connection_id, w.raw_event_id, w.status, w.created_at,
 			c.id, c.tenant_id, c.location_id, c.provider, c.name, c.status, c.capabilities,
-			c.verification_secret_hash, c.last_event_at, c.last_success_at, c.last_error_at,
-			c.last_error_code, c.created_at, c.updated_at,
+			c.verification_secret_hash, c.encrypted_credentials, c.last_event_at, c.last_success_at,
+			c.last_error_at, c.last_error_code, c.created_at, c.updated_at,
 			r.id, r.tenant_id, r.connection_id, r.provider, r.external_event_id, r.payload,
 			r.payload_hash, r.status, r.error_code, r.received_at, r.processed_at, r.created_at
-		FROM raw_event_normalization_work w
+		FROM raw_events r
 		JOIN channel_connections c
-		  ON c.tenant_id = w.tenant_id AND c.id = w.connection_id
-		JOIN raw_events r
-		  ON r.tenant_id = w.tenant_id AND r.id = w.raw_event_id AND r.connection_id = w.connection_id
-		WHERE w.status = 'PENDING' AND r.status = 'RECEIVED'
-		ORDER BY w.created_at, w.id
-		LIMIT $1`, limit)
+		  ON c.tenant_id = r.tenant_id AND c.id = r.connection_id
+		WHERE r.tenant_id = $1 AND r.id = $2`, tenantID, rawEventID).Scan(
+		&item.Connection.ID, &item.Connection.TenantID, &item.Connection.LocationID,
+		&item.Connection.Provider, &item.Connection.Name, &item.Connection.Status, &capabilitiesJSON,
+		&item.Connection.VerificationSecretHash, &item.Connection.EncryptedCredentials,
+		&item.Connection.LastEventAt, &item.Connection.LastSuccessAt, &item.Connection.LastErrorAt,
+		&item.Connection.LastErrorCode, &item.Connection.CreatedAt, &item.Connection.UpdatedAt,
+		&item.Event.ID, &item.Event.TenantID, &item.Event.ConnectionID, &item.Event.Provider,
+		&item.Event.ExternalEventID, &item.Event.Payload, &item.Event.PayloadHash, &item.Event.Status,
+		&item.Event.ErrorCode, &item.Event.ReceivedAt, &item.Event.ProcessedAt, &item.Event.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.NormalizationItem{}, false, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("список заданий канонизации: %w", err)
+		return domain.NormalizationItem{}, false, fmt.Errorf("чтение события для канонизации: %w", err)
 	}
-	defer rows.Close()
-	items := make([]domain.NormalizationItem, 0)
-	for rows.Next() {
-		var item domain.NormalizationItem
-		var capabilitiesJSON []byte
-		if err := rows.Scan(
-			&item.Work.ID, &item.Work.TenantID, &item.Work.ConnectionID, &item.Work.RawEventID,
-			&item.Work.Status, &item.Work.CreatedAt,
-			&item.Connection.ID, &item.Connection.TenantID, &item.Connection.LocationID,
-			&item.Connection.Provider, &item.Connection.Name, &item.Connection.Status, &capabilitiesJSON,
-			&item.Connection.VerificationSecretHash, &item.Connection.LastEventAt, &item.Connection.LastSuccessAt,
-			&item.Connection.LastErrorAt, &item.Connection.LastErrorCode, &item.Connection.CreatedAt, &item.Connection.UpdatedAt,
-			&item.Event.ID, &item.Event.TenantID, &item.Event.ConnectionID, &item.Event.Provider,
-			&item.Event.ExternalEventID, &item.Event.Payload, &item.Event.PayloadHash, &item.Event.Status,
-			&item.Event.ErrorCode, &item.Event.ReceivedAt, &item.Event.ProcessedAt, &item.Event.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("чтение задания канонизации: %w", err)
-		}
-		if err := json.Unmarshal(capabilitiesJSON, &item.Connection.Capabilities); err != nil ||
-			item.Connection.Validate() != nil || item.Event.Validate() != nil || item.Work.Validate(item.Event) != nil {
-			return nil, domain.ErrInvalid
-		}
-		items = append(items, item)
+	if err := json.Unmarshal(capabilitiesJSON, &item.Connection.Capabilities); err != nil ||
+		item.Connection.Validate() != nil || item.Event.Validate() != nil {
+		return domain.NormalizationItem{}, false, domain.ErrInvalid
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("обход заданий канонизации: %w", err)
-	}
-	return items, nil
+	return item, true, nil
 }
 
 func (repository *PostgresRepository) CompleteNormalization(
@@ -324,15 +328,23 @@ func (repository *PostgresRepository) finishNormalization(
 		WHERE tenant_id = $1 AND id = $2 AND status = 'RECEIVED'
 		RETURNING connection_id`, tenantID, rawEventID, status, errorCode, at.UTC()).Scan(&connectionID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrNotFound
+		var current domain.RawEventStatus
+		readErr := tx.QueryRow(ctx, `
+			SELECT status FROM raw_events WHERE tenant_id = $1 AND id = $2`, tenantID, rawEventID,
+		).Scan(&current)
+		if errors.Is(readErr, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		if readErr != nil {
+			return mapPostgresError("чтение завершённого RawEvent", readErr)
+		}
+		if current == domain.RawEventProcessed || current == domain.RawEventFailed {
+			return nil
+		}
+		return domain.ErrConflict
 	}
 	if err != nil {
 		return mapPostgresError("завершение RawEvent", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM raw_event_normalization_work
-		WHERE tenant_id = $1 AND raw_event_id = $2`, tenantID, rawEventID); err != nil {
-		return mapPostgresError("удаление задания канонизации", err)
 	}
 	if status == domain.RawEventFailed {
 		if _, err := tx.Exec(ctx, `

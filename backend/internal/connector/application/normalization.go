@@ -34,49 +34,44 @@ func NewNormalizationService(
 	return NormalizationService{repository: repository, registry: registry, sink: sink, now: now}
 }
 
-// ProcessBatch обрабатывает ограниченную порцию ранее сохранённых RawEvent.
-// Общая очередь с арендой появится на этапе 6; повтор здесь безопасен за счёт
-// уникальных внешних идентификаторов и идемпотентного Conversation Core.
-func (service NormalizationService) ProcessBatch(ctx context.Context, limit int) (int, error) {
-	if service.repository == nil || service.registry == nil || service.sink == nil || service.now == nil || limit < 1 || limit > 100 {
-		return 0, ErrInvalid
+// Process обрабатывает одно задание общей очереди. Повтор после потери аренды
+// безопасен благодаря уникальным внешним идентификаторам Conversation Core и
+// идемпотентному завершению RawEvent.
+func (service NormalizationService) Process(ctx context.Context, tenantID, rawEventID string) error {
+	if service.repository == nil || service.registry == nil || service.sink == nil || service.now == nil || tenantID == "" || rawEventID == "" {
+		return ErrInvalid
 	}
-	items, err := service.repository.PendingNormalization(ctx, limit)
+	item, found, err := service.repository.Normalization(ctx, tenantID, rawEventID)
 	if err != nil {
-		return 0, mapDomainError(err)
+		return mapDomainError(err)
 	}
-	processed := 0
-	for _, item := range items {
-		registration, found := service.registry.Lookup(item.Connection.Provider)
-		if !found || registration.Connector == nil {
-			return processed, ErrUnavailable
-		}
-		events, normalizeErr := registration.Connector.NormalizeEvent(ctx, item.Connection, item.Event)
-		if errors.Is(normalizeErr, domain.ErrInvalidPayload) || invalidCanonicalEvents(events) {
-			if err := service.repository.FailNormalization(
-				ctx, item.Event.TenantID, item.Event.ID, normalizationInvalidCode, service.now().UTC(),
-			); err != nil {
-				return processed, mapDomainError(err)
-			}
-			processed++
-			continue
-		}
-		if normalizeErr != nil {
-			return processed, normalizeErr
-		}
-		for _, event := range events {
-			if err := service.sink.IngestCanonical(ctx, event); err != nil {
-				return processed, err
-			}
-		}
-		if err := service.repository.CompleteNormalization(
-			ctx, item.Event.TenantID, item.Event.ID, service.now().UTC(),
-		); err != nil {
-			return processed, mapDomainError(err)
-		}
-		processed++
+	if !found {
+		return ErrNotFound
 	}
-	return processed, nil
+	if item.Event.Status == domain.RawEventProcessed || item.Event.Status == domain.RawEventFailed {
+		return nil
+	}
+	registration, found := service.registry.Lookup(item.Connection.Provider)
+	if !found || registration.Connector == nil {
+		return ErrUnavailable
+	}
+	events, normalizeErr := registration.Connector.NormalizeEvent(ctx, item.Connection, item.Event)
+	if errors.Is(normalizeErr, domain.ErrInvalidPayload) || invalidCanonicalEvents(events) {
+		return mapDomainError(service.repository.FailNormalization(
+			ctx, item.Event.TenantID, item.Event.ID, normalizationInvalidCode, service.now().UTC(),
+		))
+	}
+	if normalizeErr != nil {
+		return normalizeErr
+	}
+	for _, event := range events {
+		if err := service.sink.IngestCanonical(ctx, event); err != nil {
+			return err
+		}
+	}
+	return mapDomainError(service.repository.CompleteNormalization(
+		ctx, item.Event.TenantID, item.Event.ID, service.now().UTC(),
+	))
 }
 
 func invalidCanonicalEvents(events []domain.CanonicalEvent) bool {
