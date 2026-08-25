@@ -33,6 +33,9 @@ import (
 	opportunityapplication "lidradar/backend/internal/opportunity/application"
 	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
 	opportunitytransport "lidradar/backend/internal/opportunity/transport"
+	riskapplication "lidradar/backend/internal/risk/application"
+	riskdomain "lidradar/backend/internal/risk/domain"
+	riskinfrastructure "lidradar/backend/internal/risk/infrastructure"
 	"lidradar/backend/internal/tenant/application"
 	"lidradar/backend/internal/tenant/domain"
 	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
@@ -49,6 +52,7 @@ type apiFixture struct {
 	tenantService application.Service
 	dispatcher    eventsapplication.Dispatcher
 	worker        jobsapplication.Worker
+	scheduler     jobsapplication.Scheduler
 	candidates    opportunityapplication.CandidateProcessor
 	pool          *pgxpool.Pool
 }
@@ -78,18 +82,32 @@ func newAPIFixture(t *testing.T) apiFixture {
 	)
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
 	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
+	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
+	riskPolicy := riskdomain.NoResponsePolicy{}
+	riskEvaluator := riskapplication.NewEvaluator(riskRepository, riskStates, riskPolicy, ids.Generator{}, time.Now)
+	riskPlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, ids.Generator{}, time.Now,
+	)
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, "integration-outbox",
 		map[string]eventsapplication.Handler{
-			connectorapplication.NormalizationEventType:         connectorapplication.NormalizationEventHandler(jobStore, ids.Generator{}),
-			opportunityapplication.ConversationChangedEventType: opportunityapplication.CandidateEventHandler(jobStore, ids.Generator{}),
+			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, ids.Generator{}),
+			opportunityapplication.ConversationChangedEventType: eventsapplication.ChainHandlers(
+				opportunityapplication.CandidateEventHandler(jobStore, ids.Generator{}),
+				riskapplication.ConversationChangedEventHandler(jobStore, ids.Generator{}),
+			),
+			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
+			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
 		}, time.Now, eventsapplication.DefaultLease,
 	)
 	worker := jobsapplication.NewWorker(
 		jobStore, "integration-jobs",
 		map[string]jobsapplication.Handler{
-			connectorapplication.NormalizationJobType: connectorapplication.NormalizationJobHandler(normalization),
-			opportunityapplication.CandidateJobType:   opportunityapplication.CandidateJobHandler(candidateProcessor),
+			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
+			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
+			riskapplication.RefreshJobType:              riskapplication.RefreshJobHandler(riskPlanner),
+			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(
@@ -113,6 +131,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
 		worker: worker, candidates: candidateProcessor, pool: pool,
+		scheduler: jobsapplication.NewScheduler(jobStore, time.Now),
 	}
 }
 

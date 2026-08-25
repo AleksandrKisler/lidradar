@@ -242,40 +242,51 @@ PATCH /api/v1/opportunities/{opportunityId}
 создаёт запись с источником `USER`. Каждый запрос требует сеанс и корректный
 UUID в `X-Tenant-ID`; чужой идентификатор выглядит как отсутствующий.
 
-### NO_RESPONSE risk
+### Риск NO_RESPONSE
 
-The Risk module owns the `Risk` aggregate and active-risk deduplication. A
-`NO_RESPONSE` check uses a versioned deterministic policy; it does not invoke
-AI. The policy creates or refreshes a risk only when all of these conditions
-hold at execution time:
+Модуль Risk владеет агрегатом риска и устранением повторов активного состояния.
+Проверка `NO_RESPONSE` использует детерминированное версионированное правило
+`no-response/v1` и не обращается к AI. Риск создаётся или обновляется, только
+когда в момент выполнения одновременно истинны условия:
 
-- the last meaningful canonical message is incoming;
-- no outgoing message exists after that triggering message;
-- the related Opportunity is active; and
-- at least the Location response threshold has elapsed in the Location's IANA
-  timezone and weekly business-hours schedule.
+- последнее значимое каноническое сообщение является входящим;
+- после сообщения-основания нет исходящего ответа бизнеса;
+- связанная Opportunity активна;
+- в timezone IANA и недельном расписании Location прошло не меньше заданного
+  для точки порога ответа.
 
-The first 45–89 elapsed business minutes have `HIGH` severity and 90 or more
-have `CRITICAL` severity. Closed periods do not contribute to elapsed time. A
-threshold crossing outside the current working period is carried into the next
-working period.
+Значимым для этого правила считается последнее неудалённое сообщение с
+направлением `INCOMING` или `OUTGOING`. Системные и удалённые сообщения не
+запускают и не закрывают правило. Первые 45–89 прошедших рабочих минут дают
+важность `HIGH`, 90 и более — `CRITICAL`. Закрытое время не учитывается, а
+остаток порога переносится в следующий рабочий период.
 
-Scheduled work contains tenant and Opportunity identifiers plus its due time,
-not authoritative conversation state. The worker must reload current canonical
-state before evaluation. A reply or an inactive Opportunity prevents creation
-and resolves any active `NO_RESPONSE` risk. Replayed or concurrent checks
-atomically create at most one active risk per tenant, Opportunity, and risk
-type; later positive evaluations refresh its evidence instead.
+`conversation.changed.v1` ставит отдельное задание обновления плана. Создание и
+фактическая смена этапа Opportunity атомарно добавляют в исходящий журнал
+`opportunity.created.v1` или `opportunity.stage_changed.v1`. Поэтому первая
+проверка не теряется при гонке между разбором сообщения и созданием Opportunity,
+а закрытие сделки запускает автоматическое разрешение риска.
 
-All repository operations require both tenant and Opportunity identifiers.
-PostgreSQL is the production source of truth and must enforce active-risk
-uniqueness. Cancellation and persistence errors are returned to the worker for
-its normal retry classification; invalid or cross-tenant state is rejected and
-must not mutate a risk.
+Проверка по расписанию содержит tenant и идентификатор Opportunity, срок и ключ
+дедупликации, но не содержит авторитетный снимок переписки. При наступлении срока
+worker заново читает из PostgreSQL Opportunity, Conversation, последнее
+неудалённое значимое Message, Location и все семь строк рабочих часов. Ответ,
+неактивная Opportunity или более новое входящее сообщение до собственного срока
+не дают устаревшему заданию создать ложный риск. Ответ и неактивная Opportunity
+также идемпотентно закрывают уже активный `NO_RESPONSE`.
 
-Feature-level backend contracts added later must likewise define observable
-behavior, data ownership, error behavior, and operational requirements before
-production code is added.
+PostgreSQL является рабочим источником истины. Частичный уникальный индекс
+разрешает не более одного активного риска на сочетание tenant, Opportunity и
+типа; повторные и конкурентные положительные проверки обновляют ту же строку.
+Все операции хранилища требуют tenant и Opportunity. Чужое состояние не
+раскрывается и не изменяется.
+
+Отсутствующая Opportunity для события переписки означает отсутствие
+коммерческого сценария и не является ошибкой. Отсутствующие Location, сообщение
+или полный набор рабочих часов являются постоянной ошибкой конфигурации:
+задание получает безопасный код `RISK_PLAN_INVALID` либо
+`RISK_EVALUATION_INVALID` и переходит в `DEAD`. Ошибки PostgreSQL считаются
+временными и проходят обычную ограниченную сетку повторов.
 
 ### Фоновая обработка
 

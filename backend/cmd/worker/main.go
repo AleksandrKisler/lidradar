@@ -19,6 +19,9 @@ import (
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
 	opportunityapplication "lidradar/backend/internal/opportunity/application"
 	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
+	riskapplication "lidradar/backend/internal/risk/application"
+	riskdomain "lidradar/backend/internal/risk/domain"
+	riskinfrastructure "lidradar/backend/internal/risk/infrastructure"
 	"lidradar/backend/platform/bootstrap"
 	"lidradar/backend/platform/config"
 	"lidradar/backend/platform/ids"
@@ -65,20 +68,34 @@ func run(ctx context.Context, configuration config.Config) error {
 	)
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
 	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
+	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
+	riskPolicy := riskdomain.NoResponsePolicy{}
+	riskEvaluator := riskapplication.NewEvaluator(riskRepository, riskStates, riskPolicy, generator, time.Now)
+	riskPlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, generator, time.Now,
+	)
 
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, ownerID+":outbox",
 		map[string]eventsapplication.Handler{
-			connectorapplication.NormalizationEventType:         connectorapplication.NormalizationEventHandler(jobStore, generator),
-			opportunityapplication.ConversationChangedEventType: opportunityapplication.CandidateEventHandler(jobStore, generator),
+			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, generator),
+			opportunityapplication.ConversationChangedEventType: eventsapplication.ChainHandlers(
+				opportunityapplication.CandidateEventHandler(jobStore, generator),
+				riskapplication.ConversationChangedEventHandler(jobStore, generator),
+			),
+			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, generator),
+			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, generator),
 		},
 		time.Now, eventsapplication.DefaultLease,
 	)
 	worker := jobsapplication.NewWorker(
 		jobStore, ownerID+":jobs",
 		map[string]jobsapplication.Handler{
-			connectorapplication.NormalizationJobType: connectorapplication.NormalizationJobHandler(normalization),
-			opportunityapplication.CandidateJobType:   opportunityapplication.CandidateJobHandler(candidateProcessor),
+			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
+			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
+			riskapplication.RefreshJobType:              riskapplication.RefreshJobHandler(riskPlanner),
+			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)

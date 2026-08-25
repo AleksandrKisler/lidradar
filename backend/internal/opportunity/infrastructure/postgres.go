@@ -3,6 +3,7 @@ package infrastructure
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -10,13 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	eventsdomain "lidradar/backend/internal/events/domain"
+	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	"lidradar/backend/internal/opportunity/domain"
 )
 
-type PostgresRepository struct{ pool *pgxpool.Pool }
+type PostgresRepository struct {
+	pool   *pgxpool.Pool
+	events *eventsinfrastructure.PostgresStore
+}
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+	return &PostgresRepository{pool: pool, events: eventsinfrastructure.NewPostgresStore(pool)}
 }
 
 // Create атомарно создаёт возможность и первую запись истории. При гонке
@@ -55,6 +61,9 @@ func (repository *PostgresRepository) Create(
 		return existing, false, nil
 	}
 	if err := insertHistory(ctx, tx, history); err != nil {
+		return domain.Opportunity{}, false, err
+	}
+	if err := repository.appendEvent(ctx, tx, created, history, domain.CreatedEventName, nil); err != nil {
 		return domain.Opportunity{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -138,10 +147,51 @@ func (repository *PostgresRepository) Transition(
 	if err := insertHistory(ctx, tx, history); err != nil {
 		return domain.Opportunity{}, false, err
 	}
+	if err := repository.appendEvent(ctx, tx, opportunity, history, domain.StageChangedEventName, &from); err != nil {
+		return domain.Opportunity{}, false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Opportunity{}, false, fmt.Errorf("фиксация перехода этапа: %w", err)
 	}
 	return opportunity, true, nil
+}
+
+type opportunityEventData struct {
+	ConversationID string        `json:"conversationId"`
+	FromStage      *domain.Stage `json:"fromStage,omitempty"`
+	ToStage        domain.Stage  `json:"toStage"`
+}
+
+func (repository *PostgresRepository) appendEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	opportunity domain.Opportunity,
+	history domain.StageHistory,
+	eventType string,
+	fromStage *domain.Stage,
+) error {
+	data, err := json.Marshal(opportunityEventData{
+		ConversationID: opportunity.ConversationID,
+		FromStage:      fromStage,
+		ToStage:        opportunity.Stage,
+	})
+	if err != nil {
+		return fmt.Errorf("подготовка события возможности: %w", err)
+	}
+	event, err := eventsdomain.NewEvent(
+		history.ID, eventType, 1, opportunity.TenantID, "opportunity", opportunity.ID,
+		history.ID, data, history.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("проверка события возможности: %w", err)
+	}
+	if repository.events == nil {
+		return errors.New("исходящий журнал возможности не настроен")
+	}
+	if _, _, err := repository.events.AppendTx(ctx, tx, event); err != nil {
+		return fmt.Errorf("добавление события возможности: %w", err)
+	}
+	return nil
 }
 
 type queryRower interface {

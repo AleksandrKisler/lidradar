@@ -27,7 +27,7 @@ func (allowAll) Allowed(context.Context, string, string, string) (bool, error) {
 func TestRiskHTTPListAndTenantIsNotExposed(t *testing.T) {
 	repo := infrastructure.NewTestMemoryRepository()
 	at := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
-	risk, err := domain.NewNoResponse("risk", domain.Finding{TenantID: "tenant", OpportunityID: "opp", LocationID: "loc", TriggerMessageID: "msg", Severity: domain.SeverityHigh, PolicyVersion: "v1", Reason: "waiting"}, at)
+	risk, err := domain.NewNoResponse("risk", domain.Finding{TenantID: "tenant", OpportunityID: "opp", LocationID: "loc", TriggerMessageID: "msg", Severity: domain.SeverityHigh, PolicyVersion: "v1", ReasonCode: "NO_RESPONSE_THRESHOLD_EXCEEDED", Reason: "ожидание ответа", DueAt: at}, at)
 	if err != nil {
 		t.Fatal(err)
 	}

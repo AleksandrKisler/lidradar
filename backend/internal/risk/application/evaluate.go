@@ -1,4 +1,4 @@
-// Package application coordinates Risk use cases through domain ports.
+// Package application согласует сценарии Risk через порты предметной области.
 package application
 
 import (
@@ -9,45 +9,50 @@ import (
 	"lidradar/backend/internal/risk/domain"
 )
 
-var ErrInvalidCheck = errors.New("invalid risk check")
+var ErrInvalidCheck = errors.New("некорректная проверка риска")
 
-// StateReader reloads current canonical conversation/opportunity state. This
-// prevents a delayed worker from making decisions from a stale job payload.
+var (
+	ErrStateNotFound   = errors.New("состояние риска не найдено")
+	ErrStateIncomplete = errors.New("состояние риска не настроено полностью")
+)
+
+// StateReader заново читает каноническое состояние переписки и Opportunity.
+// Поэтому отложенный worker не принимает устаревшую нагрузку задания за истину.
 type StateReader interface {
 	CurrentState(ctx context.Context, tenantID, opportunityID string) (domain.ConversationState, error)
 }
 
-type IDGenerator func() string
+type IDs interface{ NewID() (string, error) }
 
 type Evaluator struct {
 	repository domain.Repository
 	states     StateReader
 	policy     domain.Policy
-	newID      IDGenerator
+	ids        IDs
 	now        func() time.Time
 	events     Invalidator
 }
 
-// WithInvalidator emits an ephemeral refetch signal after durable state has
-// changed. Persistence succeeds independently if no realtime hub is wired.
+// WithInvalidator отправляет временный сигнал перечитать данные после
+// долговечного изменения. Сохранение не зависит от подключения живого канала.
 func (e Evaluator) WithInvalidator(events Invalidator) Evaluator { e.events = events; return e }
 
-func NewEvaluator(repository domain.Repository, states StateReader, policy domain.Policy, newID IDGenerator, now func() time.Time) Evaluator {
-	return Evaluator{repository: repository, states: states, policy: policy, newID: newID, now: now}
+func NewEvaluator(repository domain.Repository, states StateReader, policy domain.Policy, ids IDs, now func() time.Time) Evaluator {
+	return Evaluator{repository: repository, states: states, policy: policy, ids: ids, now: now}
 }
 
-// EvaluateDue re-reads authoritative state, evaluates the versioned policy,
-// atomically deduplicates an active finding, and resolves a no-longer-valid one.
+// EvaluateDue перечитывает авторитетное состояние, применяет версионированное
+// правило, атомарно устраняет повтор и закрывает утративший силу риск.
 func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID string) (domain.Risk, bool, error) {
-	if tenantID == "" || opportunityID == "" || e.repository == nil || e.states == nil || e.policy == nil || e.newID == nil || e.now == nil {
+	if tenantID == "" || opportunityID == "" || e.repository == nil || e.states == nil || e.policy == nil || e.ids == nil || e.now == nil {
 		return domain.Risk{}, false, ErrInvalidCheck
 	}
 	state, err := e.states.CurrentState(ctx, tenantID, opportunityID)
 	if err != nil {
 		return domain.Risk{}, false, err
 	}
-	// A reader returning another tenant/entity is a boundary violation, not a
-	// harmless cache miss.
+	// Другой tenant или объект является нарушением границы, а не безопасным
+	// промахом кэша.
 	if state.TenantID != tenantID || state.OpportunityID != opportunityID {
 		return domain.Risk{}, false, ErrInvalidCheck
 	}
@@ -57,6 +62,9 @@ func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID stri
 		return domain.Risk{}, false, err
 	}
 	if decision.Finding == nil {
+		if !decision.Resolve {
+			return domain.Risk{}, false, nil
+		}
 		active, _, findErr := e.repository.FindActive(ctx, tenantID, opportunityID, e.policy.Type())
 		if findErr != nil {
 			return domain.Risk{}, false, findErr
@@ -68,7 +76,11 @@ func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID stri
 		err = resolveErr
 		return domain.Risk{}, false, err
 	}
-	risk, err := domain.NewNoResponse(e.newID(), *decision.Finding, now)
+	riskID, err := e.ids.NewID()
+	if err != nil {
+		return domain.Risk{}, false, err
+	}
+	risk, err := domain.NewNoResponse(riskID, *decision.Finding, now)
 	if err != nil {
 		return domain.Risk{}, false, err
 	}
@@ -79,8 +91,8 @@ func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID stri
 	return stored, created, err
 }
 
-// DueAt computes the durable scheduled-check time from current state. The job
-// should persist tenant/opportunity identifiers and this instant, not a state snapshot.
+// DueAt вычисляет срок долговечной проверки. Задание сохраняет tenant,
+// идентификатор Opportunity и этот момент, но не снимок состояния.
 func (e Evaluator) DueAt(state domain.ConversationState) (time.Time, error) {
 	decision, err := e.policy.Evaluate(state, state.LastMeaningfulAt)
 	return decision.DueAt, err

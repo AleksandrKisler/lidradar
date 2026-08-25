@@ -41,7 +41,8 @@ func TestNoResponseBoundaryAtFortyFiveMinutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !decision.DueAt.Equal(localTime(t, "2026-08-17 12:45")) || decision.Finding == nil || decision.Finding.Severity != SeverityHigh {
+	if !decision.DueAt.Equal(localTime(t, "2026-08-17 12:45")) || decision.Finding == nil ||
+		decision.Finding.Severity != SeverityHigh || decision.Finding.DueAt != decision.DueAt {
 		t.Fatalf("unexpected boundary decision: %#v", decision)
 	}
 }
@@ -72,10 +73,18 @@ func TestNoResponseRequiresCurrentUnansweredIncomingAndActiveOpportunity(t *test
 			state := baseState(t, "2026-08-17 12:00")
 			test.mutate(&state)
 			decision, err := (NoResponsePolicy{}).Evaluate(state, localTime(t, "2026-08-17 14:00"))
-			if err != nil || decision.Finding != nil {
+			if err != nil || decision.Finding != nil || !decision.Resolve {
 				t.Fatalf("finding = %#v, err = %v", decision.Finding, err)
 			}
 		})
+	}
+}
+
+func TestNewerIncomingBeforeItsDueDoesNotResolveExistingRisk(t *testing.T) {
+	state := baseState(t, "2026-08-17 13:00")
+	decision, err := (NoResponsePolicy{}).Evaluate(state, localTime(t, "2026-08-17 13:10"))
+	if err != nil || decision.Finding != nil || decision.Resolve {
+		t.Fatalf("решение = %#v, ошибка = %v", decision, err)
 	}
 }
 

@@ -23,7 +23,7 @@ func (s *signals) Publish(tenant, event, id string) { *s = append(*s, tenant+"/"
 
 func storeRisk(t *testing.T, repo *infrastructure.MemoryRepository, id, tenant string, severity domain.Severity, at time.Time) {
 	t.Helper()
-	risk, err := domain.NewNoResponse(id, domain.Finding{TenantID: tenant, OpportunityID: "opp-" + id, LocationID: "loc", TriggerMessageID: "msg", Severity: severity, PolicyVersion: "v1", Reason: "waiting"}, at)
+	risk, err := domain.NewNoResponse(id, domain.Finding{TenantID: tenant, OpportunityID: "opp-" + id, LocationID: "loc", TriggerMessageID: "msg", Severity: severity, PolicyVersion: "v1", ReasonCode: "NO_RESPONSE_THRESHOLD_EXCEEDED", Reason: "ожидание ответа", DueAt: at}, at)
 	if err != nil {
 		t.Fatal(err)
 	}

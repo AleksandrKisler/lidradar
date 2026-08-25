@@ -21,7 +21,11 @@ func (p NoResponsePolicy) Evaluate(state ConversationState, at time.Time) (Decis
 		return Decision{}, err
 	}
 	decision := Decision{DueAt: due}
-	if state.LastMeaningful != DirectionIncoming || !state.ActiveOpportunity || state.OutgoingAfterTrigger || at.Before(due) {
+	if state.LastMeaningful != DirectionIncoming || !state.ActiveOpportunity || state.OutgoingAfterTrigger {
+		decision.Resolve = true
+		return decision, nil
+	}
+	if at.Before(due) {
 		return decision, nil
 	}
 	elapsed, err := state.BusinessHours.ElapsedBusinessTime(state.LastMeaningfulAt, at)
@@ -35,7 +39,8 @@ func (p NoResponsePolicy) Evaluate(state ConversationState, at time.Time) (Decis
 	decision.Finding = &Finding{
 		TenantID: state.TenantID, OpportunityID: state.OpportunityID, LocationID: state.LocationID,
 		TriggerMessageID: state.LastMeaningfulID, Severity: severity, PolicyVersion: p.Version(),
-		Reason: fmt.Sprintf("business has not replied for %d business minutes", int(elapsed/time.Minute)),
+		ReasonCode: "NO_RESPONSE_THRESHOLD_EXCEEDED", DueAt: due,
+		Reason: fmt.Sprintf("Бизнес не ответил клиенту в течение %d рабочих минут", int(elapsed/time.Minute)),
 	}
 	return decision, nil
 }

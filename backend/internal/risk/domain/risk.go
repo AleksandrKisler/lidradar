@@ -1,10 +1,12 @@
-// Package domain owns the Risk aggregate and its business invariants.
+// Package domain содержит агрегат Risk и его бизнес-инварианты.
 package domain
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -15,6 +17,8 @@ const TypeNoResponse Type = "NO_RESPONSE"
 type Severity string
 
 const (
+	SeverityLow      Severity = "LOW"
+	SeverityMedium   Severity = "MEDIUM"
 	SeverityHigh     Severity = "HIGH"
 	SeverityCritical Severity = "CRITICAL"
 )
@@ -22,20 +26,27 @@ const (
 type Status string
 
 const (
-	StatusOpen         Status = "OPEN"
-	StatusAcknowledged Status = "ACKNOWLEDGED"
-	StatusActed        Status = "ACTED"
-	StatusResolved     Status = "RESOLVED"
+	StatusOpen          Status = "OPEN"
+	StatusAcknowledged  Status = "ACKNOWLEDGED"
+	StatusActed         Status = "ACTED"
+	StatusResolved      Status = "RESOLVED"
+	StatusFalsePositive Status = "FALSE_POSITIVE"
+	StatusIgnored       Status = "IGNORED"
+	StatusExpired       Status = "EXPIRED"
 )
 
 type Source string
 
-const SourceRule Source = "RULE"
+const (
+	SourceRule   Source = "RULE"
+	SourceHybrid Source = "HYBRID"
+	SourceManual Source = "MANUAL"
+)
 
-var ErrInvalidRisk = errors.New("invalid risk")
+var ErrInvalidRisk = errors.New("некорректный риск")
 
-// Risk is a condition requiring attention, independent of Opportunity stage.
-// All timestamps are instants and must be persisted as TIMESTAMPTZ in UTC.
+// Risk — требующее внимания состояние, не зависящее от этапа Opportunity.
+// Все временные отметки являются моментами времени и хранятся в UTC.
 type Risk struct {
 	ID               string     `json:"id"`
 	TenantID         string     `json:"-"`
@@ -47,22 +58,26 @@ type Risk struct {
 	Source           Source     `json:"source"`
 	PolicyVersion    string     `json:"policyVersion"`
 	TriggerMessageID string     `json:"triggerMessageId"`
+	ReasonCode       string     `json:"reasonCode"`
 	Reason           string     `json:"reason"`
 	DetectedAt       time.Time  `json:"detectedAt"`
+	DueAt            time.Time  `json:"dueAt"`
 	UpdatedAt        time.Time  `json:"updatedAt"`
 	AcknowledgedAt   *time.Time `json:"acknowledgedAt,omitempty"`
+	ActedAt          *time.Time `json:"actedAt,omitempty"`
 	ResolvedAt       *time.Time `json:"resolvedAt,omitempty"`
 }
 
-// NewNoResponse creates the deterministic NO_RESPONSE aggregate.
+// NewNoResponse создаёт детерминированный агрегат NO_RESPONSE.
 func NewNoResponse(id string, finding Finding, now time.Time) (Risk, error) {
 	if id == "" || finding.TenantID == "" || finding.OpportunityID == "" ||
 		finding.LocationID == "" || finding.TriggerMessageID == "" ||
-		finding.PolicyVersion == "" || finding.Reason == "" || now.IsZero() ||
+		finding.PolicyVersion == "" || finding.ReasonCode == "" || finding.Reason == "" ||
+		finding.DueAt.IsZero() || now.IsZero() || finding.DueAt.After(now) ||
 		(finding.Severity != SeverityHigh && finding.Severity != SeverityCritical) {
 		return Risk{}, ErrInvalidRisk
 	}
-	return Risk{
+	risk := Risk{
 		ID:               id,
 		TenantID:         finding.TenantID,
 		OpportunityID:    finding.OpportunityID,
@@ -73,31 +88,76 @@ func NewNoResponse(id string, finding Finding, now time.Time) (Risk, error) {
 		Source:           SourceRule,
 		PolicyVersion:    finding.PolicyVersion,
 		TriggerMessageID: finding.TriggerMessageID,
+		ReasonCode:       finding.ReasonCode,
 		Reason:           finding.Reason,
 		DetectedAt:       now.UTC(),
+		DueAt:            finding.DueAt.UTC(),
 		UpdatedAt:        now.UTC(),
-	}, nil
+	}
+	if risk.Validate() != nil {
+		return Risk{}, ErrInvalidRisk
+	}
+	return risk, nil
 }
 
-// Refresh updates a repeated active finding instead of creating a duplicate.
+// Refresh обновляет повторное активное обнаружение вместо создания дубликата.
 func (r *Risk) Refresh(finding Finding, now time.Time) error {
 	if !r.Active() || finding.TenantID != r.TenantID || finding.OpportunityID != r.OpportunityID || now.IsZero() {
 		return ErrInvalidRisk
 	}
 	r.Severity = finding.Severity
+	r.LocationID = finding.LocationID
+	r.ReasonCode = finding.ReasonCode
 	r.Reason = finding.Reason
 	r.PolicyVersion = finding.PolicyVersion
 	r.TriggerMessageID = finding.TriggerMessageID
+	r.DetectedAt = now.UTC()
+	r.DueAt = finding.DueAt.UTC()
 	r.UpdatedAt = now.UTC()
-	return nil
+	return r.Validate()
 }
 
 func (r Risk) Active() bool {
 	return r.Status == StatusOpen || r.Status == StatusAcknowledged || r.Status == StatusActed
 }
 
-// Acknowledge records that a user has seen an active risk. Replays are
-// deliberately idempotent and never reopen resolved risks.
+var reasonCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,99}$`)
+
+// Validate защищает агрегат и при создании, и при чтении из PostgreSQL.
+func (r Risk) Validate() error {
+	if r.ID == "" || r.TenantID == "" || r.OpportunityID == "" || r.LocationID == "" ||
+		r.Type != TypeNoResponse || (r.Severity != SeverityHigh && r.Severity != SeverityCritical) ||
+		(r.Source != SourceRule) || r.PolicyVersion == "" || r.PolicyVersion != strings.TrimSpace(r.PolicyVersion) ||
+		r.TriggerMessageID == "" || !reasonCodePattern.MatchString(r.ReasonCode) || r.Reason == "" ||
+		r.Reason != strings.TrimSpace(r.Reason) || r.DetectedAt.IsZero() || r.DueAt.IsZero() ||
+		r.DueAt.After(r.DetectedAt) || r.UpdatedAt.IsZero() {
+		return ErrInvalidRisk
+	}
+	switch r.Status {
+	case StatusOpen:
+		if r.AcknowledgedAt != nil || r.ActedAt != nil || r.ResolvedAt != nil {
+			return ErrInvalidRisk
+		}
+	case StatusAcknowledged:
+		if r.AcknowledgedAt == nil || r.ActedAt != nil || r.ResolvedAt != nil {
+			return ErrInvalidRisk
+		}
+	case StatusActed:
+		if r.AcknowledgedAt == nil || r.ActedAt == nil || r.ResolvedAt != nil {
+			return ErrInvalidRisk
+		}
+	case StatusResolved, StatusFalsePositive, StatusIgnored, StatusExpired:
+		if r.ResolvedAt == nil {
+			return ErrInvalidRisk
+		}
+	default:
+		return ErrInvalidRisk
+	}
+	return nil
+}
+
+// Acknowledge отмечает, что пользователь увидел активный риск. Повтор вызова
+// идемпотентен и никогда не открывает закрытый риск заново.
 func (r *Risk) Acknowledge(now time.Time) error {
 	if now.IsZero() {
 		return ErrInvalidRisk
@@ -129,9 +189,9 @@ func (r *Risk) Resolve(now time.Time) error {
 	return nil
 }
 
-// Repository is tenant-aware and atomically enforces one active risk per
-// tenant, opportunity and type. A PostgreSQL adapter must back this contract
-// with the corresponding partial unique index.
+// Repository учитывает организацию и атомарно допускает не более одного
+// активного риска на tenant, Opportunity и тип. PostgreSQL-адаптер подкрепляет
+// этот контракт частичным уникальным индексом.
 type Repository interface {
 	UpsertActive(ctx context.Context, risk Risk) (Risk, bool, error)
 	FindActive(ctx context.Context, tenantID, opportunityID string, riskType Type) (Risk, bool, error)
@@ -145,8 +205,8 @@ const (
 	DirectionOutgoing Direction = "OUTGOING"
 )
 
-// ConversationState is a fresh, authoritative projection loaded when a
-// scheduled check executes. Scheduled payloads must contain identifiers only.
+// ConversationState — свежая авторитетная проекция, читаемая при выполнении
+// проверки по расписанию. В полезной нагрузке хранятся только идентификаторы.
 type ConversationState struct {
 	TenantID             string
 	OpportunityID        string
@@ -165,15 +225,18 @@ type Finding struct {
 	TriggerMessageID                    string
 	Severity                            Severity
 	PolicyVersion                       string
+	ReasonCode                          string
 	Reason                              string
+	DueAt                               time.Time
 }
 
 type Decision struct {
 	Finding *Finding
 	DueAt   time.Time
+	Resolve bool
 }
 
-// Policy is versioned so stored risk evidence remains explainable.
+// Policy версионируется, чтобы основание сохранённого риска оставалось объяснимым.
 type Policy interface {
 	Type() Type
 	Version() string
@@ -183,7 +246,8 @@ type Policy interface {
 func validateState(state ConversationState) error {
 	if state.TenantID == "" || state.OpportunityID == "" || state.LocationID == "" ||
 		state.LastMeaningfulID == "" || state.LastMeaningfulAt.IsZero() || state.ResponseThreshold < time.Minute ||
-		state.ResponseThreshold > 1440*time.Minute || state.ResponseThreshold%time.Minute != 0 {
+		state.ResponseThreshold > 1440*time.Minute || state.ResponseThreshold%time.Minute != 0 ||
+		(state.LastMeaningful != DirectionIncoming && state.LastMeaningful != DirectionOutgoing) {
 		return fmt.Errorf("%w: incomplete conversation state", ErrInvalidRisk)
 	}
 	return nil

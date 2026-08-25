@@ -17,6 +17,10 @@ func (r *stateReader) CurrentState(context.Context, string, string) (domain.Conv
 	return r.state, nil
 }
 
+type idFunction func() (string, error)
+
+func (function idFunction) NewID() (string, error) { return function() }
+
 func evaluationState() domain.ConversationState {
 	weekly := make(map[time.Weekday][]domain.BusinessPeriod)
 	for day := time.Sunday; day <= time.Saturday; day++ {
@@ -34,7 +38,7 @@ func TestEvaluateDueRereadsStateAndAutoResolves(t *testing.T) {
 	repository := infrastructure.NewTestMemoryRepository()
 	reader := &stateReader{state: evaluationState()}
 	now := time.Date(2026, 8, 21, 10, 45, 0, 0, time.UTC)
-	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk-1" }, func() time.Time { return now })
+	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, idFunction(func() (string, error) { return "risk-1", nil }), func() time.Time { return now })
 
 	risk, created, err := evaluator.EvaluateDue(context.Background(), "tenant", "opportunity")
 	if err != nil || !created || risk.Status != domain.StatusOpen {
@@ -57,12 +61,12 @@ func TestEvaluateDueReplayCreatesOneRisk(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	var mu sync.Mutex
 	ids := 0
-	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string {
+	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, idFunction(func() (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		ids++
-		return "risk-" + string(rune('a'+ids))
-	}, func() time.Time { return now })
+		return "risk-" + string(rune('a'+ids)), nil
+	}), func() time.Time { return now })
 
 	const attempts = 10
 	created := make(chan bool, attempts)
@@ -95,7 +99,7 @@ func TestEvaluateDueRejectsCrossTenantState(t *testing.T) {
 	repository := infrastructure.NewTestMemoryRepository()
 	reader := &stateReader{state: evaluationState()}
 	reader.state.TenantID = "another-tenant"
-	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, func() string { return "risk" }, time.Now)
+	evaluator := application.NewEvaluator(repository, reader, domain.NoResponsePolicy{}, idFunction(func() (string, error) { return "risk", nil }), time.Now)
 	if _, _, err := evaluator.EvaluateDue(context.Background(), "tenant", "opportunity"); err != application.ErrInvalidCheck {
 		t.Fatalf("err = %v", err)
 	}

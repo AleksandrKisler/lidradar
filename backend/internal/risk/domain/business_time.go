@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-var ErrInvalidBusinessHours = errors.New("invalid business hours")
+var ErrInvalidBusinessHours = errors.New("некорректные рабочие часы")
 
-// TimeOfDay is a wall-clock offset from local midnight.
+// TimeOfDay — смещение настенных часов от местной полуночи.
 type TimeOfDay time.Duration
 
 func Clock(hour, minute int) TimeOfDay {
@@ -20,8 +20,8 @@ type BusinessPeriod struct {
 	Open, Close TimeOfDay
 }
 
-// BusinessHours is a weekly schedule in an IANA timezone. Overnight periods
-// are intentionally rejected; they must be represented as two weekday periods.
+// BusinessHours — недельное расписание в timezone IANA. Интервалы через полночь
+// намеренно запрещены: их нужно представить двумя периодами соседних дней.
 type BusinessHours struct {
 	Timezone string
 	Weekly   map[time.Weekday][]BusinessPeriod
@@ -56,7 +56,7 @@ func localDayPeriod(day time.Time, period BusinessPeriod, loc *time.Location) (t
 	return midnight.Add(time.Duration(period.Open)), midnight.Add(time.Duration(period.Close))
 }
 
-// AddBusinessTime carries elapsed time over closed periods and returns an instant.
+// AddBusinessTime переносит остаток через закрытые периоды и возвращает момент времени.
 func (h BusinessHours) AddBusinessTime(from time.Time, amount time.Duration) (time.Time, error) {
 	loc, err := h.validate()
 	if err != nil || from.IsZero() || amount < 0 {
@@ -66,8 +66,8 @@ func (h BusinessHours) AddBusinessTime(from time.Time, amount time.Duration) (ti
 		return from, nil
 	}
 	cursor := from
-	// A valid weekly schedule guarantees discovery within seven days. The
-	// larger guard supports long thresholds while protecting corrupt input.
+	// Корректное недельное расписание гарантирует следующий период за семь дней.
+	// Больший предел поддерживает длинные пороги и защищает от повреждённых данных.
 	for days := 0; days < 3660; days++ {
 		local := cursor.In(loc)
 		periods := append([]BusinessPeriod(nil), h.Weekly[local.Weekday()]...)
@@ -93,7 +93,7 @@ func (h BusinessHours) AddBusinessTime(from time.Time, amount time.Duration) (ti
 	return time.Time{}, ErrInvalidBusinessHours
 }
 
-// ElapsedBusinessTime measures only intersections with configured periods.
+// ElapsedBusinessTime считает только пересечения с настроенными рабочими периодами.
 func (h BusinessHours) ElapsedBusinessTime(from, to time.Time) (time.Duration, error) {
 	loc, err := h.validate()
 	if err != nil || from.IsZero() || to.IsZero() || to.Before(from) {

@@ -38,7 +38,8 @@ func (r *MemoryRepository) UpsertActive(ctx context.Context, candidate domain.Ri
 	if current, ok := r.items[key]; ok && current.Active() {
 		finding := domain.Finding{TenantID: candidate.TenantID, OpportunityID: candidate.OpportunityID,
 			LocationID: candidate.LocationID, TriggerMessageID: candidate.TriggerMessageID,
-			Severity: candidate.Severity, PolicyVersion: candidate.PolicyVersion, Reason: candidate.Reason}
+			Severity: candidate.Severity, PolicyVersion: candidate.PolicyVersion,
+			ReasonCode: candidate.ReasonCode, Reason: candidate.Reason, DueAt: candidate.DueAt}
 		if err := current.Refresh(finding, candidate.UpdatedAt); err != nil {
 			return domain.Risk{}, false, err
 		}

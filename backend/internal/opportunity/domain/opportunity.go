@@ -19,6 +19,11 @@ var (
 	ErrInvalidTransition = errors.New("недопустимый переход этапа")
 )
 
+const (
+	CreatedEventName      = "opportunity.created"
+	StageChangedEventName = "opportunity.stage_changed"
+)
+
 // Stage — самостоятельный коммерческий этап. Риск не является этапом сделки.
 type Stage string
 

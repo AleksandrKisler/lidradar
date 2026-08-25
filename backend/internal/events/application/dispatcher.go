@@ -20,6 +20,23 @@ type Store interface {
 
 type Handler func(context.Context, domain.Event) error
 
+// ChainHandlers последовательно выполняет независимые подписки одного типа.
+// При повторной доставке уже выполненные шаги остаются безопасными благодаря
+// собственным устойчивым ключам дедупликации.
+func ChainHandlers(handlers ...Handler) Handler {
+	return func(ctx context.Context, event domain.Event) error {
+		for _, handler := range handlers {
+			if handler == nil {
+				return jobsdomain.Permanent("BACKGROUND_CONFIGURATION_INVALID", errors.New("обработчик события не настроен"))
+			}
+			if err := handler(ctx, event); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
 // Dispatcher доставляет исходящий журнал как минимум один раз. Поэтому каждый
 // обработчик обязан опираться на устойчивый ключ дедупликации события.
 type Dispatcher struct {
