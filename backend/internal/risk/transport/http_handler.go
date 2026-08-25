@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"lidradar/backend/internal/risk/application"
 	"lidradar/backend/internal/risk/domain"
 	httpplatform "lidradar/backend/platform/http"
@@ -30,14 +32,21 @@ func NewHandler(radar application.Radar, principals PrincipalResolver, events *H
 }
 
 func (h Handler) Router() http.Handler {
-	r := http.NewServeMux()
-	r.HandleFunc("GET /api/v1/radar", h.summary)
-	r.HandleFunc("GET /api/v1/risks", h.list)
-	r.HandleFunc("GET /api/v1/risks/{riskID}", h.detail)
-	r.HandleFunc("POST /api/v1/risks/{riskID}/acknowledge", h.acknowledge)
-	r.HandleFunc("POST /api/v1/risks/{riskID}/resolve", h.resolve)
-	r.HandleFunc("GET /api/v1/events", h.stream)
+	r := chi.NewRouter()
+	h.RegisterRoutes(r, "")
 	return r
+}
+
+// RegisterRoutes добавляет маршруты Radar к общему корневому маршрутизатору.
+// Это позволяет сосуществовать с уже смонтированными маршрутами /api/v1.
+func (h Handler) RegisterRoutes(router chi.Router, prefix string) {
+	prefix = strings.TrimSuffix(prefix, "/")
+	router.Get(prefix+"/radar", h.summary)
+	router.Get(prefix+"/risks", h.list)
+	router.Get(prefix+"/risks/{riskID}", h.detail)
+	router.Post(prefix+"/risks/{riskID}/acknowledge", h.acknowledge)
+	router.Post(prefix+"/risks/{riskID}/resolve", h.resolve)
+	router.Get(prefix+"/events", h.stream)
 }
 
 func (h Handler) principal(w http.ResponseWriter, r *http.Request) (string, string, bool) {
@@ -66,7 +75,11 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	page, err := h.radar.List(r.Context(), a, t, application.ListQuery{Status: domain.Status(r.URL.Query().Get("status")), Limit: limit, After: r.URL.Query().Get("cursor")})
+	filters := filtersFrom(r)
+	page, err := h.radar.List(r.Context(), a, t, application.ListQuery{
+		Filters: filters, Status: domain.Status(r.URL.Query().Get("status")),
+		Limit: limit, After: r.URL.Query().Get("cursor"),
+	})
 	if handleError(w, r, err) {
 		return
 	}
@@ -77,7 +90,7 @@ func (h Handler) detail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d, err := h.radar.Get(r.Context(), a, t, r.PathValue("riskID"))
+	d, err := h.radar.Get(r.Context(), a, t, chi.URLParam(r, "riskID"))
 	if handleError(w, r, err) {
 		return
 	}
@@ -88,7 +101,7 @@ func (h Handler) summary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s, err := h.radar.Summary(r.Context(), a, t)
+	s, err := h.radar.Summary(r.Context(), a, t, filtersFrom(r))
 	if handleError(w, r, err) {
 		return
 	}
@@ -103,11 +116,19 @@ func (h Handler) command(w http.ResponseWriter, r *http.Request, fn func(context
 	if !ok {
 		return
 	}
-	risk, err := fn(r.Context(), a, t, r.PathValue("riskID"))
+	risk, err := fn(r.Context(), a, t, chi.URLParam(r, "riskID"))
 	if handleError(w, r, err) {
 		return
 	}
 	writeJSON(w, 200, risk)
+}
+
+func filtersFrom(r *http.Request) application.Filters {
+	return application.Filters{
+		LocationID: r.URL.Query().Get("locationId"),
+		Severity:   domain.Severity(r.URL.Query().Get("severity")),
+		RiskType:   domain.Type(r.URL.Query().Get("riskType")),
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

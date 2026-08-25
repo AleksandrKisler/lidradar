@@ -433,29 +433,36 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Переход назад, повторное открытие или преждевременный WON запрещены.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/radar:
-    x-lidradar-runtime-status: planned
     get:
-      summary: Get Radar summary
+      summary: Получить сводку Radar
       operationId: getRadarSummary
+      parameters:
+        - { name: locationId, in: query, schema: { type: string, format: uuid } }
+        - { name: severity, in: query, schema: { $ref: '#/components/schemas/RiskSeverity' } }
+        - { name: riskType, in: query, schema: { $ref: '#/components/schemas/RiskType' } }
       responses:
         '200':
-          description: Tenant Radar totals. Money values are exact decimal strings.
+          description: Сводка организации. Денежные значения представлены точными десятичными строками в основной валюте организации.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RadarSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks:
-    x-lidradar-runtime-status: planned
     get:
-      summary: List tenant risks
+      summary: Получить список рисков организации
       operationId: listRisks
       parameters:
         - { name: status, in: query, schema: { $ref: '#/components/schemas/RiskStatus' } }
+        - { name: locationId, in: query, schema: { type: string, format: uuid } }
+        - { name: severity, in: query, schema: { $ref: '#/components/schemas/RiskSeverity' } }
+        - { name: riskType, in: query, schema: { $ref: '#/components/schemas/RiskType' } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         '200':
-          description: Priority-ordered tenant risks and an opaque continuation cursor.
+          description: Риски в порядке серверного приоритета и непрозрачный курсор продолжения.
           content:
             application/json:
               schema:
@@ -464,36 +471,42 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/RiskDetail' } }
                   nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks/{riskId}:
-    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
     get:
-      summary: Get Risk detail
+      summary: Получить детали риска
       operationId: getRisk
       responses:
         '200':
-          description: Risk and currently available related resources.
+          description: Риск и связанные данные, уже созданные владеющими модулями.
           content: { application/json: { schema: { $ref: '#/components/schemas/RiskDetail' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/acknowledge:
-    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
     post:
-      summary: Acknowledge a Risk
+      summary: Подтвердить просмотр риска
       operationId: acknowledgeRisk
       responses:
-        '200': { description: Idempotently acknowledged risk, content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
+        '200': { description: Текущее состояние риска; повтор команды идемпотентен., content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/resolve:
-    x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
     post:
-      summary: Resolve a Risk
+      summary: Закрыть риск
       operationId: resolveRisk
       responses:
-        '200': { description: Idempotently resolved risk, content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
+        '200': { description: Текущее состояние риска; повтор команды идемпотентен., content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/recommendation:
@@ -529,13 +542,13 @@ paths:
         '201': { description: Append-only Outcome created, content: { application/json: { schema: { $ref: '#/components/schemas/Outcome' } } } }
         '409': { description: Idempotency key conflict }
   /api/v1/events:
-    x-lidradar-runtime-status: planned
     get:
-      summary: Stream tenant invalidation signals
+      summary: Получать сигналы об изменениях организации
       operationId: streamInvalidations
-      description: Ephemeral tenant-scoped invalidations; clients refetch authoritative REST resources.
+      description: Временные сигналы в границах организации без бизнес-состояния; после сигнала клиент перечитывает авторитетный REST-ресурс.
       responses:
-        '200': { description: "text/event-stream containing risk.changed, risk.acknowledged, and risk.resolved signals" }
+        '200': { description: "Поток text/event-stream с событиями risk.changed, risk.acknowledged и risk.resolved." }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/opportunities/{opportunityId}/revenue:
     x-lidradar-runtime-status: planned
@@ -574,7 +587,7 @@ components:
     ConversationId: { name: conversationId, in: path, required: true, schema: { type: string, format: uuid } }
     OpportunityId: { name: opportunityId, in: path, required: true, schema: { type: string, format: uuid } }
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
-    RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
+    RiskId: { name: riskId, in: path, required: true, schema: { type: string, format: uuid } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
   responses:
     BadRequest: { description: 'Request body, tenant selector, or domain value is invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -977,7 +990,9 @@ components:
       required: [stage]
       properties:
         stage: { $ref: '#/components/schemas/OpportunityStage' }
-    RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
+    RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED, FALSE_POSITIVE, IGNORED, EXPIRED] }
+    RiskSeverity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+    RiskType: { type: string, enum: [NO_RESPONSE] }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }
     Recommendation:
@@ -1020,38 +1035,83 @@ components:
       properties: { revenue: { $ref: '#/components/schemas/RevenueEvent' }, attribution: { $ref: '#/components/schemas/RevenueAttribution' } }
     Risk:
       type: object
-      required: [id, opportunityId, locationId, type, severity, status, source, policyVersion, triggerMessageId, reason, detectedAt, updatedAt]
+      additionalProperties: false
+      required: [id, opportunityId, locationId, type, severity, status, source, policyVersion, triggerMessageId, reasonCode, reason, detectedAt, dueAt, updatedAt]
       properties:
-        id: { type: string }
-        opportunityId: { type: string }
-        locationId: { type: string }
-        type: { type: string, enum: [NO_RESPONSE] }
-        severity: { type: string, enum: [HIGH, CRITICAL] }
+        id: { type: string, format: uuid }
+        opportunityId: { type: string, format: uuid }
+        locationId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/RiskType' }
+        severity: { $ref: '#/components/schemas/RiskSeverity' }
         status: { $ref: '#/components/schemas/RiskStatus' }
         source: { type: string, enum: [RULE] }
         policyVersion: { type: string }
-        triggerMessageId: { type: string }
+        triggerMessageId: { type: string, format: uuid }
+        reasonCode: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,99}$' }
         reason: { type: string }
         detectedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         acknowledgedAt: { type: string, format: date-time }
+        actedAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time }
+    RadarOpportunity:
+      type: object
+      additionalProperties: false
+      required: [id, stage, locationId, potentialRevenue, currency]
+      properties:
+        id: { type: string, format: uuid }
+        stage: { $ref: '#/components/schemas/OpportunityStage' }
+        locationId: { type: string, format: uuid }
+        potentialRevenue: { type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{2}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    RadarConversation:
+      type: object
+      additionalProperties: false
+      required: [id, contactId]
+      properties:
+        id: { type: string, format: uuid }
+        contactId: { type: string, format: uuid }
+    RadarRecommendation:
+      type: object
+      additionalProperties: false
+      required: [id, text]
+      properties: { id: { type: string, format: uuid }, text: { type: string } }
+    RadarAction:
+      type: object
+      additionalProperties: false
+      required: [id, type, createdAt]
+      properties: { id: { type: string, format: uuid }, type: { type: string }, createdAt: { type: string, format: date-time } }
+    RadarOutcome:
+      type: object
+      additionalProperties: false
+      required: [id, type, createdAt]
+      properties: { id: { type: string, format: uuid }, type: { type: string }, createdAt: { type: string, format: date-time } }
+    RadarRevenue:
+      type: object
+      additionalProperties: false
+      required: [currency, potential, confirmedRecovered]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        potential: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }
+        confirmedRecovered: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }
     RiskDetail:
       type: object
-      required: [risk, actions]
+      additionalProperties: false
+      required: [risk, opportunity, conversation, actions]
       properties:
         risk: { $ref: '#/components/schemas/Risk' }
-        opportunity: { type: object, additionalProperties: true }
-        conversation: { type: object, additionalProperties: true }
-        recommendation: { type: object, additionalProperties: true }
-        actions: { type: array, items: { type: object, additionalProperties: true } }
-        outcome: { type: object, additionalProperties: true }
-        revenue: { type: object, additionalProperties: true }
+        opportunity: { $ref: '#/components/schemas/RadarOpportunity' }
+        conversation: { $ref: '#/components/schemas/RadarConversation' }
+        recommendation: { $ref: '#/components/schemas/RadarRecommendation' }
+        actions: { type: array, items: { $ref: '#/components/schemas/RadarAction' } }
+        outcome: { $ref: '#/components/schemas/RadarOutcome' }
+        revenue: { $ref: '#/components/schemas/RadarRevenue' }
     RadarSummary:
       type: object
       required: [openRisks, criticalRisks, potentialRevenue, confirmedRecoveredRevenue]
       properties:
         openRisks: { type: integer, minimum: 0 }
         criticalRisks: { type: integer, minimum: 0 }
-        potentialRevenue: { type: string, pattern: '^-?[0-9]+(\.[0-9]+)?$' }
-        confirmedRecoveredRevenue: { type: string, pattern: '^-?[0-9]+(\.[0-9]+)?$' }
+        potentialRevenue: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }
+        confirmedRecoveredRevenue: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }

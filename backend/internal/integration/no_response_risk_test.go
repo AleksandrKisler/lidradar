@@ -1,8 +1,11 @@
 package integration_test
 
 import (
+	"bufio"
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,6 +46,34 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	connectionID := jsonID(t, connected)
 	path := "/api/v1/webhooks/GENERIC_WEBHOOK/" + tenantID + "/" + connectionID
 
+	// Клиент подписывается до появления риска. Поток передаёт только сигнал,
+	// поэтому после него ниже обязательно выполняется REST-перечитывание.
+	server := httptest.NewServer(fixture.handler)
+	defer server.Close()
+	streamContext, stopStream := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopStream()
+	streamRequest, err := http.NewRequestWithContext(
+		streamContext, http.MethodGet, server.URL+"/api/v1/events", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRequest.AddCookie(owner.Cookie)
+	streamRequest.Header.Set("X-Tenant-ID", tenantID)
+	streamResponse, err := server.Client().Do(streamRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer streamResponse.Body.Close()
+	if streamResponse.StatusCode != http.StatusOK {
+		t.Fatalf("SSE status = %d", streamResponse.StatusCode)
+	}
+	stream := bufio.NewReader(streamResponse.Body)
+	if line, _ := stream.ReadString('\n'); line != ": connected\n" {
+		t.Fatalf("начало SSE = %q", line)
+	}
+	_, _ = stream.ReadString('\n')
+
 	incomingAt := time.Now().UTC().Add(-60 * time.Minute).Format(time.RFC3339Nano)
 	incoming := canonicalWebhook(
 		"risk-event-incoming", "message.received.v1", "risk-dialog", "risk-message-incoming", "risk-contact",
@@ -81,6 +112,50 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	if riskCount != 1 || severity != "HIGH" || status != "OPEN" || source != "RULE" || policyVersion != "no-response/v1" {
 		t.Fatalf("риск: id=%s count=%d severity=%s status=%s source=%s policy=%s", riskID, riskCount, severity, status, source, policyVersion)
 	}
+	eventLine, eventErr := stream.ReadString('\n')
+	dataLine, dataErr := stream.ReadString('\n')
+	if eventErr != nil || dataErr != nil || eventLine != "event: risk.changed\n" ||
+		!strings.Contains(dataLine, `"resourceId":"`+riskID+`"`) {
+		t.Fatalf("сигнал создания: event=%q data=%q err=%v/%v", eventLine, dataLine, eventErr, dataErr)
+	}
+	_, _ = stream.ReadString('\n')
+
+	summaryResponse := request(t, fixture.handler, http.MethodGet, "/api/v1/radar", "", owner.Cookie, tenantID)
+	requireStatus(t, summaryResponse, http.StatusOK)
+	if body := summaryResponse.Body.String(); !strings.Contains(body, `"openRisks":1`) ||
+		!strings.Contains(body, `"criticalRisks":0`) || !strings.Contains(body, `"potentialRevenue":"5000.00"`) ||
+		!strings.Contains(body, `"confirmedRecoveredRevenue":"0.00"`) {
+		t.Fatalf("сводка Radar = %s", body)
+	}
+	listResponse := request(t, fixture.handler, http.MethodGet, "/api/v1/risks?limit=1", "", owner.Cookie, tenantID)
+	requireStatus(t, listResponse, http.StatusOK)
+	if body := listResponse.Body.String(); !strings.Contains(body, `"id":"`+riskID+`"`) ||
+		!strings.Contains(body, `"actions":[]`) || !strings.Contains(body, `"opportunity"`) ||
+		!strings.Contains(body, `"conversation"`) {
+		t.Fatalf("список Radar = %s", body)
+	}
+	detailResponse := request(t, fixture.handler, http.MethodGet, "/api/v1/risks/"+riskID, "", owner.Cookie, tenantID)
+	requireStatus(t, detailResponse, http.StatusOK)
+	if body := detailResponse.Body.String(); !strings.Contains(body, `"potentialRevenue":"5000.00"`) ||
+		strings.Contains(body, `"recommendation"`) || strings.Contains(body, `"outcome"`) ||
+		strings.Contains(body, `"revenue"`) {
+		t.Fatalf("детали Radar = %s", body)
+	}
+
+	outsider := register(t, fixture.handler, "risk-outsider@example.com", "Посторонний")
+	forbidden := request(t, fixture.handler, http.MethodGet, "/api/v1/risks/"+riskID, "", outsider.Cookie, tenantID)
+	requireStatus(t, forbidden, http.StatusForbidden)
+	acknowledged := request(
+		t, fixture.handler, http.MethodPost, "/api/v1/risks/"+riskID+"/acknowledge", "", owner.Cookie, tenantID,
+	)
+	requireStatus(t, acknowledged, http.StatusOK)
+	if !strings.Contains(acknowledged.Body.String(), `"status":"ACKNOWLEDGED"`) {
+		t.Fatalf("подтверждение риска = %s", acknowledged.Body.String())
+	}
+	replayed := request(
+		t, fixture.handler, http.MethodPost, "/api/v1/risks/"+riskID+"/acknowledge", "", owner.Cookie, tenantID,
+	)
+	requireStatus(t, replayed, http.StatusOK)
 
 	outgoingAt := time.Now().UTC().Format(time.RFC3339Nano)
 	outgoing := canonicalWebhook(
@@ -95,5 +170,10 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	}
 	if status != "RESOLVED" {
 		t.Fatalf("после ответа статус = %s, нужен RESOLVED", status)
+	}
+	closedSummary := request(t, fixture.handler, http.MethodGet, "/api/v1/radar", "", owner.Cookie, tenantID)
+	requireStatus(t, closedSummary, http.StatusOK)
+	if !strings.Contains(closedSummary.Body.String(), `"openRisks":0`) {
+		t.Fatalf("сводка после закрытия = %s", closedSummary.Body.String())
 	}
 }

@@ -36,6 +36,7 @@ import (
 	riskapplication "lidradar/backend/internal/risk/application"
 	riskdomain "lidradar/backend/internal/risk/domain"
 	riskinfrastructure "lidradar/backend/internal/risk/infrastructure"
+	risktransport "lidradar/backend/internal/risk/transport"
 	"lidradar/backend/internal/tenant/application"
 	"lidradar/backend/internal/tenant/domain"
 	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
@@ -85,7 +86,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
 	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
 	riskPolicy := riskdomain.NoResponsePolicy{}
-	riskEvaluator := riskapplication.NewEvaluator(riskRepository, riskStates, riskPolicy, ids.Generator{}, time.Now)
+	riskEvents := risktransport.NewHub()
+	riskEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, riskPolicy, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents)
 	riskPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, ids.Generator{}, time.Now,
 	)
@@ -128,6 +132,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
+	riskRadar := riskapplication.NewRadar(
+		riskinfrastructure.NewPostgresRadarStore(pool), permissions, riskEvents, time.Now,
+	)
+	risktransport.NewHandler(riskRadar, resolver, riskEvents).RegisterRoutes(router, "/api/v1")
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
 		worker: worker, candidates: candidateProcessor, pool: pool,

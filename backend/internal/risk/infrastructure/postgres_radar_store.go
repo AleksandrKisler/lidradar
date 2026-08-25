@@ -1,0 +1,382 @@
+package infrastructure
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"lidradar/backend/internal/risk/application"
+	"lidradar/backend/internal/risk/domain"
+	"lidradar/backend/platform/ids"
+)
+
+// PostgresRadarStore собирает принадлежащую Radar проекцию чтения из
+// авторитетных таблиц Risk, Opportunity и Conversation. Записи будущих этапов
+// не имитируются: необязательные поля отсутствуют, actions остаётся пустым.
+type PostgresRadarStore struct{ pool *pgxpool.Pool }
+
+func NewPostgresRadarStore(pool *pgxpool.Pool) *PostgresRadarStore {
+	return &PostgresRadarStore{pool: pool}
+}
+
+type radarCursor struct {
+	SeverityRank int       `json:"s"`
+	BookingRank  int       `json:"b"`
+	RevenueSort  string    `json:"r"`
+	DueAt        time.Time `json:"d"`
+	DetectedAt   time.Time `json:"t"`
+	RiskID       string    `json:"i"`
+	FilterKey    string    `json:"f"`
+}
+
+type rankedDetail struct {
+	Detail       application.Detail
+	SeverityRank int
+	BookingRank  int
+	RevenueSort  string
+}
+
+const radarProjection = `
+	r.id AS risk_id, r.tenant_id, r.opportunity_id, r.location_id, r.type, r.severity, r.status,
+	r.source, r.risk_engine_version, r.trigger_message_id, r.reason_code,
+	r.reason_text, r.detected_at, r.due_at, r.updated_at,
+	r.acknowledged_at, r.acted_at, r.resolved_at,
+	o.id AS radar_opportunity_id, o.stage, COALESCE(o.estimated_amount::text, '') AS potential_revenue,
+	o.currency,
+	c.id AS radar_conversation_id, c.contact_id,
+	CASE r.severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END AS severity_rank,
+	CASE WHEN o.stage = 'BOOKING_INTENT' THEN 1 ELSE 0 END AS booking_rank,
+	COALESCE(o.estimated_amount, -1::numeric)::text AS revenue_sort`
+
+const radarJoins = `
+	FROM risk_signals AS r
+	JOIN opportunities AS o ON o.tenant_id = r.tenant_id AND o.id = r.opportunity_id
+	JOIN conversations AS c ON c.tenant_id = o.tenant_id AND c.id = o.conversation_id`
+
+func (store *PostgresRadarStore) List(
+	ctx context.Context,
+	tenantID string,
+	query application.ListQuery,
+) (application.Page, error) {
+	if store == nil || store.pool == nil || tenantID == "" || query.Limit < 1 || query.Limit > 100 {
+		return application.Page{}, application.ErrInvalidCommand
+	}
+	arguments := []any{tenantID}
+	where := []string{"r.tenant_id = $1"}
+	appendRadarFilters(&where, &arguments, query.Filters)
+	if query.Status != "" {
+		arguments = append(arguments, query.Status)
+		where = append(where, fmt.Sprintf("r.status = $%d", len(arguments)))
+	}
+
+	var cursor *radarCursor
+	if query.After != "" {
+		decoded, err := decodeRadarCursor(query.After, filterKey(query))
+		if err != nil {
+			return application.Page{}, application.ErrInvalidCommand
+		}
+		cursor = &decoded
+	}
+
+	sql := `WITH ranked AS (SELECT ` + radarProjection + radarJoins + ` WHERE ` + strings.Join(where, " AND ") + `)
+		SELECT * FROM ranked`
+	if cursor != nil {
+		start := len(arguments) + 1
+		arguments = append(arguments, cursor.SeverityRank, cursor.BookingRank,
+			cursor.RevenueSort, cursor.DueAt, cursor.DetectedAt, cursor.RiskID)
+		sql += fmt.Sprintf(` WHERE
+			severity_rank < $%[1]d
+			OR (severity_rank = $%[1]d AND booking_rank < $%[2]d)
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric < $%[3]d::numeric)
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric = $%[3]d::numeric AND due_at > $%[4]d)
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric = $%[3]d::numeric AND due_at = $%[4]d AND detected_at > $%[5]d)
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric = $%[3]d::numeric AND due_at = $%[4]d AND detected_at = $%[5]d AND risk_id > $%[6]d)`,
+			start, start+1, start+2, start+3, start+4, start+5)
+	}
+	arguments = append(arguments, query.Limit+1)
+	sql += fmt.Sprintf(` ORDER BY severity_rank DESC, booking_rank DESC,
+		revenue_sort::numeric DESC, due_at ASC, detected_at ASC, risk_id ASC LIMIT $%d`, len(arguments))
+
+	rows, err := store.pool.Query(ctx, sql, arguments...)
+	if err != nil {
+		return application.Page{}, mapRadarError("чтение Radar", err)
+	}
+	defer rows.Close()
+	items := make([]rankedDetail, 0, query.Limit+1)
+	for rows.Next() {
+		item, scanErr := scanRankedDetail(rows)
+		if scanErr != nil {
+			return application.Page{}, scanErr
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return application.Page{}, fmt.Errorf("обход Radar: %w", err)
+	}
+	page := application.Page{Items: make([]application.Detail, 0, min(query.Limit, len(items)))}
+	for index := 0; index < len(items) && index < query.Limit; index++ {
+		page.Items = append(page.Items, items[index].Detail)
+	}
+	if len(items) > query.Limit {
+		last := items[query.Limit-1]
+		page.NextCursor, err = encodeRadarCursor(radarCursor{
+			SeverityRank: last.SeverityRank, BookingRank: last.BookingRank,
+			RevenueSort: last.RevenueSort, DueAt: last.Detail.Risk.DueAt,
+			DetectedAt: last.Detail.Risk.DetectedAt, RiskID: last.Detail.Risk.ID, FilterKey: filterKey(query),
+		})
+		if err != nil {
+			return application.Page{}, err
+		}
+	}
+	return page, nil
+}
+
+func (store *PostgresRadarStore) Get(
+	ctx context.Context,
+	tenantID, riskID string,
+) (application.Detail, bool, error) {
+	if store == nil || store.pool == nil || tenantID == "" || !ids.Valid(riskID) {
+		return application.Detail{}, false, application.ErrInvalidCommand
+	}
+	row := store.pool.QueryRow(ctx, `SELECT `+radarProjection+radarJoins+` WHERE r.tenant_id = $1 AND r.id = $2`, tenantID, riskID)
+	item, err := scanRankedDetail(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return application.Detail{}, false, nil
+	}
+	if err != nil {
+		return application.Detail{}, false, mapRadarError("чтение деталей риска", err)
+	}
+	return item.Detail, true, nil
+}
+
+func (store *PostgresRadarStore) Summary(
+	ctx context.Context,
+	tenantID string,
+	filters application.Filters,
+) (application.Summary, error) {
+	if store == nil || store.pool == nil || tenantID == "" {
+		return application.Summary{}, application.ErrInvalidCommand
+	}
+	arguments := []any{tenantID}
+	where := []string{"r.tenant_id = $1", "r.status IN ('OPEN', 'ACKNOWLEDGED', 'ACTED')"}
+	appendRadarFilters(&where, &arguments, filters)
+	query := `
+		WITH matching AS (
+			SELECT r.opportunity_id, r.severity
+			FROM risk_signals AS r
+			WHERE ` + strings.Join(where, " AND ") + `
+		), counts AS (
+			SELECT count(*) AS open_risks,
+			       count(*) FILTER (WHERE severity = 'CRITICAL') AS critical_risks
+			FROM matching
+		), risky_opportunities AS (
+			SELECT DISTINCT opportunity_id FROM matching
+		), money AS (
+			SELECT COALESCE(sum(o.estimated_amount), 0)::numeric(20,2)::text AS potential_revenue
+			FROM risky_opportunities AS risky
+			JOIN opportunities AS o ON o.tenant_id = $1 AND o.id = risky.opportunity_id
+			JOIN organizations AS organization ON organization.id = o.tenant_id
+			WHERE o.currency = organization.default_currency
+		)
+		SELECT counts.open_risks, counts.critical_risks, money.potential_revenue
+		FROM counts CROSS JOIN money`
+	var summary application.Summary
+	if err := store.pool.QueryRow(ctx, query, arguments...).Scan(
+		&summary.OpenRisks, &summary.CriticalRisks, &summary.PotentialRevenue,
+	); err != nil {
+		return application.Summary{}, mapRadarError("чтение сводки Radar", err)
+	}
+	// Контур подтверждённой возвращённой выручки появляется на этапе 12.
+	summary.ConfirmedRecoveredRevenue = "0.00"
+	return summary, nil
+}
+
+func (store *PostgresRadarStore) Acknowledge(
+	ctx context.Context,
+	tenantID, riskID string,
+	at time.Time,
+) (application.Mutation, error) {
+	return store.mutate(ctx, tenantID, riskID, at, true)
+}
+
+func (store *PostgresRadarStore) Resolve(
+	ctx context.Context,
+	tenantID, riskID string,
+	at time.Time,
+) (application.Mutation, error) {
+	return store.mutate(ctx, tenantID, riskID, at, false)
+}
+
+func (store *PostgresRadarStore) mutate(
+	ctx context.Context,
+	tenantID, riskID string,
+	at time.Time,
+	acknowledge bool,
+) (application.Mutation, error) {
+	if store == nil || store.pool == nil || tenantID == "" || !ids.Valid(riskID) || at.IsZero() {
+		return application.Mutation{}, application.ErrInvalidCommand
+	}
+	statusExpression := `CASE WHEN current.status IN ('OPEN','ACKNOWLEDGED','ACTED') THEN 'RESOLVED' ELSE current.status END`
+	acknowledgedExpression := `current.acknowledged_at`
+	resolvedExpression := `CASE WHEN current.status IN ('OPEN','ACKNOWLEDGED','ACTED') THEN $3 ELSE current.resolved_at END`
+	changedExpression := `current.status IN ('OPEN','ACKNOWLEDGED','ACTED')`
+	if acknowledge {
+		statusExpression = `CASE WHEN current.status = 'OPEN' THEN 'ACKNOWLEDGED' ELSE current.status END`
+		acknowledgedExpression = `CASE WHEN current.status = 'OPEN' THEN $3 ELSE current.acknowledged_at END`
+		resolvedExpression = `current.resolved_at`
+		changedExpression = `current.status = 'OPEN'`
+	}
+	query := fmt.Sprintf(`
+		WITH current AS (
+			SELECT * FROM risk_signals WHERE tenant_id = $1 AND id = $2 FOR UPDATE
+		), changed AS (
+			UPDATE risk_signals AS risk
+			SET status = %s,
+			    acknowledged_at = %s,
+			    resolved_at = %s,
+			    updated_at = CASE WHEN %s THEN $3 ELSE current.updated_at END
+			FROM current
+			WHERE risk.id = current.id
+			RETURNING risk.id, risk.tenant_id, risk.opportunity_id, risk.location_id,
+			          risk.type, risk.severity, risk.status, risk.source,
+			          risk.risk_engine_version, risk.trigger_message_id,
+			          risk.reason_code, risk.reason_text, risk.detected_at, risk.due_at,
+			          risk.updated_at, risk.acknowledged_at, risk.acted_at, risk.resolved_at,
+			          %s AS state_changed
+		)
+		SELECT * FROM changed`, statusExpression, acknowledgedExpression, resolvedExpression,
+		changedExpression, changedExpression)
+	mutation, err := scanRadarMutation(store.pool.QueryRow(ctx, query, tenantID, riskID, at.UTC()))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return application.Mutation{}, nil
+	}
+	if err != nil {
+		return application.Mutation{}, mapRadarError("изменение риска Radar", err)
+	}
+	mutation.Found = true
+	return mutation, nil
+}
+
+func appendRadarFilters(where *[]string, arguments *[]any, filters application.Filters) {
+	if filters.LocationID != "" {
+		*arguments = append(*arguments, filters.LocationID)
+		*where = append(*where, fmt.Sprintf("r.location_id = $%d", len(*arguments)))
+	}
+	if filters.Severity != "" {
+		*arguments = append(*arguments, filters.Severity)
+		*where = append(*where, fmt.Sprintf("r.severity = $%d", len(*arguments)))
+	}
+	if filters.RiskType != "" {
+		*arguments = append(*arguments, filters.RiskType)
+		*where = append(*where, fmt.Sprintf("r.type = $%d", len(*arguments)))
+	}
+}
+
+func scanRankedDetail(row riskRow) (rankedDetail, error) {
+	var result rankedDetail
+	var risk domain.Risk
+	var opportunity application.Opportunity
+	var conversation application.Conversation
+	var potentialRevenue string
+	if err := row.Scan(
+		&risk.ID, &risk.TenantID, &risk.OpportunityID, &risk.LocationID,
+		&risk.Type, &risk.Severity, &risk.Status, &risk.Source, &risk.PolicyVersion,
+		&risk.TriggerMessageID, &risk.ReasonCode, &risk.Reason, &risk.DetectedAt,
+		&risk.DueAt, &risk.UpdatedAt, &risk.AcknowledgedAt, &risk.ActedAt, &risk.ResolvedAt,
+		&opportunity.ID, &opportunity.Stage, &potentialRevenue, &opportunity.Currency,
+		&conversation.ID, &conversation.ContactID,
+		&result.SeverityRank, &result.BookingRank, &result.RevenueSort,
+	); err != nil {
+		return rankedDetail{}, err
+	}
+	if risk.Validate() != nil {
+		return rankedDetail{}, domain.ErrInvalidRisk
+	}
+	opportunity.LocationID = risk.LocationID
+	if potentialRevenue != "" {
+		opportunity.PotentialRevenue = &potentialRevenue
+	}
+	result.Detail = application.Detail{
+		Risk: risk, Opportunity: &opportunity, Conversation: &conversation,
+		Actions: []application.Action{},
+	}
+	return result, nil
+}
+
+func scanRadarMutation(row riskRow) (application.Mutation, error) {
+	var mutation application.Mutation
+	if err := row.Scan(
+		&mutation.Risk.ID, &mutation.Risk.TenantID, &mutation.Risk.OpportunityID,
+		&mutation.Risk.LocationID, &mutation.Risk.Type, &mutation.Risk.Severity,
+		&mutation.Risk.Status, &mutation.Risk.Source, &mutation.Risk.PolicyVersion,
+		&mutation.Risk.TriggerMessageID, &mutation.Risk.ReasonCode, &mutation.Risk.Reason,
+		&mutation.Risk.DetectedAt, &mutation.Risk.DueAt, &mutation.Risk.UpdatedAt,
+		&mutation.Risk.AcknowledgedAt, &mutation.Risk.ActedAt, &mutation.Risk.ResolvedAt,
+		&mutation.Changed,
+	); err != nil {
+		return application.Mutation{}, err
+	}
+	if mutation.Risk.Validate() != nil {
+		return application.Mutation{}, domain.ErrInvalidRisk
+	}
+	return mutation, nil
+}
+
+func filterKey(query application.ListQuery) string {
+	return strings.Join([]string{
+		string(query.Status), query.LocationID, string(query.Severity), string(query.RiskType),
+	}, "\x00")
+}
+
+func encodeRadarCursor(cursor radarCursor) (string, error) {
+	encoded, err := json.Marshal(cursor)
+	if err != nil {
+		return "", fmt.Errorf("кодирование курсора Radar: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func decodeRadarCursor(value, expectedFilterKey string) (radarCursor, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return radarCursor{}, application.ErrInvalidCommand
+	}
+	decoder := json.NewDecoder(bytes.NewReader(decoded))
+	decoder.DisallowUnknownFields()
+	var cursor radarCursor
+	if err := decoder.Decode(&cursor); err != nil {
+		return radarCursor{}, application.ErrInvalidCommand
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return radarCursor{}, application.ErrInvalidCommand
+	}
+	if cursor.SeverityRank < 1 || cursor.SeverityRank > 4 ||
+		(cursor.BookingRank != 0 && cursor.BookingRank != 1) || cursor.RevenueSort == "" ||
+		cursor.DueAt.IsZero() || cursor.DetectedAt.IsZero() || !ids.Valid(cursor.RiskID) || cursor.FilterKey != expectedFilterKey {
+		return radarCursor{}, application.ErrInvalidCommand
+	}
+	return cursor, nil
+}
+
+func mapRadarError(operation string, err error) error {
+	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) {
+		switch postgresError.Code {
+		case "22P02", "22003", "23514":
+			return application.ErrInvalidCommand
+		}
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+var _ application.RadarStore = (*PostgresRadarStore)(nil)

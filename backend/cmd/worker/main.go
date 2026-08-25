@@ -71,7 +71,10 @@ func run(ctx context.Context, configuration config.Config) error {
 	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
 	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
 	riskPolicy := riskdomain.NoResponsePolicy{}
-	riskEvaluator := riskapplication.NewEvaluator(riskRepository, riskStates, riskPolicy, generator, time.Now)
+	riskInvalidator := riskinfrastructure.NewPostgresInvalidator(pool)
+	riskEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, riskPolicy, generator, time.Now,
+	).WithInvalidator(riskInvalidator)
 	riskPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, generator, time.Now,
 	)

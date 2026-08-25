@@ -48,7 +48,7 @@ func TestRadarOrdersSummarizesAndChangesRisk(t *testing.T) {
 	if len(page.Items) != 2 || page.Items[0].Risk.ID != "critical" {
 		t.Fatalf("unexpected priority order: %#v", page.Items)
 	}
-	summary, err := radar.Summary(context.Background(), "user", "tenant")
+	summary, err := radar.Summary(context.Background(), "user", "tenant", application.Filters{})
 	if err != nil || summary.OpenRisks != 2 || summary.CriticalRisks != 1 {
 		t.Fatalf("summary=%#v err=%v", summary, err)
 	}
@@ -56,12 +56,20 @@ func TestRadarOrdersSummarizesAndChangesRisk(t *testing.T) {
 	if err != nil || ack.Status != domain.StatusAcknowledged || ack.AcknowledgedAt == nil {
 		t.Fatalf("ack=%#v err=%v", ack, err)
 	}
+	ackReplay, err := radar.Acknowledge(context.Background(), "user", "tenant", "critical")
+	if err != nil || ackReplay.Status != domain.StatusAcknowledged {
+		t.Fatalf("ack replay=%#v err=%v", ackReplay, err)
+	}
 	resolved, err := radar.Resolve(context.Background(), "user", "tenant", "critical")
 	if err != nil || resolved.Status != domain.StatusResolved {
 		t.Fatalf("resolved=%#v err=%v", resolved, err)
 	}
+	resolvedReplay, err := radar.Resolve(context.Background(), "user", "tenant", "critical")
+	if err != nil || resolvedReplay.Status != domain.StatusResolved {
+		t.Fatalf("resolve replay=%#v err=%v", resolvedReplay, err)
+	}
 	if len(events) != 2 {
-		t.Fatalf("signals=%v", events)
+		t.Fatalf("повторные команды создали лишние сигналы: %v", events)
 	}
 }
 

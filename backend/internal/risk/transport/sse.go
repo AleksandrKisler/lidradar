@@ -20,7 +20,7 @@ type Hub struct {
 func NewHub() *Hub { return &Hub{subs: make(map[string]map[uint64]chan Signal)} }
 
 func (h *Hub) Publish(tenantID, eventType, resourceID string) {
-	if h == nil || tenantID == "" || eventType == "" || resourceID == "" {
+	if h == nil || tenantID == "" || !validSignalType(eventType) || resourceID == "" {
 		return
 	}
 	h.mu.RLock()
@@ -30,6 +30,15 @@ func (h *Hub) Publish(tenantID, eventType, resourceID string) {
 		case ch <- Signal{eventType, resourceID}:
 		default:
 		}
+	}
+}
+
+func validSignalType(eventType string) bool {
+	switch eventType {
+	case "risk.changed", "risk.acknowledged", "risk.resolved":
+		return true
+	default:
+		return false
 	}
 }
 func (h *Hub) subscribe(tenant string) (<-chan Signal, func()) {

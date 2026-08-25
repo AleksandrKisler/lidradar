@@ -86,9 +86,6 @@ func (r *MemoryRepository) allForTenant(tenantID string) []domain.Risk {
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].Active() != items[j].Active() {
-			return items[i].Active()
-		}
 		if items[i].Severity != items[j].Severity {
 			return items[i].Severity == domain.SeverityCritical
 		}
@@ -100,8 +97,9 @@ func (r *MemoryRepository) allForTenant(tenantID string) []domain.Risk {
 	return items
 }
 
-// List provides the same deterministic priority order required of the
-// PostgreSQL Radar query: active, CRITICAL before HIGH, oldest first, then ID.
+// List сохраняет упрощённый детерминированный порядок испытательного адаптера:
+// CRITICAL перед HIGH, затем время обнаружения и ID. Полный коммерческий
+// приоритет проверяется на PostgreSQL-проекции с Opportunity.
 func (r *MemoryRepository) List(ctx context.Context, tenantID string, q application.ListQuery) (application.Page, error) {
 	if err := ctx.Err(); err != nil {
 		return application.Page{}, err
@@ -111,7 +109,10 @@ func (r *MemoryRepository) List(ctx context.Context, tenantID string, q applicat
 	items := r.allForTenant(tenantID)
 	filtered := items[:0]
 	for _, item := range items {
-		if q.Status == "" || item.Status == q.Status {
+		if (q.Status == "" || item.Status == q.Status) &&
+			(q.LocationID == "" || item.LocationID == q.LocationID) &&
+			(q.Severity == "" || item.Severity == q.Severity) &&
+			(q.RiskType == "" || item.Type == q.RiskType) {
 			filtered = append(filtered, item)
 		}
 	}
@@ -161,15 +162,18 @@ func (r *MemoryRepository) Get(ctx context.Context, tenantID, riskID string) (ap
 	return application.Detail{}, false, nil
 }
 
-func (r *MemoryRepository) Summary(ctx context.Context, tenantID string) (application.Summary, error) {
+func (r *MemoryRepository) Summary(ctx context.Context, tenantID string, filters application.Filters) (application.Summary, error) {
 	if err := ctx.Err(); err != nil {
 		return application.Summary{}, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	summary := application.Summary{PotentialRevenue: "0", ConfirmedRecoveredRevenue: "0"}
+	summary := application.Summary{PotentialRevenue: "0.00", ConfirmedRecoveredRevenue: "0.00"}
 	for _, risk := range r.items {
-		if risk.TenantID == tenantID && risk.Active() {
+		if risk.TenantID == tenantID && risk.Active() &&
+			(filters.LocationID == "" || risk.LocationID == filters.LocationID) &&
+			(filters.Severity == "" || risk.Severity == filters.Severity) &&
+			(filters.RiskType == "" || risk.Type == filters.RiskType) {
 			summary.OpenRisks++
 			if risk.Severity == domain.SeverityCritical {
 				summary.CriticalRisks++
@@ -179,28 +183,29 @@ func (r *MemoryRepository) Summary(ctx context.Context, tenantID string) (applic
 	return summary, nil
 }
 
-func (r *MemoryRepository) Acknowledge(ctx context.Context, tenantID, riskID string, at time.Time) (domain.Risk, bool, error) {
+func (r *MemoryRepository) Acknowledge(ctx context.Context, tenantID, riskID string, at time.Time) (application.Mutation, error) {
 	return r.mutateByID(ctx, tenantID, riskID, func(risk *domain.Risk) error { return risk.Acknowledge(at) })
 }
-func (r *MemoryRepository) Resolve(ctx context.Context, tenantID, riskID string, at time.Time) (domain.Risk, bool, error) {
+func (r *MemoryRepository) Resolve(ctx context.Context, tenantID, riskID string, at time.Time) (application.Mutation, error) {
 	return r.mutateByID(ctx, tenantID, riskID, func(risk *domain.Risk) error { return risk.Resolve(at) })
 }
-func (r *MemoryRepository) mutateByID(ctx context.Context, tenantID, riskID string, mutate func(*domain.Risk) error) (domain.Risk, bool, error) {
+func (r *MemoryRepository) mutateByID(ctx context.Context, tenantID, riskID string, mutate func(*domain.Risk) error) (application.Mutation, error) {
 	if err := ctx.Err(); err != nil {
-		return domain.Risk{}, false, err
+		return application.Mutation{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key, risk := range r.items {
 		if risk.TenantID == tenantID && risk.ID == riskID {
+			before := risk.Status
 			if err := mutate(&risk); err != nil {
-				return domain.Risk{}, false, err
+				return application.Mutation{}, err
 			}
 			r.items[key] = risk
-			return risk, true, nil
+			return application.Mutation{Risk: risk, Found: true, Changed: before != risk.Status}, nil
 		}
 	}
-	return domain.Risk{}, false, nil
+	return application.Mutation{}, nil
 }
 
 var _ domain.Repository = (*MemoryRepository)(nil)

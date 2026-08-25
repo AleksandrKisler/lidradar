@@ -24,6 +24,10 @@ type allowAll struct{}
 
 func (allowAll) Allowed(context.Context, string, string, string) (bool, error) { return true, nil }
 
+type denyAll struct{}
+
+func (denyAll) Allowed(context.Context, string, string, string) (bool, error) { return false, nil }
+
 func TestRiskHTTPListAndTenantIsNotExposed(t *testing.T) {
 	repo := infrastructure.NewTestMemoryRepository()
 	at := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
@@ -33,7 +37,7 @@ func TestRiskHTTPListAndTenantIsNotExposed(t *testing.T) {
 	}
 	_, _, _ = repo.UpsertActive(context.Background(), risk)
 	h := NewHandler(application.NewRadar(repo, allowAll{}, NewHub(), func() time.Time { return at }), testPrincipal{"user", "tenant"}, NewHub()).Router()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/risks", nil)
+	req := httptest.NewRequest(http.MethodGet, "/risks", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"risk"`) || strings.Contains(rec.Body.String(), "TenantID") {
@@ -44,9 +48,48 @@ func TestRiskHTTPListAndTenantIsNotExposed(t *testing.T) {
 func TestRiskHTTPRequiresPrincipal(t *testing.T) {
 	h := NewHandler(application.NewRadar(nil, allowAll{}, nil, time.Now), nil, nil).Router()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/risks", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/risks", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
+func TestRiskHTTPChecksPermissionsAndFilters(t *testing.T) {
+	repository := infrastructure.NewTestMemoryRepository()
+	denied := NewHandler(
+		application.NewRadar(repository, denyAll{}, nil, time.Now),
+		testPrincipal{"user", "tenant"}, nil,
+	).Router()
+	for _, endpoint := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/risks"},
+		{http.MethodGet, "/radar"},
+		{http.MethodPost, "/risks/risk-id/acknowledge"},
+	} {
+		recorder := httptest.NewRecorder()
+		denied.ServeHTTP(recorder, httptest.NewRequest(endpoint.method, endpoint.path, nil))
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("%s %s: status=%d", endpoint.method, endpoint.path, recorder.Code)
+		}
+	}
+
+	allowed := NewHandler(
+		application.NewRadar(repository, allowAll{}, nil, time.Now),
+		testPrincipal{"user", "tenant"}, nil,
+	).Router()
+	for _, path := range []string{
+		"/risks?status=UNKNOWN",
+		"/risks?severity=URGENT",
+		"/risks?cursor=not-a-cursor",
+		"/radar?riskType=UNKNOWN",
+	} {
+		recorder := httptest.NewRecorder()
+		allowed.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d body=%s", path, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
@@ -57,7 +100,7 @@ func TestSSEPublishesTenantInvalidation(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/events", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/events", nil)
 	response, err := server.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +111,8 @@ func TestSSEPublishesTenantInvalidation(t *testing.T) {
 		t.Fatalf("initial event = %q", line)
 	}
 	_, _ = reader.ReadString('\n')
+	hub.Publish("other-tenant", "risk.changed", "foreign-risk")
+	hub.Publish("tenant", "risk.changed\ninjected", "invalid-risk")
 	hub.Publish("tenant", "risk.changed", "risk-1")
 	line, err := reader.ReadString('\n')
 	if err != nil || line != "event: risk.changed\n" {

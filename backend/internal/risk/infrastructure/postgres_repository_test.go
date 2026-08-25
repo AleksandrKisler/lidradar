@@ -181,7 +181,8 @@ func insertRiskFixture(
 	for weekday := 1; weekday <= 7; weekday++ {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO location_business_hours(id,tenant_id,location_id,weekday,is_closed,opens_at,closes_at)
-			VALUES ($1,$2,$3,$4,FALSE,'09:00','21:00')`, newID(), tenantID, locationID, weekday); err != nil {
+			VALUES ($1,$2,$3,$4,FALSE,'09:00','21:00')
+			ON CONFLICT (tenant_id,location_id,weekday) DO NOTHING`, newID(), tenantID, locationID, weekday); err != nil {
 			t.Fatal(err)
 		}
 	}

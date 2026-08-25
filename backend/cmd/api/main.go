@@ -23,6 +23,9 @@ import (
 	opportunityapplication "lidradar/backend/internal/opportunity/application"
 	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
 	opportunitytransport "lidradar/backend/internal/opportunity/transport"
+	riskapplication "lidradar/backend/internal/risk/application"
+	riskinfrastructure "lidradar/backend/internal/risk/infrastructure"
+	risktransport "lidradar/backend/internal/risk/transport"
 	tenantapplication "lidradar/backend/internal/tenant/application"
 	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
 	tenanttransport "lidradar/backend/internal/tenant/transport"
@@ -69,6 +72,10 @@ func run(ctx context.Context, configuration config.Config) error {
 		connectorOptions = append(connectorOptions, connectorapplication.WithCredentialCipher(credentialCipher))
 	}
 	permissionService := tenantapplication.NewPermissionService(tenantRepository)
+	riskStore := riskinfrastructure.NewPostgresRadarStore(pool)
+	riskInvalidator := riskinfrastructure.NewPostgresInvalidator(pool)
+	riskEvents := risktransport.NewHub()
+	riskRadar := riskapplication.NewRadar(riskStore, permissionService, riskInvalidator, time.Now)
 	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now)
 	catalogService := catalogapplication.NewService(catalogRepository, permissionService, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
@@ -87,6 +94,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		configuration.Auth.SessionTTL,
 	)
 	principalResolver := identitytransport.Resolver{Auth: identityService}
+	go runRiskInvalidationRelay(ctx, logger, riskInvalidator, riskEvents)
 
 	router := httpplatform.NewRouter(
 		"lidradar-api", logger, postgres.NewSchemaReadiness(pool),
@@ -104,5 +112,6 @@ func run(ctx context.Context, configuration config.Config) error {
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, principalResolver).Router())
+	risktransport.NewHandler(riskRadar, principalResolver, riskEvents).RegisterRoutes(router, "/api/v1")
 	return httpplatform.Serve(ctx, configuration.HTTP, router, logger)
 }

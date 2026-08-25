@@ -328,21 +328,35 @@ RevenueEvent, Notification или критическое действие.
 актуальные RawEvent и ChannelConnection из PostgreSQL. Успешное и ошибочное
 завершение RawEvent идемпотентно.
 
-### Radar and Risk realtime API
+### Radar API и сигналы об изменениях Risk
 
-Radar reads and commands are tenant-scoped and authorized through the named
-`risks.read` and `risks.manage` membership permissions. The list is ordered by
-active state, severity (`CRITICAL` before `HIGH`), oldest detection time, and a
-stable ID tie-breaker, and uses cursor pagination. Risk detail includes related
-Opportunity, Conversation, Recommendation, Action, Outcome, and Revenue data
-only when those owning modules have produced it. Exact money totals are exposed
-as decimal strings.
+Чтение Radar и команды Risk всегда ограничены организацией и проверяют
+именованные разрешения `risks.read` и `risks.manage`. Поддерживаются фильтры по
+точке, важности и типу риска, а список использует непрозрачную курсорную
+пагинацию. Канонический порядок целиком принадлежит серверу: важность по
+убыванию, признак `BOOKING_INTENT`, потенциальная выручка по убыванию с
+отсутствующими суммами в конце, длительность ожидания по убыванию (`due_at` по
+возрастанию), время обнаружения и ID риска. Курсор содержит все поля порядка и
+отпечаток фильтров, поэтому его нельзя применить к другой выборке.
 
-Acknowledge and resolve commands are idempotent. Cross-tenant identifiers are
-indistinguishable from missing resources and cannot mutate state. SSE carries
-only tenant-scoped invalidation signals after durable changes; clients always
-refetch the authoritative REST read model, and losing an SSE signal never loses
-business data. The versioned HTTP contract is maintained in
+Сводка считает только активные состояния `OPEN`, `ACKNOWLEDGED` и `ACTED`.
+Потенциальная выручка суммируется по уникальным Opportunity только в основной
+валюте организации, чтобы не складывать разные валюты. До подключения
+подтверждённой выручки этапа 12 `confirmedRecoveredRevenue` равен `0.00`.
+Денежные значения API передаются точными десятичными строками.
+
+Детали Risk включают связанные Opportunity и Conversation из PostgreSQL.
+Recommendation, Action, Outcome и Revenue появляются только после того, как их
+создаст владеющий модуль; этап 9 не подменяет их вымышленными записями. Команды
+подтверждения просмотра и закрытия идемпотентны. Идентификатор другой
+организации неотличим от отсутствующего и не позволяет изменить состояние.
+
+SSE передаёт только ограниченные организацией сигналы после долговечного
+изменения. Между отдельными процессами `worker` и `api` сигнал переносится через
+PostgreSQL `LISTEN/NOTIFY`, а внутри API раздаётся подключённым клиентам.
+Клиент всегда перечитывает авторитетную REST-модель; потеря сигнала или разрыв
+подключения не приводит к потере бизнес-данных. Версионированный HTTP-контракт
+поддерживается в
 [`../../contracts/openapi/openapi.yaml`](../../contracts/openapi/openapi.yaml).
 Целевые операции, ещё не подключённые в `cmd/api`, имеют расширение
 `x-lidradar-runtime-status: planned`; пути без этого расширения входят в
