@@ -30,6 +30,9 @@ import (
 	identitytransport "lidradar/backend/internal/identity/transport"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	opportunityapplication "lidradar/backend/internal/opportunity/application"
+	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
+	opportunitytransport "lidradar/backend/internal/opportunity/transport"
 	"lidradar/backend/internal/tenant/application"
 	"lidradar/backend/internal/tenant/domain"
 	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
@@ -45,6 +48,7 @@ type apiFixture struct {
 	tenantService application.Service
 	dispatcher    eventsapplication.Dispatcher
 	worker        jobsapplication.Worker
+	candidates    opportunityapplication.CandidateProcessor
 	pool          *pgxpool.Pool
 }
 
@@ -56,6 +60,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
 	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
+	opportunityRepository := opportunityinfrastructure.NewPostgresRepository(pool)
 	permissions := application.NewPermissionService(tenantRepository)
 	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now)
 	catalogService := catalogapplication.NewService(catalogRepository, permissions, ids.Generator{}, time.Now)
@@ -63,6 +68,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 		connectorRepository, permissions, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
 	)
 	conversationService := conversationapplication.NewService(conversationRepository, permissions, ids.Generator{})
+	opportunityService := opportunityapplication.NewService(opportunityRepository, permissions, ids.Generator{}, time.Now)
+	candidateProcessor := opportunityapplication.NewCandidateProcessor(
+		opportunityRepository, conversationService, catalogRepository, ids.Generator{}, time.Now,
+	)
 	normalization := connectorapplication.NewNormalizationService(
 		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
 	)
@@ -71,13 +80,15 @@ func newAPIFixture(t *testing.T) apiFixture {
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, "integration-outbox",
 		map[string]eventsapplication.Handler{
-			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, ids.Generator{}),
+			connectorapplication.NormalizationEventType:         connectorapplication.NormalizationEventHandler(jobStore, ids.Generator{}),
+			opportunityapplication.ConversationChangedEventType: opportunityapplication.CandidateEventHandler(jobStore, ids.Generator{}),
 		}, time.Now, eventsapplication.DefaultLease,
 	)
 	worker := jobsapplication.NewWorker(
 		jobStore, "integration-jobs",
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType: connectorapplication.NormalizationJobHandler(normalization),
+			opportunityapplication.CandidateJobType:   opportunityapplication.CandidateJobHandler(candidateProcessor),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(
@@ -90,13 +101,14 @@ func newAPIFixture(t *testing.T) apiFixture {
 	).Router())
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, resolver).Router())
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, resolver).Router())
+	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, resolver).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, resolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
-		worker: worker, pool: pool,
+		worker: worker, candidates: candidateProcessor, pool: pool,
 	}
 }
 

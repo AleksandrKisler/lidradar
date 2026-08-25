@@ -396,6 +396,38 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/opportunities/{opportunityId}:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/OpportunityId' }
+    get:
+      summary: Получить коммерческую возможность и полную историю этапов
+      operationId: getOpportunity
+      responses:
+        '200':
+          description: Возможность выбранной организации и неизменяемая история от NEW до текущего этапа.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OpportunityDetail' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Вручную перевести возможность на допустимый этап
+      operationId: changeOpportunityStage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeOpportunityStageRequest' }
+      responses:
+        '200':
+          description: Актуальное состояние возможности. Повтор текущего этапа идемпотентен.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Opportunity' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Переход назад, повторное открытие или преждевременный WON запрещены.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/radar:
     get:
       summary: Get Radar summary
@@ -525,6 +557,7 @@ components:
     ConnectorProvider: { name: provider, in: path, required: true, schema: { $ref: '#/components/schemas/ConnectorProvider' } }
     ConnectionId: { name: connectionId, in: path, required: true, schema: { type: string, format: uuid } }
     ConversationId: { name: conversationId, in: path, required: true, schema: { type: string, format: uuid } }
+    OpportunityId: { name: opportunityId, in: path, required: true, schema: { type: string, format: uuid } }
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
@@ -874,6 +907,61 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/MessageView' } }
         nextCursor: { type: [string, 'null'], description: Непрозрачный курсор следующей страницы или null. }
+    OpportunityStage:
+      type: string
+      enum: [NEW, ENGAGED, QUALIFYING, PRICE_SENT, WAITING_CUSTOMER, WAITING_BUSINESS, BOOKING_INTENT, BOOKED, WON, LOST, ARCHIVED]
+    OpportunityStageSource:
+      type: string
+      enum: [RULE, AI, USER, IMPORT]
+    Opportunity:
+      type: object
+      additionalProperties: false
+      required: [id, conversationId, serviceId, stage, estimatedAmount, estimatedAmountConfidence, currency, openedAt, closedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        serviceId: { type: [string, 'null'], format: uuid }
+        stage: { $ref: '#/components/schemas/OpportunityStage' }
+        estimatedAmount:
+          type: [string, 'null']
+          pattern: '^[0-9]{1,12}\.[0-9]{2}$'
+          description: Точная оценка NUMERIC(14,2) либо null, когда надёжной суммы нет.
+        estimatedAmountConfidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OpportunityStageHistory:
+      type: object
+      additionalProperties: false
+      required: [id, opportunityId, fromStage, toStage, source, confidence, aiRunId, actorUserId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        opportunityId: { type: string, format: uuid }
+        fromStage:
+          oneOf:
+            - { $ref: '#/components/schemas/OpportunityStage' }
+            - { type: 'null' }
+        toStage: { $ref: '#/components/schemas/OpportunityStage' }
+        source: { $ref: '#/components/schemas/OpportunityStageSource' }
+        confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        aiRunId: { type: [string, 'null'], format: uuid }
+        actorUserId: { type: [string, 'null'], format: uuid }
+        createdAt: { type: string, format: date-time }
+    OpportunityDetail:
+      type: object
+      additionalProperties: false
+      required: [opportunity, stageHistory]
+      properties:
+        opportunity: { $ref: '#/components/schemas/Opportunity' }
+        stageHistory: { type: array, minItems: 1, items: { $ref: '#/components/schemas/OpportunityStageHistory' } }
+    ChangeOpportunityStageRequest:
+      type: object
+      additionalProperties: false
+      required: [stage]
+      properties:
+        stage: { $ref: '#/components/schemas/OpportunityStage' }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED] }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }

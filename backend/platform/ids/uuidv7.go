@@ -13,6 +13,18 @@ import (
 // millisecond and cryptographically secure random bits.
 type Generator struct{}
 
+// Valid проверяет каноническое UUID-представление без принятия лишних данных.
+// Версия не ограничивается: старые и импортированные UUID остаются допустимыми.
+func Valid(value string) bool {
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
+		return false
+	}
+	compact := value[0:8] + value[9:13] + value[14:18] + value[19:23] + value[24:36]
+	decoded := make([]byte, 16)
+	_, err := hex.Decode(decoded, []byte(compact))
+	return err == nil
+}
+
 func (Generator) NewID() (string, error) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {

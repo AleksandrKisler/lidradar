@@ -20,6 +20,9 @@ import (
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
+	opportunityapplication "lidradar/backend/internal/opportunity/application"
+	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
+	opportunitytransport "lidradar/backend/internal/opportunity/transport"
 	tenantapplication "lidradar/backend/internal/tenant/application"
 	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
 	tenanttransport "lidradar/backend/internal/tenant/transport"
@@ -52,6 +55,7 @@ func run(ctx context.Context, configuration config.Config) error {
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
 	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
+	opportunityRepository := opportunityinfrastructure.NewPostgresRepository(pool)
 	connectorRegistry := connectorinfrastructure.NewRegistry()
 	connectorOptions := make([]connectorapplication.Option, 0, 1)
 	if configuration.Integrations.PublicBaseURL != "" {
@@ -71,6 +75,9 @@ func run(ctx context.Context, configuration config.Config) error {
 		connectorRepository, permissionService, connectorRegistry, ids.Generator{}, time.Now, connectorOptions...,
 	)
 	conversationService := conversationapplication.NewService(conversationRepository, permissionService, ids.Generator{})
+	opportunityService := opportunityapplication.NewService(
+		opportunityRepository, permissionService, ids.Generator{}, time.Now,
+	)
 	identityService := identityapplication.NewService(
 		identityRepository,
 		cryptoplatform.PasswordHasher{},
@@ -92,6 +99,7 @@ func run(ctx context.Context, configuration config.Config) error {
 	).Router())
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, principalResolver).Router())
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, principalResolver).Router())
+	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, principalResolver).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, principalResolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())

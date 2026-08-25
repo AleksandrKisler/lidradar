@@ -146,16 +146,27 @@ func canonicalWebhook(
 
 func processExactly(t *testing.T, fixture apiFixture, want int) {
 	t.Helper()
-	for processed := 0; processed < want; processed++ {
+	processed := 0
+	for cycle := 0; cycle < want*10+20; cycle++ {
 		dispatched, err := fixture.dispatcher.RunOne(context.Background())
-		if err != nil || !dispatched {
-			t.Fatalf("Dispatcher.RunOne() = %v, %v; обработано %d из %d", dispatched, err, processed, want)
+		if err != nil {
+			t.Fatalf("Dispatcher.RunOne() = %v, %v; обработано %d", dispatched, err, processed)
 		}
 		done, err := fixture.worker.RunOne(context.Background())
-		if err != nil || !done {
-			t.Fatalf("Worker.RunOne() = %v, %v; обработано %d из %d", done, err, processed, want)
+		if err != nil {
+			t.Fatalf("Worker.RunOne() = %v, %v; обработано %d", done, err, processed)
+		}
+		if done {
+			processed++
+		}
+		if !dispatched && !done {
+			if processed < want {
+				t.Fatalf("фоновые задания закончились: обработано %d, нужно минимум %d", processed, want)
+			}
+			return
 		}
 	}
+	t.Fatalf("фоновые задания не опустели после %d циклов", want*10+20)
 }
 
 func conversationFromList(t *testing.T, body []byte) (string, int64) {

@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"lidradar/backend/platform/ids"
 )
 
 // Readiness is implemented by critical runtime dependencies such as PostgreSQL.
@@ -40,6 +42,7 @@ func NewRouter(service string, logger *slog.Logger, readiness Readiness, options
 	}
 	router := chi.NewRouter()
 	router.Use(correlation)
+	router.Use(validTenantSelector)
 	router.Use(recovery(logger))
 	router.Use(requestLogging(logger))
 	router.Use(originProtection(configuration.allowedOrigins))
@@ -61,4 +64,15 @@ func NewRouter(service string, logger *slog.Logger, readiness Readiness, options
 		WriteError(w, r, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 	})
 	return router
+}
+
+func validTenantSelector(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		tenantID := request.Header.Get("X-Tenant-ID")
+		if tenantID != "" && !ids.Valid(tenantID) {
+			WriteError(w, request, http.StatusBadRequest, "INVALID_TENANT", "X-Tenant-ID must be a UUID", nil)
+			return
+		}
+		next.ServeHTTP(w, request)
+	})
 }

@@ -15,14 +15,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"lidradar/backend/internal/conversation/domain"
+	eventsdomain "lidradar/backend/internal/events/domain"
+	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 )
 
 // PostgresRepository сохраняет канонические переписки в PostgreSQL.
-type PostgresRepository struct{ pool *pgxpool.Pool }
+type PostgresRepository struct {
+	pool   *pgxpool.Pool
+	outbox *eventsinfrastructure.PostgresStore
+}
 
 // NewPostgresRepository создаёт хранилище переписок поверх общего пула.
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+	return &PostgresRepository{pool: pool, outbox: eventsinfrastructure.NewPostgresStore(pool)}
 }
 
 func (repository *PostgresRepository) Ingest(
@@ -55,6 +60,33 @@ func (repository *PostgresRepository) Ingest(
 	}
 	if err != nil {
 		return domain.IngestResult{}, err
+	}
+	if result.Changed {
+		data, marshalErr := json.Marshal(map[string]any{
+			"conversationId": result.ConversationID,
+			"messageId":      result.MessageID,
+			"revision":       result.Revision,
+		})
+		if marshalErr != nil {
+			return domain.IngestResult{}, domain.ErrInvalid
+		}
+		event, eventErr := eventsdomain.NewEvent(
+			ids.OutboxEventID, domain.ChangedEventName, 1, change.TenantID,
+			"conversation", result.ConversationID, result.MessageID, data, change.ReceivedAt,
+		)
+		if eventErr != nil {
+			return domain.IngestResult{}, domain.ErrInvalid
+		}
+		if _, _, appendErr := repository.outbox.AppendTx(ctx, tx, event); appendErr != nil {
+			switch {
+			case errors.Is(appendErr, eventsdomain.ErrConflict):
+				return domain.IngestResult{}, domain.ErrConflict
+			case errors.Is(appendErr, eventsdomain.ErrInvalid):
+				return domain.IngestResult{}, domain.ErrInvalid
+			default:
+				return domain.IngestResult{}, fmt.Errorf("добавление события переписки: %w", appendErr)
+			}
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.IngestResult{}, fmt.Errorf("фиксация канонизации: %w", err)
@@ -527,6 +559,55 @@ func contactByID(ctx context.Context, queryer pgx.Tx, tenantID, contactID string
 		return domain.Contact{}, false, domain.ErrInvalid
 	}
 	return contact, true, nil
+}
+
+func (repository *PostgresRepository) CandidateSnapshot(
+	ctx context.Context,
+	tenantID, conversationID string,
+) (domain.CandidateSnapshot, bool, error) {
+	if repository == nil || repository.pool == nil || tenantID == "" || conversationID == "" {
+		return domain.CandidateSnapshot{}, false, domain.ErrInvalid
+	}
+	var snapshot domain.CandidateSnapshot
+	err := repository.pool.QueryRow(ctx, `
+		SELECT c.id, c.tenant_id, c.location_id, c.connection_id, c.contact_id, c.external_id, c.status,
+		       c.first_message_at, c.last_message_at, c.last_message_direction, c.revision, c.created_at, c.updated_at,
+		       m.id, m.tenant_id, m.conversation_id, m.connection_id, m.external_id, m.direction, m.type, m.text,
+		       m.sender_external_id, m.reply_to_message_id, m.sent_at, m.received_at,
+		       m.provider_deleted_at, m.metadata, m.created_at
+		FROM conversations AS c
+		JOIN LATERAL (
+			SELECT id, tenant_id, conversation_id, connection_id, external_id, direction, type, text,
+			       sender_external_id, reply_to_message_id, sent_at, received_at,
+			       provider_deleted_at, metadata, created_at
+			FROM messages
+			WHERE tenant_id = c.tenant_id AND conversation_id = c.id
+			ORDER BY received_at DESC, id DESC
+			LIMIT 1
+		) AS m ON TRUE
+		WHERE c.tenant_id = $1 AND c.id = $2`, tenantID, conversationID).Scan(
+		&snapshot.Conversation.ID, &snapshot.Conversation.TenantID, &snapshot.Conversation.LocationID,
+		&snapshot.Conversation.ConnectionID, &snapshot.Conversation.ContactID, &snapshot.Conversation.ExternalID,
+		&snapshot.Conversation.Status, &snapshot.Conversation.FirstMessageAt, &snapshot.Conversation.LastMessageAt,
+		&snapshot.Conversation.LastMessageDirection, &snapshot.Conversation.Revision,
+		&snapshot.Conversation.CreatedAt, &snapshot.Conversation.UpdatedAt,
+		&snapshot.LatestMessage.ID, &snapshot.LatestMessage.TenantID, &snapshot.LatestMessage.ConversationID,
+		&snapshot.LatestMessage.ConnectionID, &snapshot.LatestMessage.ExternalID, &snapshot.LatestMessage.Direction,
+		&snapshot.LatestMessage.Type, &snapshot.LatestMessage.Text, &snapshot.LatestMessage.SenderExternalID,
+		&snapshot.LatestMessage.ReplyToMessageID, &snapshot.LatestMessage.SentAt, &snapshot.LatestMessage.ReceivedAt,
+		&snapshot.LatestMessage.ProviderDeletedAt, &snapshot.LatestMessage.Metadata, &snapshot.LatestMessage.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.CandidateSnapshot{}, false, nil
+	}
+	if err != nil {
+		return domain.CandidateSnapshot{}, false, fmt.Errorf("чтение среза коммерческого кандидата: %w", err)
+	}
+	if snapshot.Conversation.Validate() != nil || snapshot.LatestMessage.Validate() != nil ||
+		snapshot.LatestMessage.ConversationID != snapshot.Conversation.ID {
+		return domain.CandidateSnapshot{}, false, domain.ErrInvalid
+	}
+	return snapshot, true, nil
 }
 
 func (repository *PostgresRepository) List(

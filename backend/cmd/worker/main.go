@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	connectorapplication "lidradar/backend/internal/connector/application"
 	connectorinfrastructure "lidradar/backend/internal/connector/infrastructure"
 	conversationapplication "lidradar/backend/internal/conversation/application"
@@ -16,6 +17,8 @@ import (
 	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	opportunityapplication "lidradar/backend/internal/opportunity/application"
+	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
 	"lidradar/backend/platform/bootstrap"
 	"lidradar/backend/platform/config"
 	"lidradar/backend/platform/ids"
@@ -49,8 +52,13 @@ func run(ctx context.Context, configuration config.Config) error {
 		return err
 	}
 	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
+	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
 	conversationService := conversationapplication.NewService(conversationRepository, nil, generator)
+	opportunityRepository := opportunityinfrastructure.NewPostgresRepository(pool)
+	candidateProcessor := opportunityapplication.NewCandidateProcessor(
+		opportunityRepository, conversationService, catalogRepository, generator, time.Now,
+	)
 	normalization := connectorapplication.NewNormalizationService(
 		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
 	)
@@ -60,7 +68,8 @@ func run(ctx context.Context, configuration config.Config) error {
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, ownerID+":outbox",
 		map[string]eventsapplication.Handler{
-			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, generator),
+			connectorapplication.NormalizationEventType:         connectorapplication.NormalizationEventHandler(jobStore, generator),
+			opportunityapplication.ConversationChangedEventType: opportunityapplication.CandidateEventHandler(jobStore, generator),
 		},
 		time.Now, eventsapplication.DefaultLease,
 	)
@@ -68,6 +77,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		jobStore, ownerID+":jobs",
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType: connectorapplication.NormalizationJobHandler(normalization),
+			opportunityapplication.CandidateJobType:   opportunityapplication.CandidateJobHandler(candidateProcessor),
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)

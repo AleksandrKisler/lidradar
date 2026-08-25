@@ -154,6 +154,48 @@ func TestExternalIdentityNamespaceIncludesConnection(t *testing.T) {
 	requireConversationCounts(t, pool, pair.A.TenantID, 2, 2, 2, 2, 0)
 }
 
+func TestConversationChangeAndOutboxEventRollbackTogether(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	pair := testsupport.TwoTenants(t, ctx, pool)
+	generator := ids.Generator{}
+	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
+	repository := NewPostgresRepository(pool)
+	connection := conversationConnection(t, connectorRepository, generator, pair.A.TenantID, nil)
+	now := time.Now().UTC()
+	text := "Нужна полировка"
+	change := domain.CanonicalChange{
+		SourceEventID: "source", Type: domain.ChangeReceived, TenantID: pair.A.TenantID,
+		ConnectionID: connection.ID, Provider: string(connection.Provider), ConversationExternalID: "dialog-rollback",
+		MessageExternalID: "message-rollback", ContactExternalID: "contact-rollback",
+		Direction: domain.DirectionIncoming, MessageType: domain.MessageText, Text: &text,
+		SentAt: now, OccurredAt: now, ReceivedAt: now, Metadata: json.RawMessage(`{}`),
+	}
+	values := make([]string, 4)
+	for index := range values {
+		value, err := generator.NewID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		values[index] = value
+	}
+	_, err := repository.Ingest(ctx, change, domain.CandidateIDs{
+		ContactID: values[0], ExternalIdentityID: values[1], ConversationID: values[2], MessageID: values[3],
+		OutboxEventID: "not-a-uuid", AttachmentIDs: []string{},
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("Ingest() error = %v", err)
+	}
+	requireConversationCounts(t, pool, pair.A.TenantID, 0, 0, 0, 0, 0)
+	var outboxCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE tenant_id = $1`, pair.A.TenantID).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if outboxCount != 0 {
+		t.Fatalf("после отката осталось событий: %d", outboxCount)
+	}
+}
+
 func conversationConnection(
 	t *testing.T,
 	repository *connectorinfrastructure.PostgresRepository,

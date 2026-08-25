@@ -147,6 +147,22 @@ func (service Service) Messages(
 	return MessagePage{Items: items, NextCursor: messageCursor(items, more)}, nil
 }
 
+// CommercialSnapshot отдаёт внутреннему прикладному процессу только актуальное
+// состояние переписки. Проверка прав выполняется у владельца вызываемого сценария.
+func (service Service) CommercialSnapshot(
+	ctx context.Context,
+	tenantID, conversationID string,
+) (domain.CandidateSnapshot, bool, error) {
+	if service.repository == nil || tenantID == "" || strings.TrimSpace(conversationID) == "" {
+		return domain.CandidateSnapshot{}, false, ErrInvalid
+	}
+	snapshot, found, err := service.repository.CandidateSnapshot(ctx, tenantID, conversationID)
+	if err != nil {
+		return domain.CandidateSnapshot{}, false, mapDomainError(err)
+	}
+	return snapshot, found, nil
+}
+
 func (service Service) requireRead(ctx context.Context, actorID, tenantID string) error {
 	if service.repository == nil || service.authorizer == nil || actorID == "" || tenantID == "" {
 		return ErrForbidden
@@ -162,8 +178,8 @@ func (service Service) requireRead(ctx context.Context, actorID, tenantID string
 }
 
 func (service Service) candidateIDs(attachmentCount int) (domain.CandidateIDs, error) {
-	values := make([]string, 0, 4+attachmentCount)
-	for index := 0; index < 4+attachmentCount; index++ {
+	values := make([]string, 0, 5+attachmentCount)
+	for index := 0; index < 5+attachmentCount; index++ {
 		id, err := service.ids.NewID()
 		if err != nil {
 			return domain.CandidateIDs{}, err
@@ -172,7 +188,7 @@ func (service Service) candidateIDs(attachmentCount int) (domain.CandidateIDs, e
 	}
 	return domain.CandidateIDs{
 		ContactID: values[0], ExternalIdentityID: values[1], ConversationID: values[2], MessageID: values[3],
-		AttachmentIDs: append([]string(nil), values[4:]...),
+		OutboxEventID: values[4], AttachmentIDs: append([]string(nil), values[5:]...),
 	}, nil
 }
 

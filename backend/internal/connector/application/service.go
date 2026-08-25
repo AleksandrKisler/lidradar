@@ -2,6 +2,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -376,7 +377,9 @@ func hashBytes(value []byte) string {
 }
 
 func persistencePayload(payload []byte) (json.RawMessage, error) {
-	if json.Valid(payload) {
+	// PostgreSQL JSONB не принимает символ U+0000 даже в корректном JSON.
+	// Такой вход сохраняется без потерь в уже предусмотренной base64-обёртке.
+	if json.Valid(payload) && !bytes.Contains(payload, []byte(`\u0000`)) {
 		return append(json.RawMessage(nil), payload...), nil
 	}
 	wrapped, err := json.Marshal(map[string]string{

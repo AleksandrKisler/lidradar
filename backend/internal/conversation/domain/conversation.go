@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -15,6 +16,8 @@ var (
 	ErrNotFound = errors.New("переписка не найдена")
 	ErrConflict = errors.New("конфликт канонической переписки")
 )
+
+const ChangedEventName = "conversation.changed"
 
 // Direction показывает, с какой стороны делового диалога пришло сообщение.
 type Direction string
@@ -254,14 +257,18 @@ type CanonicalChange struct {
 
 func (change CanonicalChange) Validate() error {
 	if change.SourceEventID == "" || !change.Type.Valid() || change.TenantID == "" || change.ConnectionID == "" ||
-		change.Provider == "" || change.ConversationExternalID == "" || change.MessageExternalID == "" ||
+		!validExternalID(change.Provider, 100) || !validExternalID(change.ConversationExternalID, 512) ||
+		!validExternalID(change.MessageExternalID, 512) ||
 		change.OccurredAt.IsZero() || change.ReceivedAt.IsZero() || !jsonObject(change.Metadata) {
 		return ErrInvalid
 	}
 	if change.Type != ChangeDeleted && (!change.Direction.Valid() || !change.MessageType.Valid() || change.SentAt.IsZero()) {
 		return ErrInvalid
 	}
-	if change.Type == ChangeReceived && change.ContactExternalID == "" {
+	if change.Type == ChangeReceived && !validExternalID(change.ContactExternalID, 512) {
+		return ErrInvalid
+	}
+	if change.Text != nil && (!utf8.ValidString(*change.Text) || strings.ContainsRune(*change.Text, '\x00')) {
 		return ErrInvalid
 	}
 	return nil
@@ -273,11 +280,12 @@ type CandidateIDs struct {
 	ExternalIdentityID string
 	ConversationID     string
 	MessageID          string
+	OutboxEventID      string
 	AttachmentIDs      []string
 }
 
 func (ids CandidateIDs) Validate(change CanonicalChange) error {
-	if ids.ContactID == "" || ids.ExternalIdentityID == "" || ids.ConversationID == "" || ids.MessageID == "" ||
+	if ids.ContactID == "" || ids.ExternalIdentityID == "" || ids.ConversationID == "" || ids.MessageID == "" || ids.OutboxEventID == "" ||
 		len(ids.AttachmentIDs) != len(change.Attachments) {
 		return ErrInvalid
 	}
@@ -296,6 +304,13 @@ type IngestResult struct {
 	MessageID      string
 	Changed        bool
 	Revision       int64
+}
+
+// CandidateSnapshot — минимальный актуальный срез для коммерческих правил.
+// Он принадлежит модулю переписок и не содержит выводов о наличии сделки.
+type CandidateSnapshot struct {
+	Conversation  Conversation
+	LatestMessage Message
 }
 
 // ConversationDetail объединяет переписку и её контакт для чтения.
@@ -319,13 +334,20 @@ type PageCursor struct {
 // Repository описывает только операции, принадлежащие модулю переписок.
 type Repository interface {
 	Ingest(context.Context, CanonicalChange, CandidateIDs) (IngestResult, error)
+	CandidateSnapshot(context.Context, string, string) (CandidateSnapshot, bool, error)
 	List(context.Context, string, int, *PageCursor) ([]Conversation, bool, error)
 	Detail(context.Context, string, string) (ConversationDetail, bool, error)
 	Messages(context.Context, string, string, int, *PageCursor) ([]MessageView, bool, error)
 }
 
 func validOptionalClean(value *string) bool {
-	return value == nil || (*value != "" && *value == strings.TrimSpace(*value))
+	return value == nil || (*value != "" && *value == strings.TrimSpace(*value) &&
+		utf8.ValidString(*value) && !strings.ContainsRune(*value, '\x00'))
+}
+
+func validExternalID(value string, maximum int) bool {
+	return value != "" && len(value) <= maximum && value == strings.TrimSpace(value) &&
+		utf8.ValidString(value) && !strings.ContainsRune(value, '\x00')
 }
 
 func jsonObject(value json.RawMessage) bool {
