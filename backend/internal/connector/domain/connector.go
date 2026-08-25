@@ -123,6 +123,7 @@ type ChannelConnection struct {
 	Status                 ConnectionStatus `json:"status"`
 	Capabilities           []Capability     `json:"capabilities"`
 	VerificationSecretHash string           `json:"-"`
+	EncryptedCredentials   []byte           `json:"-"`
 	LastEventAt            *time.Time       `json:"lastEventAt"`
 	LastSuccessAt          *time.Time       `json:"lastSuccessAt"`
 	LastErrorAt            *time.Time       `json:"lastErrorAt"`
@@ -166,6 +167,9 @@ func (connection ChannelConnection) Validate() error {
 		connection.Name == "" || len(connection.Name) > 200 || connection.Name != strings.Join(strings.Fields(connection.Name), " ") ||
 		!connection.Status.Valid() || !sha256Pattern.MatchString(connection.VerificationSecretHash) ||
 		connection.CreatedAt.IsZero() || connection.UpdatedAt.IsZero() || validateCapabilities(connection.Capabilities) != nil {
+		return ErrInvalid
+	}
+	if len(connection.EncryptedCredentials) > 8192 {
 		return ErrInvalid
 	}
 	if connection.LocationID != nil {
@@ -479,6 +483,14 @@ type Connector interface {
 	Health(context.Context, ChannelConnection) ConnectionHealth
 }
 
+// ConnectionProvisioner настраивает и удаляет внешний webhook без выполнения
+// сетевого вызова внутри PostgreSQL-транзакции. Credentials содержит
+// расшифрованные данные только на время вызова и не должна логироваться.
+type ConnectionProvisioner interface {
+	Provision(context.Context, ChannelConnection, string, json.RawMessage) (ConnectionHealth, error)
+	Deprovision(context.Context, ChannelConnection, json.RawMessage) error
+}
+
 type EventIdentifier interface {
 	ExternalEventID([]byte, Headers) (string, error)
 }
@@ -487,6 +499,7 @@ type EventIdentifier interface {
 type ConnectorRegistration struct {
 	Connector    Connector
 	Capabilities []Capability
+	Provisioner  ConnectionProvisioner
 }
 
 // ConnectorRegistry находит адаптер по поставщику канала.
@@ -511,6 +524,7 @@ type Repository interface {
 	ListConnections(context.Context, string) ([]ChannelConnection, error)
 	Connection(context.Context, string, string) (ChannelConnection, bool, error)
 	CreateConnection(context.Context, string, ChannelConnection) error
+	UpdateConnectionHealth(context.Context, string, string, ConnectionHealth) (ChannelConnection, bool, error)
 	DisconnectConnection(context.Context, string, string, time.Time) (ChannelConnection, bool, error)
 	PersistEvent(context.Context, string, string, RawEvent, *NormalizationWork, ConnectionHealth) (PersistResult, error)
 	PendingNormalization(context.Context, int) ([]NormalizationItem, error)

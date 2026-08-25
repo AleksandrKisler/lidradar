@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -21,6 +22,8 @@ const (
 	allowedOriginsKey   = "LIDRADAR_ALLOWED_ORIGINS"
 	sessionTTLKey       = "LIDRADAR_SESSION_TTL"
 	cookieSecureKey     = "LIDRADAR_COOKIE_SECURE"
+	publicBaseURLKey    = "LIDRADAR_PUBLIC_BASE_URL"
+	credentialKeyKey    = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
 	defaultHTTPAddress  = ":8080"
 	defaultDatabaseURL  = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
 	defaultShutdown     = 10 * time.Second
@@ -47,10 +50,11 @@ const (
 
 // Config contains configuration shared by every LidRadar runtime.
 type Config struct {
-	Environment Environment
-	HTTP        HTTP
-	Database    Database
-	Auth        Auth
+	Environment  Environment
+	HTTP         HTTP
+	Database     Database
+	Auth         Auth
+	Integrations Integrations
 }
 
 // HTTP contains process-level HTTP server settings.
@@ -64,6 +68,12 @@ type HTTP struct {
 type Auth struct {
 	SessionTTL   time.Duration
 	CookieSecure bool
+}
+
+// Integrations содержит общие безопасные настройки внешних подключений.
+type Integrations struct {
+	PublicBaseURL string
+	CredentialKey []byte
 }
 
 // Database contains PostgreSQL connection-pool settings.
@@ -86,6 +96,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, fmt.Errorf("required environment variable %s is missing", environmentKey)
 	}
 
+	var err error
 	configuration := Config{
 		Environment: Environment(rawEnvironment),
 		HTTP: HTTP{
@@ -100,9 +111,14 @@ func Load(lookup LookupEnv) (Config, error) {
 			ConnectTimeout: defaultDatabaseWait,
 		},
 		Auth: Auth{SessionTTL: defaultSessionTTL},
+		Integrations: Integrations{
+			PublicBaseURL: strings.TrimRight(strings.TrimSpace(valueOrDefault(lookup, publicBaseURLKey, "")), "/"),
+		},
+	}
+	if configuration.Integrations.CredentialKey, err = encryptionKeyValue(lookup, credentialKeyKey); err != nil {
+		return Config{}, err
 	}
 
-	var err error
 	if configuration.HTTP.ShutdownTimeout, err = durationValue(lookup, shutdownTimeoutKey, defaultShutdown); err != nil {
 		return Config{}, err
 	}
@@ -154,6 +170,17 @@ func (c Config) Validate() error {
 	}
 	if c.Auth.SessionTTL <= 0 {
 		return fmt.Errorf("%s must be positive", sessionTTLKey)
+	}
+	if (c.Integrations.PublicBaseURL == "") != (len(c.Integrations.CredentialKey) == 0) {
+		return fmt.Errorf("%s and %s must be configured together", publicBaseURLKey, credentialKeyKey)
+	}
+	if c.Integrations.PublicBaseURL != "" {
+		parsed, err := url.Parse(c.Integrations.PublicBaseURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+			(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" ||
+			len(c.Integrations.CredentialKey) != 32 {
+			return fmt.Errorf("telegram integration configuration is invalid")
+		}
 	}
 	if (c.Environment == EnvironmentStaging || c.Environment == EnvironmentProduction) && !c.Auth.CookieSecure {
 		return fmt.Errorf("%s must be true in %s", cookieSecureKey, c.Environment)
@@ -229,4 +256,16 @@ func stringListValue(lookup LookupEnv, key string) []string {
 		values = append(values, item)
 	}
 	return values
+}
+
+func encryptionKeyValue(lookup LookupEnv, key string) ([]byte, error) {
+	raw, ok := lookup(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
+	if err != nil || len(decoded) != 32 {
+		return nil, fmt.Errorf("%s must contain exactly 32 base64-encoded bytes", key)
+	}
+	return decoded, nil
 }

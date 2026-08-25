@@ -28,7 +28,7 @@ func (repository *PostgresRepository) ListConnections(ctx context.Context, tenan
 	}
 	rows, err := repository.pool.Query(ctx, `
 		SELECT id, tenant_id, location_id, provider, name, status, capabilities,
-		       verification_secret_hash, last_event_at, last_success_at, last_error_at,
+		       verification_secret_hash, encrypted_credentials, last_event_at, last_success_at, last_error_at,
 		       last_error_code, created_at, updated_at
 		FROM channel_connections
 		WHERE tenant_id = $1
@@ -57,7 +57,7 @@ func (repository *PostgresRepository) Connection(ctx context.Context, tenantID, 
 	}
 	return scanConnection(repository.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, location_id, provider, name, status, capabilities,
-		       verification_secret_hash, last_event_at, last_success_at, last_error_at,
+		       verification_secret_hash, encrypted_credentials, last_event_at, last_success_at, last_error_at,
 		       last_error_code, created_at, updated_at
 		FROM channel_connections
 		WHERE tenant_id = $1 AND id = $2`, tenantID, connectionID))
@@ -74,18 +74,41 @@ func (repository *PostgresRepository) CreateConnection(ctx context.Context, tena
 	_, err = repository.pool.Exec(ctx, `
 		INSERT INTO channel_connections(
 			id, tenant_id, location_id, provider, name, status, capabilities,
-			verification_secret_hash, last_event_at, last_success_at, last_error_at,
+			verification_secret_hash, encrypted_credentials, last_event_at, last_success_at, last_error_at,
 			last_error_code, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		connection.ID, tenantID, connection.LocationID, connection.Provider, connection.Name,
 		connection.Status, string(capabilities), connection.VerificationSecretHash,
-		connection.LastEventAt, connection.LastSuccessAt, connection.LastErrorAt,
+		nullableBytes(connection.EncryptedCredentials), connection.LastEventAt, connection.LastSuccessAt, connection.LastErrorAt,
 		connection.LastErrorCode, connection.CreatedAt, connection.UpdatedAt,
 	)
 	if err != nil {
 		return mapPostgresError("insert channel connection", err)
 	}
 	return nil
+}
+
+func (repository *PostgresRepository) UpdateConnectionHealth(
+	ctx context.Context,
+	tenantID, connectionID string,
+	health domain.ConnectionHealth,
+) (domain.ChannelConnection, bool, error) {
+	if repository == nil || repository.pool == nil || tenantID == "" || connectionID == "" || health.Validate() != nil {
+		return domain.ChannelConnection{}, false, domain.ErrInvalid
+	}
+	return scanConnection(repository.pool.QueryRow(ctx, `
+		UPDATE channel_connections
+		SET status = $3,
+		    last_success_at = CASE WHEN $3 = 'ACTIVE' THEN $4 ELSE last_success_at END,
+		    last_error_at = CASE WHEN $3 = 'ACTIVE' THEN NULL ELSE COALESCE($5, $4) END,
+		    last_error_code = CASE WHEN $3 = 'ACTIVE' THEN NULL ELSE $6 END,
+		    updated_at = $4
+		WHERE tenant_id = $1 AND id = $2
+		RETURNING id, tenant_id, location_id, provider, name, status, capabilities,
+		          verification_secret_hash, encrypted_credentials, last_event_at, last_success_at, last_error_at,
+		          last_error_code, created_at, updated_at`,
+		tenantID, connectionID, health.Status, health.CheckedAt.UTC(), health.LastErrorAt, health.LastErrorCode,
+	))
 }
 
 func (repository *PostgresRepository) DisconnectConnection(
@@ -101,7 +124,7 @@ func (repository *PostgresRepository) DisconnectConnection(
 		SET status = 'DISCONNECTED', updated_at = $3
 		WHERE tenant_id = $1 AND id = $2
 		RETURNING id, tenant_id, location_id, provider, name, status, capabilities,
-		          verification_secret_hash, last_event_at, last_success_at, last_error_at,
+		          verification_secret_hash, encrypted_credentials, last_event_at, last_success_at, last_error_at,
 		          last_error_code, created_at, updated_at`, tenantID, connectionID, at.UTC()))
 }
 
@@ -132,7 +155,7 @@ func (repository *PostgresRepository) PersistEvent(
 
 	connection, found, err := scanConnection(tx.QueryRow(ctx, `
 		SELECT id, tenant_id, location_id, provider, name, status, capabilities,
-		       verification_secret_hash, last_event_at, last_success_at, last_error_at,
+		       verification_secret_hash, encrypted_credentials, last_event_at, last_success_at, last_error_at,
 		       last_error_code, created_at, updated_at
 		FROM channel_connections
 		WHERE tenant_id = $1 AND id = $2
@@ -344,7 +367,7 @@ func scanConnectionValues(row rowScanner) (domain.ChannelConnection, error) {
 	if err := row.Scan(
 		&connection.ID, &connection.TenantID, &connection.LocationID, &connection.Provider,
 		&connection.Name, &connection.Status, &capabilitiesJSON, &connection.VerificationSecretHash,
-		&connection.LastEventAt, &connection.LastSuccessAt, &connection.LastErrorAt,
+		&connection.EncryptedCredentials, &connection.LastEventAt, &connection.LastSuccessAt, &connection.LastErrorAt,
 		&connection.LastErrorCode, &connection.CreatedAt, &connection.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -356,6 +379,13 @@ func scanConnectionValues(row rowScanner) (domain.ChannelConnection, error) {
 		return domain.ChannelConnection{}, fmt.Errorf("scan channel connection: %w", domain.ErrInvalid)
 	}
 	return connection, nil
+}
+
+func nullableBytes(value []byte) []byte {
+	if len(value) == 0 {
+		return nil
+	}
+	return value
 }
 
 func insertRawEvent(ctx context.Context, tx pgx.Tx, event domain.RawEvent) (domain.RawEvent, bool, error) {

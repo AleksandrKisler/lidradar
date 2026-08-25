@@ -46,6 +46,8 @@ services:
     environment:
       <<: *backend-environment
       LIDRADAR_HTTP_ADDRESS: :8080
+      LIDRADAR_PUBLIC_BASE_URL: ${LIDRADAR_PUBLIC_BASE_URL:-}
+      LIDRADAR_INTEGRATION_ENCRYPTION_KEY: ${LIDRADAR_INTEGRATION_ENCRYPTION_KEY:-}
     ports:
       - "8080:8080"
     depends_on:

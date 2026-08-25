@@ -262,7 +262,7 @@ paths:
       - { $ref: '#/components/parameters/ConnectorProvider' }
     post:
       summary: Create a channel connection
-      description: OWNER-only. The webhook secret is accepted once and persisted only as a SHA-256 verifier.
+      description: OWNER-only. The webhook secret is accepted once and persisted only as a SHA-256 verifier. CONNECTED_BUSINESS_BOT also requires botToken; the token is encrypted at rest and never returned.
       operationId: connectChannel
       requestBody:
         required: true
@@ -271,12 +271,13 @@ paths:
             schema: { $ref: '#/components/schemas/ConnectChannelRequest' }
       responses:
         '201':
-          description: Connection created. Telegram remains DEGRADED until its real-account spike is verified.
+          description: Connection created. A Telegram connection is ACTIVE after setWebhook/getWebhookInfo verification, or ERROR with a safe code when remote provisioning failed.
           content: { application/json: { schema: { $ref: '#/components/schemas/ChannelConnection' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Telegram provisioning is not configured safely., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/integrations/{connectionId}:
     parameters:
       - { $ref: '#/components/parameters/TenantId' }
@@ -291,6 +292,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: 'The local connection is disconnected, but Telegram webhook removal could not be verified.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/integrations/{connectionId}/health:
     parameters:
       - { $ref: '#/components/parameters/TenantId' }
@@ -319,7 +321,7 @@ paths:
       - name: X-Telegram-Bot-Api-Secret-Token
         in: header
         required: false
-        description: Required for CONNECTED_BUSINESS_BOT fixture events.
+        description: Required for CONNECTED_BUSINESS_BOT events and populated by Telegram from the registered secret_token.
         schema: { type: string, minLength: 16, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$' }
     post:
       summary: Persist a provider webhook event
@@ -757,6 +759,13 @@ components:
         name: { type: string, minLength: 1, maxLength: 200 }
         locationId: { type: [string, 'null'], format: uuid }
         webhookSecret: { type: string, minLength: 16, maxLength: 256, writeOnly: true }
+        botToken:
+          type: string
+          minLength: 26
+          maxLength: 149
+          pattern: '^[0-9]{5,20}:[A-Za-z0-9_-]{20,128}$'
+          writeOnly: true
+          description: Required only for CONNECTED_BUSINESS_BOT and rejected for other providers.
     WebhookReceipt:
       type: object
       required: [rawEventId, status, duplicate]

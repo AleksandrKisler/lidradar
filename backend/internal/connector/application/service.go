@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -27,11 +28,14 @@ var (
 const (
 	PermissionManage        = "integration.manage"
 	invalidPayloadErrorCode = "INVALID_PAYLOAD"
+	telegramPendingCode     = "TELEGRAM_WEBHOOK_PENDING"
+	telegramSetupFailedCode = "TELEGRAM_WEBHOOK_SETUP_FAILED"
 	minWebhookSecretBytes   = 16
 	maxWebhookSecretBytes   = 256
 )
 
 var telegramSecretPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var telegramBotTokenPattern = regexp.MustCompile(`^[0-9]{5,20}:[A-Za-z0-9_-]{20,128}$`)
 
 type Authorizer interface {
 	Allowed(context.Context, string, string, string) (bool, error)
@@ -39,12 +43,28 @@ type Authorizer interface {
 
 type IDs interface{ NewID() (string, error) }
 
+// CredentialCipher шифрует реквизиты подключения с привязкой к организации,
+// поставщику и внутреннему идентификатору.
+type CredentialCipher interface {
+	Encrypt([]byte, []byte) ([]byte, error)
+	Decrypt([]byte, []byte) ([]byte, error)
+}
+
+// Option задаёт необязательную защищённую возможность сервиса подключений.
+type Option func(*Service)
+
+// WithCredentialCipher разрешает хранение реквизитов внешних сервисов.
+func WithCredentialCipher(cipher CredentialCipher) Option {
+	return func(service *Service) { service.cipher = cipher }
+}
+
 type Service struct {
 	repository domain.Repository
 	authorizer Authorizer
 	registry   domain.ConnectorRegistry
 	ids        IDs
 	now        func() time.Time
+	cipher     CredentialCipher
 }
 
 func NewService(
@@ -53,8 +73,15 @@ func NewService(
 	registry domain.ConnectorRegistry,
 	ids IDs,
 	now func() time.Time,
+	options ...Option,
 ) Service {
-	return Service{repository: repository, authorizer: authorizer, registry: registry, ids: ids, now: now}
+	service := Service{repository: repository, authorizer: authorizer, registry: registry, ids: ids, now: now}
+	for _, option := range options {
+		if option != nil {
+			option(&service)
+		}
+	}
+	return service
 }
 
 type ConnectCommand struct {
@@ -62,6 +89,7 @@ type ConnectCommand struct {
 	Name          string
 	LocationID    *string
 	WebhookSecret string
+	BotToken      string
 }
 
 func (service Service) Connect(ctx context.Context, actorID, tenantID string, command ConnectCommand) (domain.ChannelConnection, error) {
@@ -82,6 +110,16 @@ func (service Service) Connect(ctx context.Context, actorID, tenantID string, co
 	if !found || registration.Connector == nil {
 		return domain.ChannelConnection{}, ErrInvalid
 	}
+	if provider == domain.ProviderTelegramConnectedBusinessBot {
+		if registration.Provisioner == nil || service.cipher == nil {
+			return domain.ChannelConnection{}, ErrUnavailable
+		}
+		if !telegramBotTokenPattern.MatchString(strings.TrimSpace(command.BotToken)) {
+			return domain.ChannelConnection{}, ErrInvalid
+		}
+	} else if strings.TrimSpace(command.BotToken) != "" {
+		return domain.ChannelConnection{}, ErrInvalid
+	}
 	id, err := service.ids.NewID()
 	if err != nil {
 		return domain.ChannelConnection{}, err
@@ -89,6 +127,12 @@ func (service Service) Connect(ctx context.Context, actorID, tenantID string, co
 	now := service.now().UTC()
 	health := registration.Connector.Health(ctx, domain.ChannelConnection{Provider: provider})
 	health.CheckedAt = now
+	if provider == domain.ProviderTelegramConnectedBusinessBot {
+		code := telegramPendingCode
+		health = domain.ConnectionHealth{
+			Status: domain.ConnectionDegraded, LastErrorAt: &now, LastErrorCode: &code, CheckedAt: now,
+		}
+	}
 	connection, err := domain.NewChannelConnection(
 		id, tenantID, command.LocationID, provider, command.Name, registration.Capabilities,
 		hashValue(command.WebhookSecret), health, now,
@@ -96,8 +140,41 @@ func (service Service) Connect(ctx context.Context, actorID, tenantID string, co
 	if err != nil {
 		return domain.ChannelConnection{}, ErrInvalid
 	}
+	var credentials json.RawMessage
+	if provider == domain.ProviderTelegramConnectedBusinessBot {
+		credentials, err = json.Marshal(map[string]string{"botToken": strings.TrimSpace(command.BotToken)})
+		if err != nil {
+			return domain.ChannelConnection{}, ErrInvalid
+		}
+		connection.EncryptedCredentials, err = service.cipher.Encrypt(credentials, credentialAAD(connection))
+		if err != nil || connection.Validate() != nil {
+			return domain.ChannelConnection{}, ErrUnavailable
+		}
+		defer clear(credentials)
+	}
 	if err := service.repository.CreateConnection(ctx, tenantID, connection); err != nil {
 		return domain.ChannelConnection{}, mapDomainError(err)
+	}
+	if registration.Provisioner != nil {
+		provisionedHealth, provisionErr := registration.Provisioner.Provision(
+			ctx, connection, command.WebhookSecret, credentials,
+		)
+		if provisionErr != nil {
+			code := telegramSetupFailedCode
+			provisionedHealth = domain.ConnectionHealth{
+				Status: domain.ConnectionError, LastErrorAt: &now, LastErrorCode: &code, CheckedAt: now,
+			}
+		}
+		updated, found, updateErr := service.repository.UpdateConnectionHealth(
+			ctx, tenantID, connection.ID, provisionedHealth,
+		)
+		if updateErr != nil || !found {
+			if updateErr == nil {
+				updateErr = domain.ErrNotFound
+			}
+			return domain.ChannelConnection{}, mapDomainError(updateErr)
+		}
+		connection = updated
 	}
 	return connection, nil
 }
@@ -137,12 +214,34 @@ func (service Service) Disconnect(ctx context.Context, actorID, tenantID, connec
 	if strings.TrimSpace(connectionID) == "" || service.now == nil {
 		return ErrInvalid
 	}
-	_, found, err := service.repository.DisconnectConnection(ctx, tenantID, connectionID, service.now().UTC())
+	connection, found, err := service.repository.Connection(ctx, tenantID, connectionID)
 	if err != nil {
 		return mapDomainError(err)
 	}
 	if !found {
 		return ErrNotFound
+	}
+	_, found, err = service.repository.DisconnectConnection(ctx, tenantID, connectionID, service.now().UTC())
+	if err != nil {
+		return mapDomainError(err)
+	}
+	if !found {
+		return ErrNotFound
+	}
+	registration, registered := service.registry.Lookup(connection.Provider)
+	if !registered || registration.Provisioner == nil || len(connection.EncryptedCredentials) == 0 {
+		return nil
+	}
+	if service.cipher == nil {
+		return ErrUnavailable
+	}
+	credentials, decryptErr := service.cipher.Decrypt(connection.EncryptedCredentials, credentialAAD(connection))
+	if decryptErr != nil {
+		return ErrUnavailable
+	}
+	defer clear(credentials)
+	if err := registration.Provisioner.Deprovision(ctx, connection, credentials); err != nil {
+		return ErrUnavailable
 	}
 	return nil
 }
@@ -266,6 +365,10 @@ func (service Service) requireManage(ctx context.Context, actorID, tenantID stri
 }
 
 func hashValue(value string) string { return hashBytes([]byte(value)) }
+
+func credentialAAD(connection domain.ChannelConnection) []byte {
+	return []byte(fmt.Sprintf("lidradar:v1:%s:%s:%s", connection.TenantID, connection.Provider, connection.ID))
+}
 
 func hashBytes(value []byte) string {
 	digest := sha256.Sum256(value)

@@ -8,7 +8,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,17 +23,32 @@ import (
 const (
 	developmentSecretHeader = "X-LidRadar-Webhook-Secret"
 	telegramSecretHeader    = "X-Telegram-Bot-Api-Secret-Token"
-	telegramSpikeErrorCode  = "TELEGRAM_SPIKE_NOT_VERIFIED"
+	telegramConfigErrorCode = "TELEGRAM_CONFIGURATION_REQUIRED"
+	defaultTelegramAPIURL   = "https://api.telegram.org"
+	telegramResponseLimit   = 64 << 10
 )
+
+var ErrTelegramAPI = errors.New("ошибка Telegram Bot API")
+
+var telegramSecretPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,256}$`)
+var telegramBotTokenPattern = regexp.MustCompile(`^[0-9]{5,20}:[A-Za-z0-9_-]{20,128}$`)
+
+// TelegramConfiguration задаёт сетевой клиент и публичный адрес webhook.
+type TelegramConfiguration struct {
+	WebhookBaseURL string
+	APIBaseURL     string
+	Client         *http.Client
+}
 
 // Registry содержит доступные в текущей сборке адаптеры каналов.
 type Registry struct {
 	registrations map[domain.Provider]domain.ConnectorRegistration
 }
 
-// NewRegistry создаёт реестр локальных адаптеров и макета Telegram.
-func NewRegistry() Registry {
-	return Registry{registrations: map[domain.Provider]domain.ConnectorRegistration{
+// NewRegistry создаёт реестр локальных адаптеров и Telegram-коннектора.
+func NewRegistry(configurations ...TelegramConfiguration) Registry {
+	telegram := newTelegramConnector(configurations...)
+	registry := Registry{registrations: map[domain.Provider]domain.ConnectorRegistration{
 		domain.ProviderTest: {
 			Connector: TestConnector{},
 			Capabilities: []domain.Capability{
@@ -55,7 +74,7 @@ func NewRegistry() Registry {
 			},
 		},
 		domain.ProviderTelegramConnectedBusinessBot: {
-			Connector: TelegramConnectedBusinessStubConnector{},
+			Connector: telegram,
 			Capabilities: []domain.Capability{
 				domain.CapabilityReceiveMessages, domain.CapabilitySendMessages,
 				domain.CapabilityReceiveEdits, domain.CapabilityReceiveDeletions,
@@ -63,6 +82,12 @@ func NewRegistry() Registry {
 			},
 		},
 	}}
+	if telegram.configured() {
+		registration := registry.registrations[domain.ProviderTelegramConnectedBusinessBot]
+		registration.Provisioner = telegram
+		registry.registrations[domain.ProviderTelegramConnectedBusinessBot] = registration
+	}
+	return registry
 }
 
 func (registry Registry) Lookup(provider domain.Provider) (domain.ConnectorRegistration, bool) {
@@ -128,16 +153,20 @@ func (GenericWebhookConnector) Health(_ context.Context, _ domain.ChannelConnect
 	return activeHealth()
 }
 
-// TelegramConnectedBusinessStubConnector проверяет текущую форму обновления Bot API
-// и секретный заголовок без сетевых вызовов. Состояние остаётся DEGRADED до
-// завершения обязательной проверки на настоящем аккаунте.
-type TelegramConnectedBusinessStubConnector struct{}
+// TelegramConnectedBusinessConnector принимает события Telegram Business и,
+// при наличии конфигурации, управляет webhook через официальный Bot API.
+type TelegramConnectedBusinessConnector struct {
+	webhookBaseURL string
+	apiBaseURL     string
+	client         *http.Client
+	now            func() time.Time
+}
 
-func (TelegramConnectedBusinessStubConnector) Provider() domain.Provider {
+func (TelegramConnectedBusinessConnector) Provider() domain.Provider {
 	return domain.ProviderTelegramConnectedBusinessBot
 }
 
-func (connector TelegramConnectedBusinessStubConnector) VerifyEvent(
+func (connector TelegramConnectedBusinessConnector) VerifyEvent(
 	_ context.Context,
 	connection domain.ChannelConnection,
 	payload []byte,
@@ -153,12 +182,12 @@ func (connector TelegramConnectedBusinessStubConnector) VerifyEvent(
 	return err
 }
 
-func (TelegramConnectedBusinessStubConnector) ExternalEventID(payload []byte, _ domain.Headers) (string, error) {
+func (TelegramConnectedBusinessConnector) ExternalEventID(payload []byte, _ domain.Headers) (string, error) {
 	updateID, _, err := decodeTelegramUpdate(payload)
 	return updateID, err
 }
 
-func (connector TelegramConnectedBusinessStubConnector) NormalizeEvent(
+func (connector TelegramConnectedBusinessConnector) NormalizeEvent(
 	_ context.Context,
 	connection domain.ChannelConnection,
 	event domain.RawEvent,
@@ -173,11 +202,159 @@ func (connector TelegramConnectedBusinessStubConnector) NormalizeEvent(
 	return normalizeTelegramUpdate(connection, event, updateID, eventType)
 }
 
-func (TelegramConnectedBusinessStubConnector) Health(_ context.Context, _ domain.ChannelConnection) domain.ConnectionHealth {
-	code := telegramSpikeErrorCode
+func (connector TelegramConnectedBusinessConnector) Health(_ context.Context, _ domain.ChannelConnection) domain.ConnectionHealth {
+	if connector.configured() {
+		return domain.ConnectionHealth{Status: domain.ConnectionActive, CheckedAt: connector.now().UTC()}
+	}
+	code := telegramConfigErrorCode
 	return domain.ConnectionHealth{
 		Status: domain.ConnectionDegraded, LastErrorCode: &code, CheckedAt: time.Now().UTC(),
 	}
+}
+
+type telegramCredentials struct {
+	BotToken string `json:"botToken"`
+}
+
+type telegramWebhookInfo struct {
+	URL                string `json:"url"`
+	PendingUpdateCount int    `json:"pending_update_count"`
+	LastErrorDate      int64  `json:"last_error_date"`
+}
+
+type telegramAPIResponse struct {
+	OK        bool            `json:"ok"`
+	Result    json.RawMessage `json:"result"`
+	ErrorCode int             `json:"error_code"`
+}
+
+func newTelegramConnector(configurations ...TelegramConfiguration) *TelegramConnectedBusinessConnector {
+	configuration := TelegramConfiguration{}
+	if len(configurations) > 0 {
+		configuration = configurations[0]
+	}
+	apiBaseURL := strings.TrimRight(strings.TrimSpace(configuration.APIBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = defaultTelegramAPIURL
+	}
+	client := configuration.Client
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	return &TelegramConnectedBusinessConnector{
+		webhookBaseURL: strings.TrimRight(strings.TrimSpace(configuration.WebhookBaseURL), "/"),
+		apiBaseURL:     apiBaseURL, client: client, now: time.Now,
+	}
+}
+
+func (connector TelegramConnectedBusinessConnector) configured() bool {
+	webhook, webhookErr := url.Parse(connector.webhookBaseURL)
+	api, apiErr := url.Parse(connector.apiBaseURL)
+	return connector.client != nil && connector.now != nil && webhookErr == nil && apiErr == nil &&
+		webhook.Scheme == "https" && webhook.Host != "" && api.Scheme == "https" && api.Host != ""
+}
+
+func (connector TelegramConnectedBusinessConnector) Provision(
+	ctx context.Context,
+	connection domain.ChannelConnection,
+	webhookSecret string,
+	credentials json.RawMessage,
+) (domain.ConnectionHealth, error) {
+	parsed, err := decodeTelegramCredentials(credentials)
+	if !connector.configured() || err != nil || connection.Provider != connector.Provider() ||
+		!telegramSecretPattern.MatchString(webhookSecret) {
+		return domain.ConnectionHealth{}, ErrTelegramAPI
+	}
+	webhookURL := connector.webhookURL(connection)
+	request := map[string]any{
+		"url": webhookURL, "secret_token": webhookSecret,
+		"allowed_updates": []string{
+			"business_connection", "business_message", "edited_business_message", "deleted_business_messages",
+		},
+	}
+	var installed bool
+	if err := connector.call(ctx, parsed.BotToken, "setWebhook", request, &installed); err != nil || !installed {
+		return domain.ConnectionHealth{}, ErrTelegramAPI
+	}
+	var info telegramWebhookInfo
+	if err := connector.call(ctx, parsed.BotToken, "getWebhookInfo", struct{}{}, &info); err != nil || info.URL != webhookURL {
+		return domain.ConnectionHealth{}, ErrTelegramAPI
+	}
+	now := connector.now().UTC()
+	return domain.ConnectionHealth{Status: domain.ConnectionActive, LastSuccessAt: &now, CheckedAt: now}, nil
+}
+
+func (connector TelegramConnectedBusinessConnector) Deprovision(
+	ctx context.Context,
+	connection domain.ChannelConnection,
+	credentials json.RawMessage,
+) error {
+	parsed, err := decodeTelegramCredentials(credentials)
+	if !connector.configured() || err != nil || connection.Provider != connector.Provider() {
+		return ErrTelegramAPI
+	}
+	var deleted bool
+	if err := connector.call(ctx, parsed.BotToken, "deleteWebhook", map[string]bool{"drop_pending_updates": false}, &deleted); err != nil || !deleted {
+		return ErrTelegramAPI
+	}
+	return nil
+}
+
+func (connector TelegramConnectedBusinessConnector) webhookURL(connection domain.ChannelConnection) string {
+	return fmt.Sprintf(
+		"%s/api/v1/webhooks/%s/%s/%s", connector.webhookBaseURL,
+		url.PathEscape(string(connection.Provider)), url.PathEscape(connection.TenantID), url.PathEscape(connection.ID),
+	)
+}
+
+func (connector TelegramConnectedBusinessConnector) call(
+	ctx context.Context,
+	botToken, method string,
+	payload any,
+	result any,
+) error {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return ErrTelegramAPI
+	}
+	endpoint := connector.apiBaseURL + "/bot" + botToken + "/" + method
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return ErrTelegramAPI
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := connector.client.Do(request)
+	if err != nil {
+		return ErrTelegramAPI
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, telegramResponseLimit+1))
+	if err != nil || len(body) > telegramResponseLimit || response.StatusCode != http.StatusOK {
+		return ErrTelegramAPI
+	}
+	var envelope telegramAPIResponse
+	if json.Unmarshal(body, &envelope) != nil || !envelope.OK || len(envelope.Result) == 0 || envelope.ErrorCode != 0 {
+		return ErrTelegramAPI
+	}
+	if result != nil && json.Unmarshal(envelope.Result, result) != nil {
+		return ErrTelegramAPI
+	}
+	return nil
+}
+
+func decodeTelegramCredentials(value json.RawMessage) (telegramCredentials, error) {
+	var credentials telegramCredentials
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&credentials); err != nil {
+		return telegramCredentials{}, ErrTelegramAPI
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) ||
+		!telegramBotTokenPattern.MatchString(strings.TrimSpace(credentials.BotToken)) {
+		return telegramCredentials{}, ErrTelegramAPI
+	}
+	credentials.BotToken = strings.TrimSpace(credentials.BotToken)
+	return credentials, nil
 }
 
 type envelope struct {

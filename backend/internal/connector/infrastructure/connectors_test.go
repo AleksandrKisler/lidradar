@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,8 +51,8 @@ func TestDevelopmentConnectorsVerifyIdentifyAndNormalize(t *testing.T) {
 	}
 }
 
-func TestTelegramStubUsesBotAPIUpdateIDAndRemainsDegraded(t *testing.T) {
-	connector := TelegramConnectedBusinessStubConnector{}
+func TestTelegramConnectorUsesBotAPIUpdateIDAndRequiresConfiguration(t *testing.T) {
+	connector := TelegramConnectedBusinessConnector{}
 	connection := connectorConnection(t, connector.Provider(), "telegram_secret-123")
 	payload := []byte(`{
 		"update_id":9001,
@@ -75,7 +78,7 @@ func TestTelegramStubUsesBotAPIUpdateIDAndRemainsDegraded(t *testing.T) {
 		t.Fatalf("NormalizeEvent() = %#v, %v", events, err)
 	}
 	health := connector.Health(context.Background(), connection)
-	if health.Status != domain.ConnectionDegraded || health.LastErrorCode == nil || *health.LastErrorCode != telegramSpikeErrorCode {
+	if health.Status != domain.ConnectionDegraded || health.LastErrorCode == nil || *health.LastErrorCode != telegramConfigErrorCode {
 		t.Fatalf("Health() = %#v", health)
 	}
 
@@ -113,7 +116,7 @@ func TestConnectorFixtureSetsProduceCanonicalEvents(t *testing.T) {
 		{"test", TestConnector{}, "test", developmentSecretHeader, "fixture-secret-test"},
 		{"import", ImportConnector{}, "import", developmentSecretHeader, "fixture-secret-import"},
 		{"generic", GenericWebhookConnector{}, "generic_webhook", developmentSecretHeader, "fixture-secret-generic"},
-		{"telegram", TelegramConnectedBusinessStubConnector{}, "telegram", telegramSecretHeader, "fixture_secret_telegram"},
+		{"telegram", TelegramConnectedBusinessConnector{}, "telegram", telegramSecretHeader, "fixture_secret_telegram"},
 	}
 	fixtureExpectations := []struct {
 		name      string
@@ -179,7 +182,7 @@ func TestDirectionDetectionForManualOutgoingMessages(t *testing.T) {
 		t.Fatalf("generic outgoing = %#v, %v", genericEvents, err)
 	}
 
-	telegram := TelegramConnectedBusinessStubConnector{}
+	telegram := TelegramConnectedBusinessConnector{}
 	telegramConnection := connectorConnection(t, telegram.Provider(), "telegram_direction_secret")
 	telegramPayload := []byte(`{
 		"update_id":9201,"business_message":{"business_connection_id":"business-1","message_id":50,"date":1787649000,
@@ -194,7 +197,7 @@ func TestDirectionDetectionForManualOutgoingMessages(t *testing.T) {
 }
 
 func TestTelegramAttachmentRequiresDownloadableFileIdentifier(t *testing.T) {
-	connector := TelegramConnectedBusinessStubConnector{}
+	connector := TelegramConnectedBusinessConnector{}
 	connection := connectorConnection(t, connector.Provider(), "telegram_file_secret")
 	payload := []byte(`{
 		"update_id":9301,"business_message":{"business_connection_id":"business-1","message_id":51,"date":1787649000,
@@ -205,6 +208,98 @@ func TestTelegramAttachmentRequiresDownloadableFileIdentifier(t *testing.T) {
 	)
 	if !errors.Is(err, domain.ErrInvalidPayload) {
 		t.Fatalf("NormalizeEvent() error = %v", err)
+	}
+}
+
+func TestTelegramProvisionerInstallsVerifiesAndDeletesWebhook(t *testing.T) {
+	const token = "123456:abcdefghijklmnopqrstuvwxyzABCD"
+	const publicBaseURL = "https://lidradar-tunnel.example"
+	connection := connectorConnection(t, domain.ProviderTelegramConnectedBusinessBot, "telegram_secret_123")
+	wantWebhookURL := publicBaseURL + "/api/v1/webhooks/CONNECTED_BUSINESS_BOT/tenant/connection"
+	methods := make([]string, 0, 3)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		methods = append(methods, request.URL.Path)
+		status := http.StatusOK
+		body := ""
+		switch request.URL.Path {
+		case "/bot" + token + "/setWebhook":
+			var requestBody struct {
+				URL            string   `json:"url"`
+				SecretToken    string   `json:"secret_token"`
+				AllowedUpdates []string `json:"allowed_updates"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil || requestBody.URL != wantWebhookURL ||
+				requestBody.SecretToken != "telegram_secret_123" || len(requestBody.AllowedUpdates) != 4 {
+				t.Fatalf("setWebhook body = %#v, %v", requestBody, err)
+			}
+			body = `{"ok":true,"result":true}`
+		case "/bot" + token + "/getWebhookInfo":
+			body = fmt.Sprintf(`{"ok":true,"result":{"url":%q,"pending_update_count":0}}`, wantWebhookURL)
+		case "/bot" + token + "/deleteWebhook":
+			body = `{"ok":true,"result":true}`
+		default:
+			status = http.StatusNotFound
+		}
+		return jsonResponse(status, body), nil
+	})}
+
+	connector := newTelegramConnector(TelegramConfiguration{
+		WebhookBaseURL: publicBaseURL, APIBaseURL: "https://api.telegram.test", Client: client,
+	})
+	health, err := connector.Provision(
+		context.Background(), connection, "telegram_secret_123", json.RawMessage(`{"botToken":"`+token+`"}`),
+	)
+	if err != nil || health.Status != domain.ConnectionActive || len(methods) != 2 {
+		t.Fatalf("Provision() = %#v, %v; methods=%v", health, err, methods)
+	}
+	if err := connector.Deprovision(
+		context.Background(), connection, json.RawMessage(`{"botToken":"`+token+`"}`),
+	); err != nil || len(methods) != 3 {
+		t.Fatalf("Deprovision() = %v; methods=%v", err, methods)
+	}
+}
+
+func TestTelegramProvisionerDoesNotExposeBotTokenInErrors(t *testing.T) {
+	const token = "123456:abcdefghijklmnopqrstuvwxyzABCD"
+	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusUnauthorized, `{"ok":false,"error_code":401,"description":"Unauthorized"}`), nil
+	})}
+	connector := newTelegramConnector(TelegramConfiguration{
+		WebhookBaseURL: "https://public.example", APIBaseURL: "https://api.telegram.test", Client: client,
+	})
+	_, err := connector.Provision(
+		context.Background(), connectorConnection(t, domain.ProviderTelegramConnectedBusinessBot, "telegram_secret_123"),
+		"telegram_secret_123", json.RawMessage(`{"botToken":"`+token+`"}`),
+	)
+	if !errors.Is(err, ErrTelegramAPI) || strings.Contains(err.Error(), token) {
+		t.Fatalf("Provision() error = %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func TestRegistryEnablesTelegramProvisioningOnlyWithPublicHTTPSURL(t *testing.T) {
+	without := NewRegistry()
+	registration, found := without.Lookup(domain.ProviderTelegramConnectedBusinessBot)
+	if !found || registration.Provisioner != nil {
+		t.Fatalf("реестр без адреса = %#v, found=%v", registration, found)
+	}
+	with := NewRegistry(TelegramConfiguration{WebhookBaseURL: "https://public.example"})
+	registration, found = with.Lookup(domain.ProviderTelegramConnectedBusinessBot)
+	if !found || registration.Provisioner == nil {
+		t.Fatalf("реестр с адресом = %#v, found=%v", registration, found)
 	}
 }
 

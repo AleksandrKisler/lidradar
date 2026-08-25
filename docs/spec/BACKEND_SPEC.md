@@ -107,12 +107,22 @@ the generic leased job runtime remains owned by stage six.
 
 OWNER manages list/connect/disconnect/health under `/api/v1/integrations`.
 TEST, IMPORT, and GENERIC_WEBHOOK are deterministic local adapters sharing the
-versioned fixture envelope. The Connected Business Bot adapter only validates
-the current Telegram update/header shape from fixtures and performs no network
-request. Its health remains `DEGRADED` with
-`TELEGRAM_SPIKE_NOT_VERIFIED` until the required real-account feasibility spike
-and its report exist; therefore the real-Telegram exit gate is not claimed by
-the stub implementation.
+versioned fixture envelope. The Connected Business Bot adapter registers a
+tenant- and connection-specific HTTPS webhook through `setWebhook`, restricts
+updates to the four Business event families, and verifies the resulting address
+through `getWebhookInfo`. Disconnect first records authoritative local state and
+then calls `deleteWebhook`, so a failed remote cleanup can be retried safely.
+
+The bot token is accepted only for `CONNECTED_BUSINESS_BOT`, encrypted with
+AES-256-GCM using a deployment key, bound to tenant/provider/connection
+identifiers, and never returned through JSON. The webhook secret is stored only
+as a SHA-256 verifier. Missing public HTTPS or encryption configuration makes
+Telegram connection unavailable without disabling the other adapters. Remote
+setup failure leaves a durable connection in `ERROR` with the safe code
+`TELEGRAM_WEBHOOK_SETUP_FAILED`; provider text and credentials are not exposed.
+No Bot API call occurs on the event receipt path. Automated adapter tests do not
+claim the real-Telegram exit gate: the non-Premium account spike and its evidence
+report remain mandatory.
 
 ### Ядро переписок
 

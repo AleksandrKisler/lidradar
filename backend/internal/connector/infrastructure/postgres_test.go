@@ -131,6 +131,35 @@ func TestPostgresRepositoryInvalidPayloadUpdatesHealthWithoutWork(t *testing.T) 
 	}
 }
 
+func TestPostgresRepositoryPersistsEncryptedCredentialsAndProvisioningHealth(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	pair := testsupport.TwoTenants(t, ctx, pool)
+	repository := NewPostgresRepository(pool)
+	connection := newConnection(
+		t, ids.Generator{}, pair.A.TenantID, nil, domain.ProviderTelegramConnectedBusinessBot,
+	)
+	connection.EncryptedCredentials = []byte{1, 2, 3, 4, 5}
+	if err := repository.CreateConnection(ctx, pair.A.TenantID, connection); err != nil {
+		t.Fatalf("CreateConnection() error = %v", err)
+	}
+
+	stored, found, err := repository.Connection(ctx, pair.A.TenantID, connection.ID)
+	if err != nil || !found || string(stored.EncryptedCredentials) != string(connection.EncryptedCredentials) {
+		t.Fatalf("Connection() = %#v, found=%v, err=%v", stored, found, err)
+	}
+	now := time.Now().UTC()
+	health := domain.ConnectionHealth{Status: domain.ConnectionActive, LastSuccessAt: &now, CheckedAt: now}
+	updated, found, err := repository.UpdateConnectionHealth(ctx, pair.A.TenantID, connection.ID, health)
+	if err != nil || !found || updated.Status != domain.ConnectionActive || updated.LastSuccessAt == nil ||
+		string(updated.EncryptedCredentials) != string(connection.EncryptedCredentials) {
+		t.Fatalf("UpdateConnectionHealth() = %#v, found=%v, err=%v", updated, found, err)
+	}
+	if _, found, err := repository.UpdateConnectionHealth(ctx, pair.B.TenantID, connection.ID, health); err != nil || found {
+		t.Fatalf("cross-tenant UpdateConnectionHealth() = found %v, error %v", found, err)
+	}
+}
+
 func newConnection(
 	t *testing.T,
 	generator ids.Generator,

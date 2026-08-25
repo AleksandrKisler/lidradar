@@ -54,11 +54,54 @@ docker compose up --build
 Подключения каналов доступны в `/api/v1/integrations`. Событие поставщика входит
 через `/api/v1/webhooks/{provider}/{tenantId}/{connectionId}`, проверяется и
 сохраняется до постановки работы по преобразованию. TEST, IMPORT и
-GENERIC_WEBHOOK используют локальные адаптеры. Адаптер Telegram Connected
-Business пока является макетом и сообщает состояние
-`DEGRADED/TELEGRAM_SPIKE_NOT_VERIFIED`, пока проверка на настоящем аккаунте не
-завершена. В этой конфигурации данные не отправляются во внешний Telegram или
-сервис искусственного интеллекта.
+GENERIC_WEBHOOK используют локальные адаптеры. Telegram Connected Business
+Connector умеет зарегистрировать настоящий webhook через Bot API, проверить
+его адрес и удалить при отключении. Без двух специальных настроек Telegram
+остаётся недоступным, а остальные каналы продолжают работать локально. Узел
+искусственного интеллекта по-прежнему использует заглушку.
+
+## Подключение Telegram для испытания
+
+API должен быть доступен Telegram по публичному HTTPS-адресу без дополнительного
+пути. Скопируйте `.env.example` в локальный `.env`, не добавляемый в Git, и
+задайте:
+
+```text
+LIDRADAR_PUBLIC_BASE_URL=https://ваш-публичный-адрес
+LIDRADAR_INTEGRATION_ENCRYPTION_KEY=<32 случайных байта в Base64>
+```
+
+Ключ создаётся один раз командой `openssl rand -base64 32`. Его потеря лишит
+сервер возможности расшифровать сохранённые токены; смена ключа требует отдельной
+процедуры перешифрования. Токен бота в `.env`, журнале или репозитории хранить не
+нужно: OWNER передаёт его только в теле запроса подключения. Поле является
+одноразовым входом и никогда не возвращается API.
+
+```sh
+read -rs TELEGRAM_BOT_TOKEN
+read -rs TELEGRAM_WEBHOOK_SECRET
+curl --fail-with-body \
+  -X POST 'http://127.0.0.1:8080/api/v1/integrations/CONNECTED_BUSINESS_BOT/connect' \
+  -H 'Content-Type: application/json' \
+  -H "X-Tenant-ID: $LIDRADAR_TENANT_ID" \
+  -H "Cookie: lidradar_session=$LIDRADAR_SESSION" \
+  --data-binary @- <<JSON
+{"name":"Telegram разработки","webhookSecret":"$TELEGRAM_WEBHOOK_SECRET","botToken":"$TELEGRAM_BOT_TOKEN"}
+JSON
+unset TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
+```
+
+`TELEGRAM_WEBHOOK_SECRET` должен содержать 16–256 латинских букв, цифр,
+подчёркиваний или дефисов; его удобно создать командой `openssl rand -hex 32`.
+Успешный ответ имеет состояние `ACTIVE`. Ошибка внешней настройки оставляет
+запись подключения в `ERROR/TELEGRAM_WEBHOOK_SETUP_FAILED`, не раскрывая ответ
+Telegram или токен. Перед повтором следует удалить это подключение и создать
+новое после устранения причины.
+
+Это ещё не означает, что проверка применимости пройдена. Живые входящие и
+исходящие сообщения, варианты файлов, повтор доставки, переподключение,
+одноразовая привязка и уведомление фиксируются в
+[`../docs/roadmap/TELEGRAM_SPIKE_REPORT.md`](../docs/roadmap/TELEGRAM_SPIKE_REPORT.md).
 
 Фоновый обработчик преобразует ожидающие события в независимую от канала модель
 контактов и переписок. Доступны маршруты:

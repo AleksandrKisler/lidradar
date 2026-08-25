@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +27,7 @@ func (ids *testIDs) NewID() (string, error) {
 }
 
 type testConnector struct {
+	provider       domain.Provider
 	verifyErr      error
 	identifierErr  error
 	normalizeCalls int
@@ -32,7 +35,12 @@ type testConnector struct {
 	normalizeErr   error
 }
 
-func (*testConnector) Provider() domain.Provider { return domain.ProviderTest }
+func (connector *testConnector) Provider() domain.Provider {
+	if connector.provider.Valid() {
+		return connector.provider
+	}
+	return domain.ProviderTest
+}
 func (connector *testConnector) VerifyEvent(context.Context, domain.ChannelConnection, []byte, domain.Headers) error {
 	return connector.verifyErr
 }
@@ -47,15 +55,68 @@ func (*testConnector) Health(context.Context, domain.ChannelConnection) domain.C
 	return domain.ConnectionHealth{Status: domain.ConnectionActive, CheckedAt: time.Now()}
 }
 
-type testRegistry struct{ connector *testConnector }
+type testRegistry struct {
+	connector   *testConnector
+	provisioner domain.ConnectionProvisioner
+}
 
 func (registry testRegistry) Lookup(provider domain.Provider) (domain.ConnectorRegistration, bool) {
-	if provider != domain.ProviderTest {
+	if registry.connector == nil || provider != registry.connector.Provider() {
 		return domain.ConnectorRegistration{}, false
 	}
 	return domain.ConnectorRegistration{
 		Connector: registry.connector, Capabilities: []domain.Capability{domain.CapabilityReceiveMessages},
+		Provisioner: registry.provisioner,
 	}, true
+}
+
+type testCredentialCipher struct {
+	plaintext []byte
+	aad       []byte
+}
+
+func (cipher *testCredentialCipher) Encrypt(plaintext, aad []byte) ([]byte, error) {
+	cipher.plaintext = append([]byte(nil), plaintext...)
+	cipher.aad = append([]byte(nil), aad...)
+	return []byte("encrypted-telegram-token"), nil
+}
+
+func (cipher *testCredentialCipher) Decrypt(encrypted, aad []byte) ([]byte, error) {
+	if string(encrypted) != "encrypted-telegram-token" || string(aad) != string(cipher.aad) {
+		return nil, errors.New("неверная привязка шифротекста")
+	}
+	return append([]byte(nil), cipher.plaintext...), nil
+}
+
+type testProvisioner struct {
+	provisioned   int
+	deprovisioned int
+	secret        string
+	credentials   []byte
+	err           error
+}
+
+func (provisioner *testProvisioner) Provision(
+	_ context.Context,
+	_ domain.ChannelConnection,
+	secret string,
+	credentials json.RawMessage,
+) (domain.ConnectionHealth, error) {
+	provisioner.provisioned++
+	provisioner.secret = secret
+	provisioner.credentials = append([]byte(nil), credentials...)
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	return domain.ConnectionHealth{Status: domain.ConnectionActive, CheckedAt: now}, provisioner.err
+}
+
+func (provisioner *testProvisioner) Deprovision(
+	_ context.Context,
+	_ domain.ChannelConnection,
+	credentials json.RawMessage,
+) error {
+	provisioner.deprovisioned++
+	provisioner.credentials = append([]byte(nil), credentials...)
+	return provisioner.err
 }
 
 type testRepository struct {
@@ -93,6 +154,28 @@ func (repository *testRepository) CreateConnection(_ context.Context, tenantID s
 	}
 	repository.connections[connection.ID] = connection
 	return nil
+}
+func (repository *testRepository) UpdateConnectionHealth(
+	_ context.Context,
+	tenantID, connectionID string,
+	health domain.ConnectionHealth,
+) (domain.ChannelConnection, bool, error) {
+	connection, found := repository.connections[connectionID]
+	if !found || connection.TenantID != tenantID {
+		return domain.ChannelConnection{}, false, nil
+	}
+	connection.Status = health.Status
+	connection.UpdatedAt = health.CheckedAt
+	if health.Status == domain.ConnectionActive {
+		connection.LastSuccessAt = &connection.UpdatedAt
+		connection.LastErrorAt = nil
+		connection.LastErrorCode = nil
+	} else {
+		connection.LastErrorAt = &connection.UpdatedAt
+		connection.LastErrorCode = health.LastErrorCode
+	}
+	repository.connections[connectionID] = connection
+	return connection, true, nil
 }
 func (repository *testRepository) DisconnectConnection(_ context.Context, tenantID, connectionID string, at time.Time) (domain.ChannelConnection, bool, error) {
 	connection, found := repository.connections[connectionID]
@@ -145,7 +228,7 @@ func TestReceivePersistsBeforeNormalization(t *testing.T) {
 	repository := newTestRepository()
 	connector := &testConnector{}
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
-	service := NewService(repository, testAuthorizer(true), testRegistry{connector}, &testIDs{}, func() time.Time { return now })
+	service := NewService(repository, testAuthorizer(true), testRegistry{connector: connector}, &testIDs{}, func() time.Time { return now })
 	connection, err := service.Connect(context.Background(), "owner", "tenant", ConnectCommand{
 		Provider: "TEST", Name: "Fixture", WebhookSecret: "fixture-secret-123",
 	})
@@ -170,7 +253,7 @@ func TestReceivePersistsBeforeNormalization(t *testing.T) {
 func TestInvalidPayloadIsPersistedFailedWithoutWork(t *testing.T) {
 	repository := newTestRepository()
 	connector := &testConnector{verifyErr: domain.ErrInvalidPayload, identifierErr: domain.ErrInvalidPayload}
-	service := NewService(repository, testAuthorizer(true), testRegistry{connector}, &testIDs{}, time.Now)
+	service := NewService(repository, testAuthorizer(true), testRegistry{connector: connector}, &testIDs{}, time.Now)
 	connection, err := service.Connect(context.Background(), "owner", "tenant", ConnectCommand{
 		Provider: "TEST", Name: "Fixture", WebhookSecret: "fixture-secret-123",
 	})
@@ -189,7 +272,7 @@ func TestInvalidPayloadIsPersistedFailedWithoutWork(t *testing.T) {
 func TestUnauthenticatedPayloadIsNotPersisted(t *testing.T) {
 	repository := newTestRepository()
 	connector := &testConnector{verifyErr: domain.ErrUnauthenticated}
-	service := NewService(repository, testAuthorizer(true), testRegistry{connector}, &testIDs{}, time.Now)
+	service := NewService(repository, testAuthorizer(true), testRegistry{connector: connector}, &testIDs{}, time.Now)
 	connection, err := service.Connect(context.Background(), "owner", "tenant", ConnectCommand{
 		Provider: "TEST", Name: "Fixture", WebhookSecret: "fixture-secret-123",
 	})
@@ -203,7 +286,7 @@ func TestUnauthenticatedPayloadIsNotPersisted(t *testing.T) {
 }
 
 func TestManagerCannotManageConnections(t *testing.T) {
-	service := NewService(newTestRepository(), testAuthorizer(false), testRegistry{&testConnector{}}, &testIDs{}, time.Now)
+	service := NewService(newTestRepository(), testAuthorizer(false), testRegistry{connector: &testConnector{}}, &testIDs{}, time.Now)
 	if _, err := service.Connect(context.Background(), "manager", "tenant", ConnectCommand{
 		Provider: "TEST", Name: "Fixture", WebhookSecret: "fixture-secret-123",
 	}); !errors.Is(err, ErrForbidden) {
@@ -211,11 +294,90 @@ func TestManagerCannotManageConnections(t *testing.T) {
 	}
 }
 
+func TestTelegramConnectionEncryptsTokenProvisionsAndDeprovisions(t *testing.T) {
+	repository := newTestRepository()
+	connector := &testConnector{provider: domain.ProviderTelegramConnectedBusinessBot}
+	provisioner := &testProvisioner{}
+	cipher := &testCredentialCipher{}
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	service := NewService(
+		repository, testAuthorizer(true), testRegistry{connector: connector, provisioner: provisioner},
+		&testIDs{}, func() time.Time { return now }, WithCredentialCipher(cipher),
+	)
+	token := "123456:abcdefghijklmnopqrstuvwxyzABCD"
+	connection, err := service.Connect(context.Background(), "owner", "tenant", ConnectCommand{
+		Provider: "CONNECTED_BUSINESS_BOT", Name: "Telegram", WebhookSecret: "telegram_secret_123", BotToken: token,
+	})
+	if err != nil || connection.Status != domain.ConnectionActive || provisioner.provisioned != 1 {
+		t.Fatalf("Connect() = %#v, %v; provisioned=%d", connection, err, provisioner.provisioned)
+	}
+	if string(connection.EncryptedCredentials) != "encrypted-telegram-token" ||
+		strings.Contains(string(connection.EncryptedCredentials), token) || strings.Contains(string(provisioner.credentials), "encrypted") ||
+		!strings.Contains(string(provisioner.credentials), token) || provisioner.secret != "telegram_secret_123" {
+		t.Fatalf("реквизиты обработаны неверно: connection=%#v provisioner=%q", connection, provisioner.credentials)
+	}
+	encoded, err := json.Marshal(connection)
+	if err != nil || strings.Contains(string(encoded), token) || strings.Contains(string(encoded), "encrypted-telegram-token") {
+		t.Fatalf("публичный ответ раскрыл реквизиты: %s, %v", encoded, err)
+	}
+	if err := service.Disconnect(context.Background(), "owner", "tenant", connection.ID); err != nil || provisioner.deprovisioned != 1 {
+		t.Fatalf("Disconnect() = %v; deprovisioned=%d", err, provisioner.deprovisioned)
+	}
+}
+
+func TestTelegramProvisioningFailureIsPersistedAsSafeHealthCode(t *testing.T) {
+	repository := newTestRepository()
+	provisioner := &testProvisioner{err: errors.New("секретная ошибка с токеном")}
+	service := NewService(
+		repository, testAuthorizer(true), testRegistry{
+			connector: &testConnector{provider: domain.ProviderTelegramConnectedBusinessBot}, provisioner: provisioner,
+		},
+		&testIDs{}, time.Now, WithCredentialCipher(&testCredentialCipher{}),
+	)
+	connection, err := service.Connect(context.Background(), "owner", "tenant", ConnectCommand{
+		Provider: "CONNECTED_BUSINESS_BOT", Name: "Telegram", WebhookSecret: "telegram_secret_123",
+		BotToken: "123456:abcdefghijklmnopqrstuvwxyzABCD",
+	})
+	if err != nil || connection.Status != domain.ConnectionError || connection.LastErrorCode == nil ||
+		*connection.LastErrorCode != telegramSetupFailedCode || strings.Contains(*connection.LastErrorCode, "токен") {
+		t.Fatalf("Connect() = %#v, %v", connection, err)
+	}
+}
+
+func TestTelegramDisconnectCanRetryRemoteWebhookRemoval(t *testing.T) {
+	repository := newTestRepository()
+	provisioner := &testProvisioner{}
+	service := NewService(
+		repository, testAuthorizer(true), testRegistry{
+			connector: &testConnector{provider: domain.ProviderTelegramConnectedBusinessBot}, provisioner: provisioner,
+		},
+		&testIDs{}, time.Now, WithCredentialCipher(&testCredentialCipher{}),
+	)
+	connection, err := service.Connect(context.Background(), "owner", "tenant", ConnectCommand{
+		Provider: "CONNECTED_BUSINESS_BOT", Name: "Telegram", WebhookSecret: "telegram_secret_123",
+		BotToken: "123456:abcdefghijklmnopqrstuvwxyzABCD",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioner.err = errors.New("Telegram временно недоступен")
+	if err := service.Disconnect(context.Background(), "owner", "tenant", connection.ID); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("first Disconnect() error = %v", err)
+	}
+	if stored := repository.connections[connection.ID]; stored.Status != domain.ConnectionDisconnected {
+		t.Fatalf("локальное состояние после ошибки = %#v", stored)
+	}
+	provisioner.err = nil
+	if err := service.Disconnect(context.Background(), "owner", "tenant", connection.ID); err != nil || provisioner.deprovisioned != 2 {
+		t.Fatalf("retry Disconnect() error = %v; deprovisioned=%d", err, provisioner.deprovisioned)
+	}
+}
+
 func TestNormalizationCompletesOnlyAfterCanonicalIngestion(t *testing.T) {
 	repository, connector, item := normalizationFixture(t)
 	connector.normalized = []domain.CanonicalEvent{canonicalFixture(item)}
 	sink := &testCanonicalSink{}
-	service := NewNormalizationService(repository, testRegistry{connector}, sink, time.Now)
+	service := NewNormalizationService(repository, testRegistry{connector: connector}, sink, time.Now)
 
 	processed, err := service.ProcessBatch(context.Background(), 10)
 	if err != nil || processed != 1 || len(sink.events) != 1 || len(repository.completed) != 1 || len(repository.failed) != 0 {
@@ -226,7 +388,7 @@ func TestNormalizationCompletesOnlyAfterCanonicalIngestion(t *testing.T) {
 func TestNormalizationMarksInvalidCanonicalEventFailed(t *testing.T) {
 	repository, connector, _ := normalizationFixture(t)
 	connector.normalized = []domain.CanonicalEvent{{}}
-	service := NewNormalizationService(repository, testRegistry{connector}, &testCanonicalSink{}, time.Now)
+	service := NewNormalizationService(repository, testRegistry{connector: connector}, &testCanonicalSink{}, time.Now)
 
 	processed, err := service.ProcessBatch(context.Background(), 10)
 	if err != nil || processed != 1 || len(repository.failed) != 1 || len(repository.completed) != 0 {
@@ -238,7 +400,7 @@ func TestNormalizationKeepsWorkPendingOnTemporarySinkFailure(t *testing.T) {
 	repository, connector, item := normalizationFixture(t)
 	connector.normalized = []domain.CanonicalEvent{canonicalFixture(item)}
 	wantErr := errors.New("временная ошибка PostgreSQL")
-	service := NewNormalizationService(repository, testRegistry{connector}, &testCanonicalSink{err: wantErr}, time.Now)
+	service := NewNormalizationService(repository, testRegistry{connector: connector}, &testCanonicalSink{err: wantErr}, time.Now)
 
 	processed, err := service.ProcessBatch(context.Background(), 10)
 	if !errors.Is(err, wantErr) || processed != 0 || len(repository.completed) != 0 || len(repository.failed) != 0 {

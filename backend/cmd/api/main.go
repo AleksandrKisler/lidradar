@@ -52,11 +52,23 @@ func run(ctx context.Context, configuration config.Config) error {
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
 	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
+	connectorRegistry := connectorinfrastructure.NewRegistry()
+	connectorOptions := make([]connectorapplication.Option, 0, 1)
+	if configuration.Integrations.PublicBaseURL != "" {
+		credentialCipher, cipherErr := cryptoplatform.NewCredentialCipher(configuration.Integrations.CredentialKey)
+		if cipherErr != nil {
+			return cipherErr
+		}
+		connectorRegistry = connectorinfrastructure.NewRegistry(connectorinfrastructure.TelegramConfiguration{
+			WebhookBaseURL: configuration.Integrations.PublicBaseURL,
+		})
+		connectorOptions = append(connectorOptions, connectorapplication.WithCredentialCipher(credentialCipher))
+	}
 	permissionService := tenantapplication.NewPermissionService(tenantRepository)
 	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now)
 	catalogService := catalogapplication.NewService(catalogRepository, permissionService, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
-		connectorRepository, permissionService, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
+		connectorRepository, permissionService, connectorRegistry, ids.Generator{}, time.Now, connectorOptions...,
 	)
 	conversationService := conversationapplication.NewService(conversationRepository, permissionService, ids.Generator{})
 	identityService := identityapplication.NewService(

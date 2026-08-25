@@ -40,11 +40,13 @@ PostgreSQL либо настоящий внешний сервис) не зак�
 
 ## Telegram feasibility spike
 
-- **LR-BE-TG-001 — LR-BE-TG-012 — не выполнены.** Development bot, проверка
-  non-Premium аккаунта, реальные `business_connection`/incoming/manual outgoing,
-  варианты событий, reconnect, duplicate delivery, stable identifiers, linking,
-  тестовое уведомление и spike report в репозитории отсутствуют. Без Telegram
-  credentials и внешнего аккаунта эти проверки нельзя достоверно заявить.
+- **LR-BE-TG-001 — LR-BE-TG-012 — не выполнены, программная подготовка
+  сделана.** Коннектор регистрирует, проверяет и удаляет webhook через Bot API,
+  шифрует токен и принимает четыре семейства Business-событий. Создана матрица
+  доказательств `docs/roadmap/TELEGRAM_SPIKE_REPORT.md`. Бот разработки, проверка
+  аккаунта без Premium, живые `business_connection`/incoming/manual outgoing,
+  варианты событий, reconnect, duplicate delivery, stable identifiers, linking
+  и настоящее уведомление ещё должны быть подтверждены внешними аккаунтами.
 
 ## Этапы 2–7 — базовые бизнес-модули
 
@@ -103,11 +105,12 @@ PostgreSQL либо настоящий внешний сервис) не зак�
 - **LR-BE-0406 — LR-BE-0408 — выполнены.** TEST, IMPORT и GENERIC_WEBHOOK имеют
   детерминированные local adapters с secret verification, строгим fixture
   envelope, external ID и normalization fixture.
-- **LR-BE-0409 — частично.** Connected Business Bot stub проверяет официальный
-  secret-token header и fixture updates `business_connection`,
-  `business_message`, edit/delete без сетевых вызовов. Health намеренно
-  `DEGRADED/TELEGRAM_SPIKE_NOT_VERIFIED`: обязательный real-account spike выше
-  по-прежнему не выполнен.
+- **LR-BE-0409 — частично.** Connected Business Bot connector вызывает
+  `setWebhook`, сверяет `getWebhookInfo`, выполняет `deleteWebhook`, проверяет
+  официальный secret-token header и преобразует `business_connection`,
+  `business_message`, edit/delete. Токен хранится только в зашифрованном виде.
+  Обязательный real-account spike выше по-прежнему не выполнен, поэтому задача
+  не переводится в состояние «выполнено» только по автоматизированным тестам.
 - **LR-BE-0410 — выполнено.** OWNER-only connect/list/idempotent disconnect/health
   API подключён к runtime; cross-tenant ID возвращается как missing. Webhook
   endpoint аутентифицируется provider secret без user session.
@@ -134,7 +137,7 @@ PostgreSQL либо настоящий внешний сервис) не зак�
   `(connection_id, external_id)` и повторно используется следующими сообщениями.
 - **LR-BE-0505 — выполнено.** Каноническое сообщение сохраняется в PostgreSQL;
   повтор с тем же содержимым безопасен, а противоречащее содержимое даёт конфликт.
-- **LR-BE-0506 — выполнено для локальных адаптеров и макета Telegram.** TEST,
+- **LR-BE-0506 — выполнено для локальных адаптеров и программного коннектора Telegram.** TEST,
   IMPORT и GENERIC_WEBHOOK принимают явное направление. Макет Connected Business
   Bot различает входящие сообщения и ручные исходящие по `sender_business_bot`
   и соотношению отправителя с личным чатом. Настоящий Telegram всё ещё требует
@@ -155,7 +158,7 @@ PostgreSQL либо настоящий внешний сервис) не зак�
   переписки с контактом и сообщений с вложениями; OWNER и MANAGER используют
   `conversation.read`, страницы имеют непрозрачный курсор, чужие данные не
   раскрываются.
-- **LR-BE-0512 — выполнено.** Для TEST, IMPORT, GENERIC_WEBHOOK и макета Telegram
+- **LR-BE-0512 — выполнено.** Для TEST, IMPORT, GENERIC_WEBHOOK и коннектора Telegram
   добавлено по пять файлов-примеров: новое, изменённое, удалённое сообщение,
   вложение и повтор события.
 - **Exit Gate этапа 5 — выполнено для канонического контура.** Сквозной тест

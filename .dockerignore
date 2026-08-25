@@ -2,5 +2,7 @@
 .github
 .idea
 .DS_Store
+.env
+.env.*
 bin
 work

@@ -126,10 +126,9 @@ func TestConnectorCoreManagementPersistFirstDeduplicationAndIsolation(t *testing
 	telegram := request(t, fixture.handler, http.MethodPost, "/api/v1/integrations/CONNECTED_BUSINESS_BOT/connect", `{
 		"name":"Telegram fixture","webhookSecret":"telegram_secret-123"
 	}`, owner.Cookie, tenantID)
-	requireStatus(t, telegram, http.StatusCreated)
-	if !strings.Contains(telegram.Body.String(), `"status":"DEGRADED"`) ||
-		!strings.Contains(telegram.Body.String(), `"lastErrorCode":"TELEGRAM_SPIKE_NOT_VERIFIED"`) {
-		t.Fatalf("Telegram fixture connection = %s", telegram.Body.String())
+	requireStatus(t, telegram, http.StatusServiceUnavailable)
+	if !strings.Contains(telegram.Body.String(), `"code":"CONNECTOR_UNAVAILABLE"`) {
+		t.Fatalf("Telegram connection without safe configuration = %s", telegram.Body.String())
 	}
 
 	ownerB := register(t, fixture.handler, "connector-owner-b@example.com", "Connector Owner B")

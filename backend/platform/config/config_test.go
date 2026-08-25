@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +133,38 @@ func TestLoadRejectsInvalidAllowedOrigin(t *testing.T) {
 func TestLoadRejectsNilLookup(t *testing.T) {
 	if _, err := Load(nil); err == nil {
 		t.Fatal("Load() error = nil, want lookup error")
+	}
+}
+
+func TestLoadTelegramIntegrationConfiguration(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey:   string(EnvironmentDevelopment),
+		publicBaseURLKey: "https://telegram-dev.example.com/",
+		credentialKeyKey: key,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.Integrations.PublicBaseURL != "https://telegram-dev.example.com" ||
+		len(configuration.Integrations.CredentialKey) != 32 {
+		t.Fatalf("Integrations = %#v", configuration.Integrations)
+	}
+}
+
+func TestLoadRejectsPartialOrUnsafeTelegramConfiguration(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	for name, values := range map[string]map[string]string{
+		"только адрес":  {environmentKey: string(EnvironmentDevelopment), publicBaseURLKey: "https://example.com"},
+		"только ключ":   {environmentKey: string(EnvironmentDevelopment), credentialKeyKey: key},
+		"без HTTPS":     {environmentKey: string(EnvironmentDevelopment), publicBaseURLKey: "http://example.com", credentialKeyKey: key},
+		"короткий ключ": {environmentKey: string(EnvironmentDevelopment), publicBaseURLKey: "https://example.com", credentialKeyKey: base64.StdEncoding.EncodeToString([]byte("short"))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(mapLookup(values)); err == nil {
+				t.Fatal("Load() не отклонил небезопасную конфигурацию")
+			}
+		})
 	}
 }
 

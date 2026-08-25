@@ -57,6 +57,7 @@ type connectRequest struct {
 	Name          *string `json:"name"`
 	LocationID    *string `json:"locationId"`
 	WebhookSecret *string `json:"webhookSecret"`
+	BotToken      *string `json:"botToken"`
 }
 
 func (handler Handler) connect(w http.ResponseWriter, request *http.Request) {
@@ -71,7 +72,7 @@ func (handler Handler) connect(w http.ResponseWriter, request *http.Request) {
 	}
 	connection, err := handler.service.Connect(request.Context(), actorID, tenantID, application.ConnectCommand{
 		Provider: chi.URLParam(request, "provider"), Name: *body.Name,
-		LocationID: body.LocationID, WebhookSecret: *body.WebhookSecret,
+		LocationID: body.LocationID, WebhookSecret: *body.WebhookSecret, BotToken: optionalString(body.BotToken),
 	})
 	if handleError(w, request, err) {
 		return
@@ -187,4 +188,11 @@ func handleError(w http.ResponseWriter, request *http.Request, err error) bool {
 
 func writeError(w http.ResponseWriter, request *http.Request, status int, code, message string) {
 	httpplatform.WriteError(w, request, status, code, message, nil)
+}
+
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
