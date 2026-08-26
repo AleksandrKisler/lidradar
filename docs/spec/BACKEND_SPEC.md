@@ -341,8 +341,9 @@ RevenueEvent, Notification или критическое действие.
 
 Сводка считает только активные состояния `OPEN`, `ACKNOWLEDGED` и `ACTED`.
 Потенциальная выручка суммируется по уникальным Opportunity только в основной
-валюте организации, чтобы не складывать разные валюты. До подключения
-подтверждённой выручки этапа 12 `confirmedRecoveredRevenue` равен `0.00`.
+валюте организации, чтобы не складывать разные валюты. После этапа 12
+`confirmedRecoveredRevenue` содержит только подтверждённые события с формальной
+атрибуцией `RECOVERED`; до первого такого события значение равно `0.00`.
 Денежные значения API передаются точными десятичными строками.
 
 Детали Risk включают связанные Opportunity и Conversation из PostgreSQL.
@@ -423,20 +424,24 @@ Neither state mutates domain data. The Go AI agent retains no customer text on
 disk, uses outbound calls, and resumes polling after restart. A deterministic
 fake provider supports development and disconnect testing without a GPU.
 
-### Revenue and attribution
+### Выручка и атрибуция
 
-Revenue confirmation requires `revenue.confirm` and an `Idempotency-Key` and
-stores an exact positive decimal amount as a confirmed RevenueEvent. The
-RevenueEvent, its single attribution, idempotency response, and audit record
-are one atomic write. Key reuse with changed content is a conflict.
+Подтверждение выручки требует разрешение `revenue.confirm` и заголовок
+`Idempotency-Key`. Сервер сохраняет точную положительную десятичную сумму как
+подтверждённый RevenueEvent с источником `USER_CONFIRMED`. RevenueEvent, его
+единственная атрибуция, сохранённый ответ идемпотентности и запись аудита
+создаются атомарно. Повтор ключа с изменённым содержимым является конфликтом.
 
-Recovered attribution requires a Risk, Action, and Outcome from the same
-tenant and Opportunity, each no later than confirmation and within the central
-30-day attribution window. Organic and unknown revenue carry no corrective
-chain. Confirmed Recovered Revenue sums only confirmed events with a formal
-`RECOVERED` attribution and is returned separately per ISO currency; heuristic
-association never contributes to this KPI. Cross-tenant references are
-indistinguishable from missing resources.
+Атрибуция `RECOVERED` требует Risk, Action и Outcome из той же организации и
+Opportunity. Каждый факт должен существовать не позже подтверждения и попадать
+в единое 30-дневное окно. Точный повтор сначала разрешается по сохранённому
+ключу и потому остаётся допустимым после истечения окна. `ORGANIC` и `UNKNOWN`
+не содержат корректирующую цепочку.
+
+Показатель подтверждённой возвращённой выручки суммирует только события
+`CONFIRMED` с формальной атрибуцией `RECOVERED` и возвращается отдельно для
+каждой трёхбуквенной валюты. Эвристическое совпадение в показатель не входит.
+Ссылки на объекты другой организации неотличимы от отсутствующих.
 
 ### AI conversation analysis
 

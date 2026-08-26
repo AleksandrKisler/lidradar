@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,10 +13,11 @@ import (
 	"lidradar/backend/platform/ids"
 )
 
-// TestNoResponseRiskRealMessageFlow доказывает выходные критерии этапов 8–11:
+// TestNoResponseRiskRealMessageFlow доказывает выходные критерии этапов 8–12:
 // внешний webhook проходит канонизацию, создаёт Opportunity, долговечную
 // проверку и Risk без AI; затем API создаёт рекомендацию, действие и исход, а
-// ответ бизнеса закрывает тот же Risk автоматически.
+// цепочка BOOKED → PAID формально подтверждает 47 000 возвращённой выручки.
+// Ответ бизнеса после этого закрывает тот же Risk автоматически.
 func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	fixture := newAPIFixture(t)
 	owner := register(t, fixture.handler, "risk-flow@example.com", "Владелец риска")
@@ -214,19 +216,86 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 		!strings.Contains(body, `"outcome":{"id"`) || !strings.Contains(body, `"type":"BOOKED"`) {
 		t.Fatalf("полная корректирующая карточка = %s", body)
 	}
-	var actionCount, outcomeCount, auditCount, keyCount int
+	paidOutcome := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/opportunities/"+opportunityID+"/outcomes",
+		`{"status":"PAID","note":"Оплата 47 000 подтверждена"}`,
+		owner.Cookie, tenantID, "e2e-paid-outcome",
+	)
+	requireStatus(t, paidOutcome, http.StatusCreated)
+	paidOutcomeID := jsonID(t, paidOutcome)
+	revenueBody := `{"amount":"47000","currency":"RUB","attributionType":"RECOVERED","riskId":"` +
+		riskID + `","actionId":"` + actionID + `","outcomeId":"` + paidOutcomeID + `"}`
+	revenue := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/opportunities/"+opportunityID+"/revenue",
+		revenueBody, owner.Cookie, tenantID, "e2e-revenue-47000",
+	)
+	requireStatus(t, revenue, http.StatusCreated)
+	var confirmation struct {
+		Revenue struct {
+			ID     string `json:"id"`
+			Amount string `json:"amount"`
+			Source string `json:"source"`
+		} `json:"revenue"`
+		Attribution struct {
+			Type string `json:"type"`
+		} `json:"attribution"`
+	}
+	if err := json.Unmarshal(revenue.Body.Bytes(), &confirmation); err != nil ||
+		confirmation.Revenue.ID == "" || confirmation.Revenue.Amount != "47000.00" ||
+		confirmation.Revenue.Source != "USER_CONFIRMED" || confirmation.Attribution.Type != "RECOVERED" {
+		t.Fatalf("подтверждение выручки = %#v, ошибка=%v, body=%s", confirmation, err, revenue.Body.String())
+	}
+	replayedRevenue := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/opportunities/"+opportunityID+"/revenue",
+		revenueBody, owner.Cookie, tenantID, "e2e-revenue-47000",
+	)
+	requireStatus(t, replayedRevenue, http.StatusOK)
+	if replayedRevenue.Body.String() != revenue.Body.String() {
+		t.Fatalf("повтор выручки изменил ответ: first=%s replay=%s", revenue.Body.String(), replayedRevenue.Body.String())
+	}
+	conflictingRevenue := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/opportunities/"+opportunityID+"/revenue",
+		strings.Replace(revenueBody, `"47000"`, `"47001"`, 1),
+		owner.Cookie, tenantID, "e2e-revenue-47000",
+	)
+	requireStatus(t, conflictingRevenue, http.StatusConflict)
+	recoveredKPI := request(
+		t, fixture.handler, http.MethodGet, "/api/v1/revenue/confirmed-recovered?currency=RUB",
+		"", owner.Cookie, tenantID,
+	)
+	requireStatus(t, recoveredKPI, http.StatusOK)
+	if recoveredKPI.Body.String() != "{\"amount\":\"47000.00\",\"currency\":\"RUB\"}\n" {
+		t.Fatalf("показатель возвращённой выручки = %s", recoveredKPI.Body.String())
+	}
+	revenueDetail := request(t, fixture.handler, http.MethodGet, "/api/v1/risks/"+riskID, "", owner.Cookie, tenantID)
+	requireStatus(t, revenueDetail, http.StatusOK)
+	if body := revenueDetail.Body.String(); !strings.Contains(body, `"outcome":{"id"`) ||
+		!strings.Contains(body, `"type":"PAID"`) ||
+		!strings.Contains(body, `"revenue":{"currency":"RUB","potential":"5000.00","confirmedRecovered":"47000.00"}`) {
+		t.Fatalf("денежная карточка Radar = %s", body)
+	}
+	revenueSummary := request(t, fixture.handler, http.MethodGet, "/api/v1/radar", "", owner.Cookie, tenantID)
+	requireStatus(t, revenueSummary, http.StatusOK)
+	if !strings.Contains(revenueSummary.Body.String(), `"confirmedRecoveredRevenue":"47000.00"`) {
+		t.Fatalf("денежная сводка Radar = %s", revenueSummary.Body.String())
+	}
+
+	var actionCount, outcomeCount, revenueEventCount, attributionCount, auditCount, keyCount int
 	if err := fixture.pool.QueryRow(context.Background(), `
 		SELECT
 			(SELECT count(*) FROM actions WHERE tenant_id = $1 AND risk_id = $2),
 			(SELECT count(*) FROM outcomes WHERE tenant_id = $1 AND opportunity_id = $3),
+			(SELECT count(*) FROM revenue_events WHERE tenant_id = $1 AND opportunity_id = $3),
+			(SELECT count(*) FROM revenue_attributions WHERE tenant_id = $1 AND opportunity_id = $3),
 			(SELECT count(*) FROM audit_log WHERE tenant_id = $1),
 			(SELECT count(*) FROM idempotency_keys WHERE tenant_id = $1)`,
 		tenantID, riskID, opportunityID,
-	).Scan(&actionCount, &outcomeCount, &auditCount, &keyCount); err != nil {
+	).Scan(&actionCount, &outcomeCount, &revenueEventCount, &attributionCount, &auditCount, &keyCount); err != nil {
 		t.Fatal(err)
 	}
-	if actionCount != 1 || outcomeCount != 1 || auditCount != 2 || keyCount != 2 {
-		t.Fatalf("корректирующие записи: actions=%d outcomes=%d audits=%d keys=%d", actionCount, outcomeCount, auditCount, keyCount)
+	if actionCount != 1 || outcomeCount != 2 || revenueEventCount != 1 || attributionCount != 1 || auditCount != 4 || keyCount != 4 {
+		t.Fatalf("денежная цепочка: actions=%d outcomes=%d events=%d attributions=%d audits=%d keys=%d",
+			actionCount, outcomeCount, revenueEventCount, attributionCount, auditCount, keyCount)
 	}
 
 	outsider := register(t, fixture.handler, "risk-outsider@example.com", "Посторонний")

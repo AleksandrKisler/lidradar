@@ -595,26 +595,35 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/opportunities/{opportunityId}/revenue:
-    x-lidradar-runtime-status: planned
     parameters:
-      - { name: opportunityId, in: path, required: true, schema: { type: string } }
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/OpportunityId' }
       - { $ref: '#/components/parameters/IdempotencyKey' }
     post:
-      summary: Confirm Opportunity revenue
+      summary: Подтвердить выручку коммерческой возможности
+      description: Событие, его единственная формальная атрибуция, ключ идемпотентности и аудит записываются одной транзакцией. Для RECOVERED обязательна 30-дневная цепочка Risk → Action → Outcome той же организации и возможности.
       operationId: confirmRevenue
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ConfirmRevenueRequest' } } } }
       responses:
-        '201': { description: Confirmed revenue and its unique attribution, content: { application/json: { schema: { $ref: '#/components/schemas/RevenueConfirmation' } } } }
-        '409': { description: Idempotency key conflict }
+        '200': { description: Ранее сохранённое подтверждение при точном повторе., content: { application/json: { schema: { $ref: '#/components/schemas/RevenueConfirmation' } } } }
+        '201': { description: Подтверждённая выручка и её единственная атрибуция., content: { application/json: { schema: { $ref: '#/components/schemas/RevenueConfirmation' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Ключ идемпотентности использован с другим содержимым., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/revenue/confirmed-recovered:
-    x-lidradar-runtime-status: planned
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
     get:
-      summary: Get confirmed recovered revenue
+      summary: Получить подтверждённую возвращённую выручку
+      description: Суммируются только CONFIRMED-события с формальной атрибуцией RECOVERED; валюты никогда не смешиваются.
       operationId: getConfirmedRecoveredRevenue
       parameters: [{ name: currency, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }]
       responses:
-        '200': { description: Formal recovered revenue total for one currency, content: { application/json: { schema: { $ref: '#/components/schemas/Money' } } } }
-        '400': { description: Currency is invalid, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '200': { description: Формальная возвращённая выручка в одной валюте., content: { application/json: { schema: { $ref: '#/components/schemas/Money' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 components:
   securitySchemes:
@@ -1074,24 +1083,28 @@ components:
       properties: { amount: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }, currency: { type: string, pattern: '^[A-Z]{3}$' } }
     ConfirmRevenueRequest:
       type: object
+      additionalProperties: false
       required: [amount, currency, attributionType]
       properties:
         amount: { type: string, pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$' }
         currency: { type: string, pattern: '^[A-Za-z]{3}$' }
         attributionType: { type: string, enum: [RECOVERED, ORGANIC, UNKNOWN] }
-        riskId: { type: string }
-        actionId: { type: string }
-        outcomeId: { type: string }
+        riskId: { type: string, format: uuid }
+        actionId: { type: string, format: uuid }
+        outcomeId: { type: string, format: uuid }
     RevenueEvent:
       type: object
-      required: [id, opportunityId, amount, currency, status, confirmedBy, confirmedAt]
-      properties: { id: { type: string }, opportunityId: { type: string }, amount: { type: string }, currency: { type: string }, status: { type: string, enum: [CONFIRMED] }, confirmedBy: { type: string }, confirmedAt: { type: string, format: date-time } }
+      additionalProperties: false
+      required: [id, opportunityId, amount, currency, status, source, confirmedBy, confirmedAt]
+      properties: { id: { type: string, format: uuid }, opportunityId: { type: string, format: uuid }, amount: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }, currency: { type: string, pattern: '^[A-Z]{3}$' }, status: { type: string, enum: [CONFIRMED] }, source: { type: string, enum: [USER_CONFIRMED] }, confirmedBy: { type: string, format: uuid }, confirmedAt: { type: string, format: date-time } }
     RevenueAttribution:
       type: object
+      additionalProperties: false
       required: [id, revenueEventId, opportunityId, type, createdAt]
-      properties: { id: { type: string }, revenueEventId: { type: string }, opportunityId: { type: string }, type: { type: string, enum: [RECOVERED, ORGANIC, UNKNOWN] }, riskId: { type: string }, actionId: { type: string }, outcomeId: { type: string }, createdAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, revenueEventId: { type: string, format: uuid }, opportunityId: { type: string, format: uuid }, type: { type: string, enum: [RECOVERED, ORGANIC, UNKNOWN] }, riskId: { type: string, format: uuid }, actionId: { type: string, format: uuid }, outcomeId: { type: string, format: uuid }, createdAt: { type: string, format: date-time } }
     RevenueConfirmation:
       type: object
+      additionalProperties: false
       required: [revenue, attribution]
       properties: { revenue: { $ref: '#/components/schemas/RevenueEvent' }, attribution: { $ref: '#/components/schemas/RevenueAttribution' } }
     Risk:

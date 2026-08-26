@@ -39,6 +39,9 @@ import (
 	opportunityapplication "lidradar/backend/internal/opportunity/application"
 	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
 	opportunitytransport "lidradar/backend/internal/opportunity/transport"
+	revenueapplication "lidradar/backend/internal/revenue/application"
+	revenueinfrastructure "lidradar/backend/internal/revenue/infrastructure"
+	revenuetransport "lidradar/backend/internal/revenue/transport"
 	riskapplication "lidradar/backend/internal/risk/application"
 	riskdomain "lidradar/backend/internal/risk/domain"
 	riskinfrastructure "lidradar/backend/internal/risk/infrastructure"
@@ -100,6 +103,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 	correctiveService := correctiveapplication.NewService(
 		correctiveinfrastructure.NewPostgresStore(pool), permissions, ids.Generator{}, time.Now,
 	).WithInvalidator(riskEvents)
+	revenueService := revenueapplication.NewService(
+		revenueinfrastructure.NewPostgresStore(pool), permissions, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents)
 	riskEvaluator := riskapplication.NewEvaluator(
 		riskRepository, riskStates, riskPolicy, ids.Generator{}, time.Now,
 	).WithInvalidator(riskEvents)
@@ -159,6 +165,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
 	risktransport.NewHandler(riskRadar, resolver, riskEvents).RegisterRoutes(router, "/api/v1")
 	correctivetransport.NewHandler(correctiveService, resolver).RegisterRoutes(router, "/api/v1")
+	revenuetransport.NewHandler(revenueService, resolver).RegisterRoutes(router, "/api/v1")
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
 		worker: worker, candidates: candidateProcessor, notifications: notificationService, pool: pool,

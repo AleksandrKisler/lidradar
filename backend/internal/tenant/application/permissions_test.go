@@ -64,7 +64,10 @@ func TestPermissionServiceUsesMembershipRoleMapping(t *testing.T) {
 			t.Fatalf("MANAGER permission %q = %v, %v", permission, allowed, err)
 		}
 	}
-	for _, permission := range []string{PermissionOrganizationManage, PermissionLocationManage, PermissionMemberManage, PermissionAnalyticsRead} {
+	for _, permission := range []string{
+		PermissionOrganizationManage, PermissionLocationManage, PermissionMemberManage,
+		PermissionRevenueRead, PermissionAnalyticsRead,
+	} {
 		allowed, err := service.Allowed(context.Background(), "user", "tenant", permission)
 		if err != nil || allowed {
 			t.Fatalf("MANAGER forbidden permission %q = %v, %v", permission, allowed, err)

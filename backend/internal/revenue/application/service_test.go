@@ -17,19 +17,29 @@ func (allow) Allowed(context.Context, string, string, string) (bool, error) { re
 
 type ids struct{ n int }
 
-func (i *ids) NewID() string { i.n++; return fmt.Sprintf("id-%d", i.n) }
+func (i *ids) NewID() (string, error) { i.n++; return fmt.Sprintf("id-%d", i.n), nil }
+
+type invalidation struct{ tenant, event, resource string }
+type invalidationCapture []invalidation
+
+func (capture *invalidationCapture) Publish(tenant, event, resource string) {
+	*capture = append(*capture, invalidation{tenant, event, resource})
+}
+
 func fixture() (application.Service, *infrastructure.MemoryStore, time.Time) {
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	s := infrastructure.NewTestMemoryStore()
 	s.AddOpportunity("tenant", "opportunity")
 	f := application.RelatedFact{OpportunityID: "opportunity", At: now.Add(-time.Hour)}
 	s.AddRisk("tenant", "risk", f)
-	s.AddAction("tenant", "action", f)
+	s.AddAction("tenant", "action", application.RelatedFact{OpportunityID: "opportunity", RiskID: "risk", At: now.Add(-time.Hour)})
 	s.AddOutcome("tenant", "outcome", f)
 	return application.NewService(s, allow{}, &ids{}, func() time.Time { return now }), s, now
 }
 func TestMoneyLoopRecoveredRevenueIsFormalIdempotentAndAudited(t *testing.T) {
 	svc, store, _ := fixture()
+	var signals invalidationCapture
+	svc = svc.WithInvalidator(&signals)
 	cmd := application.ConfirmCommand{Amount: "47000", Currency: "rub", Type: domain.AttributionRecovered, RiskID: "risk", ActionID: "action", OutcomeID: "outcome"}
 	got, created, err := svc.Confirm(context.Background(), "actor", "tenant", "opportunity", "payment-1", cmd)
 	if err != nil || !created || got.Event.Amount.String() != "47000.00" {
@@ -38,6 +48,9 @@ func TestMoneyLoopRecoveredRevenueIsFormalIdempotentAndAudited(t *testing.T) {
 	replay, created, err := svc.Confirm(context.Background(), "actor", "tenant", "opportunity", "payment-1", cmd)
 	if err != nil || created || replay.Event.ID != got.Event.ID || len(store.Confirmations()) != 1 || len(store.Audits()) != 1 {
 		t.Fatalf("replay=%+v created=%v err=%v", replay, created, err)
+	}
+	if len(signals) != 1 || signals[0] != (invalidation{"tenant", "risk.changed", "risk"}) {
+		t.Fatalf("сигналы = %#v", signals)
 	}
 	total, err := svc.ConfirmedRecovered(context.Background(), "actor", "tenant", "RUB")
 	if err != nil || total.String() != "47000.00" {

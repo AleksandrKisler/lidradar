@@ -21,7 +21,7 @@ import (
 )
 
 // PostgresRadarStore собирает проекцию Radar из авторитетных таблиц Risk,
-// Opportunity, Conversation и уже созданных корректирующих фактов.
+// Opportunity, Conversation, корректирующих фактов и подтверждённой выручки.
 type PostgresRadarStore struct{ pool *pgxpool.Pool }
 
 func NewPostgresRadarStore(pool *pgxpool.Pool) *PostgresRadarStore {
@@ -268,6 +268,48 @@ func (store *PostgresRadarStore) loadCorrective(
 		return fmt.Errorf("обход исходов Radar: %w", err)
 	}
 	outcomes.Close()
+
+	revenues, err := store.pool.Query(ctx, `
+		SELECT event.opportunity_id, event.currency,
+		       COALESCE(sum(event.amount) FILTER (
+		           WHERE attribution.type = 'RECOVERED'
+		       ), 0)::numeric(20,2)::text AS confirmed_recovered
+		FROM revenue_events AS event
+		JOIN revenue_attributions AS attribution
+		  ON attribution.tenant_id = event.tenant_id
+		 AND attribution.revenue_event_id = event.id
+		WHERE event.tenant_id = $1
+		  AND event.opportunity_id IN (`+opportunityPlaceholders+`)
+		  AND event.status = 'CONFIRMED'
+		GROUP BY event.opportunity_id, event.currency`, opportunityArguments...)
+	if err != nil {
+		return mapRadarError("чтение выручки Radar", err)
+	}
+	for revenues.Next() {
+		var opportunityID, currency, confirmed string
+		if err := revenues.Scan(&opportunityID, &currency, &confirmed); err != nil {
+			revenues.Close()
+			return fmt.Errorf("чтение строки выручки Radar: %w", err)
+		}
+		for _, index := range opportunityIndices[opportunityID] {
+			opportunity := items[index].Detail.Opportunity
+			if opportunity == nil || opportunity.Currency != currency {
+				continue
+			}
+			potential := "0.00"
+			if opportunity.PotentialRevenue != nil {
+				potential = *opportunity.PotentialRevenue
+			}
+			items[index].Detail.Revenue = &application.Revenue{
+				Currency: currency, Potential: potential, ConfirmedRecovered: confirmed,
+			}
+		}
+	}
+	if err := revenues.Err(); err != nil {
+		revenues.Close()
+		return fmt.Errorf("обход выручки Radar: %w", err)
+	}
+	revenues.Close()
 	return nil
 }
 
@@ -295,7 +337,7 @@ func (store *PostgresRadarStore) Summary(
 	appendRadarFilters(&where, &arguments, filters)
 	query := `
 		WITH matching AS (
-			SELECT r.opportunity_id, r.severity
+			SELECT r.id AS risk_id, r.opportunity_id, r.severity
 			FROM risk_signals AS r
 			WHERE ` + strings.Join(where, " AND ") + `
 		), counts AS (
@@ -304,23 +346,36 @@ func (store *PostgresRadarStore) Summary(
 			FROM matching
 		), risky_opportunities AS (
 			SELECT DISTINCT opportunity_id FROM matching
-		), money AS (
+		), potential_money AS (
 			SELECT COALESCE(sum(o.estimated_amount), 0)::numeric(20,2)::text AS potential_revenue
 			FROM risky_opportunities AS risky
 			JOIN opportunities AS o ON o.tenant_id = $1 AND o.id = risky.opportunity_id
 			JOIN organizations AS organization ON organization.id = o.tenant_id
 			WHERE o.currency = organization.default_currency
+		), recovered_money AS (
+			SELECT COALESCE(sum(event.amount), 0)::numeric(20,2)::text AS confirmed_recovered_revenue
+			FROM matching
+			JOIN revenue_attributions AS attribution
+			  ON attribution.tenant_id = $1 AND attribution.risk_id = matching.risk_id
+			 AND attribution.type = 'RECOVERED'
+			JOIN revenue_events AS event
+			  ON event.tenant_id = attribution.tenant_id
+			 AND event.id = attribution.revenue_event_id
+			JOIN organizations AS organization ON organization.id = event.tenant_id
+			WHERE event.status = 'CONFIRMED'
+			  AND event.currency = organization.default_currency
 		)
-		SELECT counts.open_risks, counts.critical_risks, money.potential_revenue
-		FROM counts CROSS JOIN money`
+		SELECT counts.open_risks, counts.critical_risks,
+		       potential_money.potential_revenue,
+		       recovered_money.confirmed_recovered_revenue
+		FROM counts CROSS JOIN potential_money CROSS JOIN recovered_money`
 	var summary application.Summary
 	if err := store.pool.QueryRow(ctx, query, arguments...).Scan(
 		&summary.OpenRisks, &summary.CriticalRisks, &summary.PotentialRevenue,
+		&summary.ConfirmedRecoveredRevenue,
 	); err != nil {
 		return application.Summary{}, mapRadarError("чтение сводки Radar", err)
 	}
-	// Контур подтверждённой возвращённой выручки появляется на этапе 12.
-	summary.ConfirmedRecoveredRevenue = "0.00"
 	return summary, nil
 }
 

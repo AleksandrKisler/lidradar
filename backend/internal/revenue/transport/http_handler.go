@@ -1,11 +1,14 @@
-// Package transport exposes revenue operations through the versioned API.
+// Package transport открывает операции выручки через версионированный API.
 package transport
 
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"lidradar/backend/internal/revenue/application"
 	"lidradar/backend/internal/revenue/domain"
@@ -13,38 +16,63 @@ import (
 )
 
 type PrincipalResolver interface {
-	Principal(*http.Request) (string, string, bool)
+	Principal(*http.Request) (actorID, tenantID string, ok bool)
 }
+
 type Handler struct {
 	service    application.Service
 	principals PrincipalResolver
 }
 
-func NewHandler(s application.Service, p PrincipalResolver) Handler { return Handler{s, p} }
-func (h Handler) Router() http.Handler {
-	r := http.NewServeMux()
-	r.HandleFunc("POST /api/v1/opportunities/{opportunityID}/revenue", h.confirm)
-	r.HandleFunc("GET /api/v1/revenue/confirmed-recovered", h.total)
-	return r
+func NewHandler(service application.Service, principals PrincipalResolver) Handler {
+	return Handler{service: service, principals: principals}
 }
-func (h Handler) principal(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	if h.principals == nil {
-		writeError(w, r, 401, "UNAUTHENTICATED", "authentication required")
+
+func (handler Handler) Router() http.Handler {
+	router := chi.NewRouter()
+	handler.RegisterRoutes(router, "")
+	return router
+}
+
+func (handler Handler) RegisterRoutes(router chi.Router, prefix string) {
+	prefix = strings.TrimSuffix(prefix, "/")
+	router.Post(prefix+"/opportunities/{opportunityID}/revenue", handler.confirm)
+	router.Get(prefix+"/revenue/confirmed-recovered", handler.total)
+}
+
+func (handler Handler) principal(w http.ResponseWriter, request *http.Request) (string, string, bool) {
+	if handler.principals == nil {
+		writeError(w, request, http.StatusUnauthorized, "UNAUTHENTICATED", "требуется аутентификация")
 		return "", "", false
 	}
-	a, t, ok := h.principals.Principal(r)
-	if !ok || a == "" || t == "" {
-		writeError(w, r, 401, "UNAUTHENTICATED", "authentication required")
+	actor, tenant, ok := handler.principals.Principal(request)
+	if !ok || actor == "" || tenant == "" {
+		writeError(w, request, http.StatusUnauthorized, "UNAUTHENTICATED", "требуется аутентификация")
 		return "", "", false
 	}
-	return a, t, true
+	return actor, tenant, true
 }
-func (h Handler) confirm(w http.ResponseWriter, r *http.Request) {
-	a, t, ok := h.principal(w, r)
+
+func decode(w http.ResponseWriter, request *http.Request, value any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, request.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "некорректный запрос")
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "некорректный запрос")
+		return false
+	}
+	return true
+}
+
+func (handler Handler) confirm(w http.ResponseWriter, request *http.Request) {
+	actor, tenant, ok := handler.principal(w, request)
 	if !ok {
 		return
 	}
-	var b struct {
+	var body struct {
 		Amount          string                 `json:"amount"`
 		Currency        string                 `json:"currency"`
 		AttributionType domain.AttributionType `json:"attributionType"`
@@ -52,57 +80,63 @@ func (h Handler) confirm(w http.ResponseWriter, r *http.Request) {
 		ActionID        string                 `json:"actionId"`
 		OutcomeID       string                 `json:"outcomeId"`
 	}
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
-	d.DisallowUnknownFields()
-	if d.Decode(&b) != nil {
-		writeError(w, r, 400, "INVALID_ARGUMENT", "invalid request")
+	if !decode(w, request, &body) {
 		return
 	}
-	v, created, err := h.service.Confirm(r.Context(), a, t, r.PathValue("opportunityID"), strings.TrimSpace(r.Header.Get("Idempotency-Key")), application.ConfirmCommand{
-		Amount: b.Amount, Currency: b.Currency, Type: b.AttributionType,
-		RiskID: b.RiskID, ActionID: b.ActionID, OutcomeID: b.OutcomeID,
-	})
-	if handle(w, r, err) {
+	confirmation, created, err := handler.service.Confirm(
+		request.Context(), actor, tenant, chi.URLParam(request, "opportunityID"),
+		strings.TrimSpace(request.Header.Get("Idempotency-Key")),
+		application.ConfirmCommand{
+			Amount: body.Amount, Currency: body.Currency, Type: body.AttributionType,
+			RiskID: body.RiskID, ActionID: body.ActionID, OutcomeID: body.OutcomeID,
+		},
+	)
+	if handle(w, request, err) {
 		return
 	}
 	if created {
-		writeJSON(w, 201, v)
-	} else {
-		writeJSON(w, 200, v)
+		writeJSON(w, http.StatusCreated, confirmation)
+		return
 	}
+	writeJSON(w, http.StatusOK, confirmation)
 }
-func (h Handler) total(w http.ResponseWriter, r *http.Request) {
-	a, t, ok := h.principal(w, r)
+
+func (handler Handler) total(w http.ResponseWriter, request *http.Request) {
+	actor, tenant, ok := handler.principal(w, request)
 	if !ok {
 		return
 	}
-	v, err := h.service.ConfirmedRecovered(r.Context(), a, t, r.URL.Query().Get("currency"))
-	if handle(w, r, err) {
+	currency := strings.ToUpper(strings.TrimSpace(request.URL.Query().Get("currency")))
+	total, err := handler.service.ConfirmedRecovered(request.Context(), actor, tenant, currency)
+	if handle(w, request, err) {
 		return
 	}
-	writeJSON(w, 200, map[string]string{"amount": v.String(), "currency": strings.ToUpper(r.URL.Query().Get("currency"))})
+	writeJSON(w, http.StatusOK, map[string]string{"amount": total.String(), "currency": currency})
 }
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	httpplatform.WriteJSON(w, status, v)
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	httpplatform.WriteJSON(w, status, value)
 }
-func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
-	httpplatform.WriteError(w, r, status, code, message, nil)
+
+func writeError(w http.ResponseWriter, request *http.Request, status int, code, message string) {
+	httpplatform.WriteError(w, request, status, code, message, nil)
 }
-func handle(w http.ResponseWriter, r *http.Request, err error) bool {
+
+func handle(w http.ResponseWriter, request *http.Request, err error) bool {
 	if err == nil {
 		return false
 	}
 	switch {
 	case errors.Is(err, application.ErrForbidden):
-		writeError(w, r, 403, "FORBIDDEN", "permission denied")
+		writeError(w, request, http.StatusForbidden, "FORBIDDEN", "недостаточно прав")
 	case errors.Is(err, application.ErrNotFound):
-		writeError(w, r, 404, "NOT_FOUND", "resource not found")
+		writeError(w, request, http.StatusNotFound, "NOT_FOUND", "объект не найден")
 	case errors.Is(err, application.ErrConflict):
-		writeError(w, r, 409, "IDEMPOTENCY_CONFLICT", "idempotency key was used for another request")
+		writeError(w, request, http.StatusConflict, "IDEMPOTENCY_CONFLICT", "ключ идемпотентности уже использован для другого запроса")
 	case errors.Is(err, application.ErrInvalid), errors.Is(err, domain.ErrInvalid):
-		writeError(w, r, 400, "INVALID_ARGUMENT", "invalid request")
+		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "некорректный запрос")
 	default:
-		writeError(w, r, 500, "INTERNAL", "internal error")
+		writeError(w, request, http.StatusInternalServerError, "INTERNAL", "внутренняя ошибка")
 	}
 	return true
 }

@@ -1,10 +1,11 @@
-// Package application coordinates revenue confirmation and attribution.
+// Package application согласует подтверждение выручки и её атрибуцию.
 package application
 
 import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,50 +13,71 @@ import (
 )
 
 var (
-	ErrForbidden = errors.New("forbidden")
-	ErrNotFound  = errors.New("resource not found")
-	ErrInvalid   = errors.New("invalid request")
-	ErrConflict  = errors.New("idempotency conflict")
+	ErrForbidden = errors.New("нет разрешения на работу с выручкой")
+	ErrNotFound  = errors.New("связанный объект выручки не найден")
+	ErrInvalid   = errors.New("некорректная команда выручки")
+	ErrConflict  = errors.New("конфликт ключа идемпотентности")
 )
 
-const PermissionConfirm = "revenue.confirm"
-const AttributionWindow = 30 * 24 * time.Hour
+const (
+	PermissionConfirm = "revenue.confirm"
+	PermissionRead    = "revenue.read"
+	AttributionWindow = 30 * 24 * time.Hour
+)
 
 type Authorizer interface {
 	Allowed(context.Context, string, string, string) (bool, error)
 }
-type IDs interface{ NewID() string }
+
+type IDs interface{ NewID() (string, error) }
+
+type Invalidator interface {
+	Publish(tenantID, eventType, resourceID string)
+}
+
+// RelatedFact используется испытательным хранилищем для воспроизведения
+// межобъектных ограничений PostgreSQL.
 type RelatedFact struct {
 	OpportunityID string
+	RiskID        string
 	At            time.Time
 }
+
 type AuditRecord struct {
-	TenantID, ActorID, Operation, ResourceID string
-	At                                       time.Time
+	ID, TenantID, ActorID, Operation, ResourceType, ResourceID string
+	At                                                         time.Time
 }
+
 type Confirmation struct {
 	Event       domain.RevenueEvent       `json:"revenue"`
 	Attribution domain.RevenueAttribution `json:"attribution"`
 }
 
+// Store обязан сначала разрешить ключ идемпотентности и только для новой
+// команды проверять авторитетную цепочку Risk → Action → Outcome. Благодаря
+// этому точный повтор остаётся допустимым после истечения 30-дневного окна.
 type Store interface {
-	OpportunityExists(context.Context, string, string) (bool, error)
-	Risk(context.Context, string, string) (RelatedFact, bool, error)
-	Action(context.Context, string, string) (RelatedFact, bool, error)
-	Outcome(context.Context, string, string) (RelatedFact, bool, error)
-	Confirm(context.Context, Confirmation, string, [32]byte, AuditRecord) (Confirmation, bool, error)
+	Confirm(context.Context, Confirmation, string, [32]byte, AuditRecord, time.Duration) (Confirmation, bool, error)
 	ConfirmedRecovered(context.Context, string, string) (domain.Money, error)
 }
 
 type Service struct {
-	store Store
-	auth  Authorizer
-	ids   IDs
-	now   func() time.Time
+	store  Store
+	auth   Authorizer
+	ids    IDs
+	now    func() time.Time
+	events Invalidator
 }
 
 func NewService(store Store, auth Authorizer, ids IDs, now func() time.Time) Service {
-	return Service{store, auth, ids, now}
+	return Service{store: store, auth: auth, ids: ids, now: now}
+}
+
+// WithInvalidator включает короткий сигнал для перечитывания Radar после
+// успешной записи возвращённой выручки.
+func (service Service) WithInvalidator(events Invalidator) Service {
+	service.events = events
+	return service
 }
 
 type ConfirmCommand struct {
@@ -64,76 +86,87 @@ type ConfirmCommand struct {
 	RiskID, ActionID, OutcomeID string
 }
 
-func (s Service) Confirm(ctx context.Context, actor, tenant, opportunity, key string, cmd ConfirmCommand) (Confirmation, bool, error) {
-	if actor == "" || tenant == "" || s.auth == nil {
-		return Confirmation{}, false, ErrForbidden
-	}
-	ok, err := s.auth.Allowed(ctx, actor, tenant, PermissionConfirm)
-	if err != nil {
+func (service Service) Confirm(
+	ctx context.Context,
+	actor, tenant, opportunity, key string,
+	command ConfirmCommand,
+) (Confirmation, bool, error) {
+	if err := service.permit(ctx, actor, tenant, PermissionConfirm); err != nil {
 		return Confirmation{}, false, err
 	}
-	if !ok {
-		return Confirmation{}, false, ErrForbidden
-	}
-	if key == "" || opportunity == "" || s.store == nil || s.ids == nil || s.now == nil {
+	if !validIdempotencyKey(key) || opportunity == "" || service.store == nil || service.ids == nil || service.now == nil {
 		return Confirmation{}, false, ErrInvalid
 	}
-	found, err := s.store.OpportunityExists(ctx, tenant, opportunity)
+	now := service.now().UTC()
+	eventID, err := service.ids.NewID()
 	if err != nil {
-		return Confirmation{}, false, err
+		return Confirmation{}, false, fmt.Errorf("создание идентификатора события выручки: %w", err)
 	}
-	if !found {
-		return Confirmation{}, false, ErrNotFound
-	}
-	now := s.now().UTC()
-	event, err := domain.NewConfirmedEvent(s.ids.NewID(), tenant, opportunity, cmd.Amount, cmd.Currency, actor, now)
+	attributionID, err := service.ids.NewID()
 	if err != nil {
-		return Confirmation{}, false, ErrInvalid
+		return Confirmation{}, false, fmt.Errorf("создание идентификатора атрибуции: %w", err)
 	}
-	if cmd.Type == domain.AttributionRecovered {
-		facts := []struct {
-			id     string
-			lookup func(context.Context, string, string) (RelatedFact, bool, error)
-		}{{cmd.RiskID, s.store.Risk}, {cmd.ActionID, s.store.Action}, {cmd.OutcomeID, s.store.Outcome}}
-		for _, related := range facts {
-			if related.id == "" {
-				return Confirmation{}, false, ErrInvalid
-			}
-			fact, exists, lookupErr := related.lookup(ctx, tenant, related.id)
-			if lookupErr != nil {
-				return Confirmation{}, false, lookupErr
-			}
-			if !exists {
-				return Confirmation{}, false, ErrNotFound
-			}
-			if fact.OpportunityID != opportunity || fact.At.IsZero() || fact.At.After(now) || now.Sub(fact.At) > AttributionWindow {
-				return Confirmation{}, false, ErrInvalid
-			}
-		}
+	auditID, err := service.ids.NewID()
+	if err != nil {
+		return Confirmation{}, false, fmt.Errorf("создание идентификатора аудита выручки: %w", err)
 	}
-	attribution, err := domain.NewAttribution(s.ids.NewID(), event, cmd.Type, cmd.RiskID, cmd.ActionID, cmd.OutcomeID, now)
+	event, err := domain.NewConfirmedEvent(
+		eventID, tenant, opportunity, command.Amount, command.Currency, actor, now,
+	)
 	if err != nil {
 		return Confirmation{}, false, ErrInvalid
 	}
-	hash := sha256.Sum256([]byte(strings.Join([]string{opportunity, event.Amount.String(), event.Currency, string(cmd.Type), cmd.RiskID, cmd.ActionID, cmd.OutcomeID}, "\x00")))
-	confirmation := Confirmation{event, attribution}
-	return s.store.Confirm(ctx, confirmation, key, hash, AuditRecord{tenant, actor, "REVENUE_CONFIRMED", event.ID, now})
+	attribution, err := domain.NewAttribution(
+		attributionID, event, command.Type,
+		command.RiskID, command.ActionID, command.OutcomeID, now,
+	)
+	if err != nil {
+		return Confirmation{}, false, ErrInvalid
+	}
+	hash := sha256.Sum256([]byte(strings.Join([]string{
+		actor, opportunity, event.Amount.String(), event.Currency,
+		string(command.Type), command.RiskID, command.ActionID, command.OutcomeID,
+	}, "\x00")))
+	confirmation := Confirmation{Event: event, Attribution: attribution}
+	stored, created, err := service.store.Confirm(ctx, confirmation, key, hash, AuditRecord{
+		ID: auditID, TenantID: tenant, ActorID: actor,
+		Operation: "REVENUE_CONFIRMED", ResourceType: "REVENUE_EVENT",
+		ResourceID: event.ID, At: now,
+	}, AttributionWindow)
+	if err == nil && created && command.Type == domain.AttributionRecovered && service.events != nil {
+		service.events.Publish(tenant, "risk.changed", command.RiskID)
+	}
+	return stored, created, err
 }
 
-func (s Service) ConfirmedRecovered(ctx context.Context, actor, tenant, currency string) (domain.Money, error) {
-	if actor == "" || tenant == "" || s.auth == nil || s.store == nil {
-		return domain.Money{}, ErrForbidden
-	}
-	ok, err := s.auth.Allowed(ctx, actor, tenant, "revenue.read")
-	if err != nil {
+func (service Service) ConfirmedRecovered(ctx context.Context, actor, tenant, currency string) (domain.Money, error) {
+	if err := service.permit(ctx, actor, tenant, PermissionRead); err != nil {
 		return domain.Money{}, err
 	}
-	if !ok {
-		return domain.Money{}, ErrForbidden
-	}
-	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if len(currency) != 3 {
+	if service.store == nil {
 		return domain.Money{}, ErrInvalid
 	}
-	return s.store.ConfirmedRecovered(ctx, tenant, currency)
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if !domain.ValidCurrency(currency) {
+		return domain.Money{}, ErrInvalid
+	}
+	return service.store.ConfirmedRecovered(ctx, tenant, currency)
+}
+
+func (service Service) permit(ctx context.Context, actor, tenant, permission string) error {
+	if actor == "" || tenant == "" || service.auth == nil {
+		return ErrForbidden
+	}
+	allowed, err := service.auth.Allowed(ctx, actor, tenant, permission)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbidden
+	}
+	return nil
+}
+
+func validIdempotencyKey(key string) bool {
+	return key != "" && key == strings.TrimSpace(key) && len([]rune(key)) <= 255
 }

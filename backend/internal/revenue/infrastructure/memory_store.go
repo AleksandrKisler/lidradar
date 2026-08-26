@@ -1,9 +1,12 @@
-// Package infrastructure provides adapters for the revenue application.
+// Package infrastructure предоставляет адаптеры модуля выручки.
 package infrastructure
 
 import (
 	"context"
 	"sync"
+	"time"
+
+	"github.com/shopspring/decimal"
 
 	"lidradar/backend/internal/revenue/application"
 	"lidradar/backend/internal/revenue/domain"
@@ -14,8 +17,8 @@ type idempotency struct {
 	result application.Confirmation
 }
 
-// MemoryStore — внутрипроцессный испытательный адаптер. Рабочим командам нельзя
-// использовать его: выручка требует транзакционного хранения в PostgreSQL.
+// MemoryStore — внутрипроцессный испытательный адаптер. Рабочим командам
+// нельзя использовать его: выручка требует транзакционного PostgreSQL.
 type MemoryStore struct {
 	mu                       sync.Mutex
 	opportunities            map[string]bool
@@ -26,88 +29,109 @@ type MemoryStore struct {
 }
 
 func NewTestMemoryStore() *MemoryStore {
-	return &MemoryStore{opportunities: map[string]bool{}, risks: map[string]application.RelatedFact{}, actions: map[string]application.RelatedFact{}, outcomes: map[string]application.RelatedFact{}, idempotency: map[string]idempotency{}}
+	return &MemoryStore{
+		opportunities: map[string]bool{}, risks: map[string]application.RelatedFact{},
+		actions: map[string]application.RelatedFact{}, outcomes: map[string]application.RelatedFact{},
+		idempotency: map[string]idempotency{},
+	}
 }
+
 func scoped(tenant, id string) string { return tenant + "\x00" + id }
-func (s *MemoryStore) AddOpportunity(tenant, id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.opportunities[scoped(tenant, id)] = true
+
+func (store *MemoryStore) AddOpportunity(tenant, id string) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.opportunities[scoped(tenant, id)] = true
 }
-func (s *MemoryStore) AddRisk(tenant, id string, f application.RelatedFact) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.risks[scoped(tenant, id)] = f
+
+func (store *MemoryStore) AddRisk(tenant, id string, fact application.RelatedFact) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.risks[scoped(tenant, id)] = fact
 }
-func (s *MemoryStore) AddAction(tenant, id string, f application.RelatedFact) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.actions[scoped(tenant, id)] = f
+
+func (store *MemoryStore) AddAction(tenant, id string, fact application.RelatedFact) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.actions[scoped(tenant, id)] = fact
 }
-func (s *MemoryStore) AddOutcome(tenant, id string, f application.RelatedFact) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.outcomes[scoped(tenant, id)] = f
+
+func (store *MemoryStore) AddOutcome(tenant, id string, fact application.RelatedFact) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.outcomes[scoped(tenant, id)] = fact
 }
-func (s *MemoryStore) OpportunityExists(_ context.Context, tenant, id string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.opportunities[scoped(tenant, id)], nil
-}
-func lookup(values map[string]application.RelatedFact, tenant, id string) (application.RelatedFact, bool, error) {
-	v, ok := values[scoped(tenant, id)]
-	return v, ok, nil
-}
-func (s *MemoryStore) Risk(_ context.Context, t, id string) (application.RelatedFact, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return lookup(s.risks, t, id)
-}
-func (s *MemoryStore) Action(_ context.Context, t, id string) (application.RelatedFact, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return lookup(s.actions, t, id)
-}
-func (s *MemoryStore) Outcome(_ context.Context, t, id string) (application.RelatedFact, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return lookup(s.outcomes, t, id)
-}
-func (s *MemoryStore) Confirm(_ context.Context, c application.Confirmation, key string, hash [32]byte, audit application.AuditRecord) (application.Confirmation, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	k := scoped(c.Event.TenantID, key)
-	if old, ok := s.idempotency[k]; ok {
-		if old.hash != hash {
+
+func (store *MemoryStore) Confirm(
+	_ context.Context,
+	confirmation application.Confirmation,
+	key string,
+	hash [32]byte,
+	audit application.AuditRecord,
+	window time.Duration,
+) (application.Confirmation, bool, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	idempotencyKey := scoped(confirmation.Event.TenantID, key)
+	if previous, exists := store.idempotency[idempotencyKey]; exists {
+		if previous.hash != hash {
 			return application.Confirmation{}, false, application.ErrConflict
 		}
-		return old.result, false, nil
+		return previous.result, false, nil
 	}
-	// A single atomic critical section models the production transaction: event,
-	// unique attribution, idempotency response, and audit are committed together.
-	s.confirmations = append(s.confirmations, c)
-	s.audits = append(s.audits, audit)
-	s.idempotency[k] = idempotency{hash, c}
-	return c, true, nil
-}
-func (s *MemoryStore) ConfirmedRecovered(_ context.Context, tenant, currency string) (domain.Money, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var cents int64
-	for _, c := range s.confirmations {
-		if c.Event.TenantID == tenant && c.Event.Currency == currency && c.Event.Status == "CONFIRMED" && c.Attribution.Type == domain.AttributionRecovered {
-			cents += c.Event.Amount.Cents()
+	if !store.opportunities[scoped(confirmation.Event.TenantID, confirmation.Event.OpportunityID)] {
+		return application.Confirmation{}, false, application.ErrNotFound
+	}
+	if confirmation.Attribution.Type == domain.AttributionRecovered {
+		facts := []application.RelatedFact{
+			store.risks[scoped(confirmation.Event.TenantID, confirmation.Attribution.RiskID)],
+			store.actions[scoped(confirmation.Event.TenantID, confirmation.Attribution.ActionID)],
+			store.outcomes[scoped(confirmation.Event.TenantID, confirmation.Attribution.OutcomeID)],
+		}
+		for _, fact := range facts {
+			if fact.OpportunityID == "" {
+				return application.Confirmation{}, false, application.ErrNotFound
+			}
+			age := confirmation.Event.ConfirmedAt.Sub(fact.At)
+			if fact.OpportunityID != confirmation.Event.OpportunityID || fact.At.IsZero() || age < 0 || age > window {
+				return application.Confirmation{}, false, application.ErrInvalid
+			}
+		}
+		action := facts[1]
+		if action.RiskID != "" && action.RiskID != confirmation.Attribution.RiskID {
+			return application.Confirmation{}, false, application.ErrInvalid
 		}
 	}
-	return domain.NewMoneyFromCents(cents)
+	store.confirmations = append(store.confirmations, confirmation)
+	store.audits = append(store.audits, audit)
+	store.idempotency[idempotencyKey] = idempotency{hash: hash, result: confirmation}
+	return confirmation, true, nil
 }
-func (s *MemoryStore) Confirmations() []application.Confirmation {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]application.Confirmation(nil), s.confirmations...)
+
+func (store *MemoryStore) ConfirmedRecovered(_ context.Context, tenant, currency string) (domain.Money, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	total := decimal.Zero
+	for _, confirmation := range store.confirmations {
+		if confirmation.Event.TenantID == tenant && confirmation.Event.Currency == currency &&
+			confirmation.Event.Status == domain.StatusConfirmed &&
+			confirmation.Attribution.Type == domain.AttributionRecovered {
+			total = total.Add(confirmation.Event.Amount.Decimal())
+		}
+	}
+	return domain.ParseNonNegativeMoney(total.StringFixed(2))
 }
-func (s *MemoryStore) Audits() []application.AuditRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]application.AuditRecord(nil), s.audits...)
+
+func (store *MemoryStore) Confirmations() []application.Confirmation {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return append([]application.Confirmation(nil), store.confirmations...)
 }
+
+func (store *MemoryStore) Audits() []application.AuditRecord {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return append([]application.AuditRecord(nil), store.audits...)
+}
+
+var _ application.Store = (*MemoryStore)(nil)
