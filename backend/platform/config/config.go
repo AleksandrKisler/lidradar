@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,8 @@ const (
 	cookieSecureKey     = "LIDRADAR_COOKIE_SECURE"
 	publicBaseURLKey    = "LIDRADAR_PUBLIC_BASE_URL"
 	credentialKeyKey    = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
+	telegramTokenKey    = "LIDAR_TELEGRAM_TOKEN"
+	telegramUsernameKey = "LIDRADAR_TELEGRAM_BOT_USERNAME"
 	defaultHTTPAddress  = ":8080"
 	defaultDatabaseURL  = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
 	defaultShutdown     = 10 * time.Second
@@ -31,6 +34,7 @@ const (
 	defaultSessionTTL   = 30 * 24 * time.Hour
 	defaultDatabaseMax  = int32(10)
 	defaultDatabaseMin  = int32(1)
+	defaultTelegramBot  = "LidRadarDevBot"
 )
 
 // LookupEnv is the environment lookup contract used by Load. Keeping the
@@ -50,11 +54,12 @@ const (
 
 // Config contains configuration shared by every LidRadar runtime.
 type Config struct {
-	Environment  Environment
-	HTTP         HTTP
-	Database     Database
-	Auth         Auth
-	Integrations Integrations
+	Environment   Environment
+	HTTP          HTTP
+	Database      Database
+	Auth          Auth
+	Integrations  Integrations
+	Notifications Notifications
 }
 
 // HTTP contains process-level HTTP server settings.
@@ -74,6 +79,13 @@ type Auth struct {
 type Integrations struct {
 	PublicBaseURL string
 	CredentialKey []byte
+}
+
+// Notifications содержит настройки исходящих оповещений. BotToken никогда не
+// должен попадать в журналы или диагностические ответы.
+type Notifications struct {
+	TelegramBotToken string
+	TelegramUsername string
 }
 
 // Database contains PostgreSQL connection-pool settings.
@@ -113,6 +125,10 @@ func Load(lookup LookupEnv) (Config, error) {
 		Auth: Auth{SessionTTL: defaultSessionTTL},
 		Integrations: Integrations{
 			PublicBaseURL: strings.TrimRight(strings.TrimSpace(valueOrDefault(lookup, publicBaseURLKey, "")), "/"),
+		},
+		Notifications: Notifications{
+			TelegramBotToken: valueOrDefault(lookup, telegramTokenKey, ""),
+			TelegramUsername: strings.TrimPrefix(strings.TrimSpace(valueOrDefault(lookup, telegramUsernameKey, defaultTelegramBot)), "@"),
 		},
 	}
 	if configuration.Integrations.CredentialKey, err = encryptionKeyValue(lookup, credentialKeyKey); err != nil {
@@ -182,6 +198,12 @@ func (c Config) Validate() error {
 			return fmt.Errorf("telegram integration configuration is invalid")
 		}
 	}
+	if !telegramUsernamePattern.MatchString(c.Notifications.TelegramUsername) {
+		return fmt.Errorf("%s has invalid format", telegramUsernameKey)
+	}
+	if c.Notifications.TelegramBotToken != "" && !telegramTokenPattern.MatchString(c.Notifications.TelegramBotToken) {
+		return fmt.Errorf("%s has invalid format", telegramTokenKey)
+	}
 	if (c.Environment == EnvironmentStaging || c.Environment == EnvironmentProduction) && !c.Auth.CookieSecure {
 		return fmt.Errorf("%s must be true in %s", cookieSecureKey, c.Environment)
 	}
@@ -193,6 +215,11 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
+
+var (
+	telegramUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`)
+	telegramTokenPattern    = regexp.MustCompile(`^[0-9]{5,20}:[A-Za-z0-9_-]{20,100}$`)
+)
 
 func valueOrDefault(lookup LookupEnv, key, fallback string) string {
 	if value, ok := lookup(key); ok {

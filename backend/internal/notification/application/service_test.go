@@ -12,7 +12,7 @@ import (
 
 type ids struct{ n int }
 
-func (i *ids) NewID() string { i.n++; return string(rune('a' + i.n)) }
+func (i *ids) NewID() (string, error) { i.n++; return string(rune('a' + i.n)), nil }
 
 type links struct{ destination string }
 
@@ -33,16 +33,19 @@ func (m *memory) Create(_ context.Context, n domain.Notification, d domain.Deliv
 	m.deliveries = append(m.deliveries, d)
 	return n, true, nil
 }
-func (m *memory) Due(_ context.Context, at time.Time, _ int) ([]domain.Delivery, error) {
+func (m *memory) ClaimDue(_ context.Context, owner string, at, leaseUntil time.Time, _ int) ([]domain.Delivery, error) {
 	var due []domain.Delivery
-	for _, d := range m.deliveries {
-		if d.Status == domain.DeliveryPending && !d.NextAttemptAt.After(at) {
+	for index, d := range m.deliveries {
+		if d.Status == domain.DeliveryPending && !d.AvailableAt.After(at) {
+			d.Status = domain.DeliveryProcessing
+			d.LeaseOwner, d.LeaseUntil, d.UpdatedAt = &owner, &leaseUntil, at
+			m.deliveries[index] = d
 			due = append(due, d)
 		}
 	}
 	return due, nil
 }
-func (m *memory) Complete(_ context.Context, d domain.Delivery, retry *domain.Delivery) error {
+func (m *memory) Complete(_ context.Context, _ string, d domain.Delivery, retry *domain.Delivery) error {
 	for i := range m.deliveries {
 		if m.deliveries[i].ID == d.ID {
 			m.deliveries[i] = d
@@ -92,14 +95,14 @@ func TestTelegramDownRetriesWithoutDuplicatingNotification(t *testing.T) {
 	if _, _, err := svc.NotifyRisk(context.Background(), "tenant", "owner", "risk-1", "Critical", "Reply now"); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.DispatchDue(context.Background(), 10); err != nil {
+	if _, err := svc.DispatchOne(context.Background(), "worker", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.deliveries) != 2 || store.deliveries[0].Status != domain.DeliveryRetry || len([]domain.Notification{store.notification}) != 1 {
 		t.Fatalf("unexpected retry state: %#v", store.deliveries)
 	}
 	now = now.Add(5 * time.Second)
-	if err := svc.DispatchDue(context.Background(), 10); err != nil {
+	if _, err := svc.DispatchOne(context.Background(), "worker", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if store.deliveries[1].Status != domain.DeliverySucceeded || tx.calls != 2 {
@@ -115,7 +118,7 @@ func (c *callback) ExecuteSafeCallback(context.Context, application.CallbackComm
 }
 func TestCallbacksAllowOnlySafeActions(t *testing.T) {
 	c := new(callback)
-	base := application.CallbackCommand{TenantID: "t", UserID: "u", RiskID: "r", IdempotencyKey: "key"}
+	base := application.CallbackCommand{TenantID: "t", UserID: "u", NotificationID: "n", RiskID: "r", IdempotencyKey: "key"}
 	base.Action = application.CallbackAcknowledge
 	if err := application.HandleCallback(context.Background(), c, base); err != nil || !c.called {
 		t.Fatal("safe callback rejected")

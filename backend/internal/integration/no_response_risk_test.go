@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"lidradar/backend/platform/ids"
 )
 
 // TestNoResponseRiskRealMessageFlow доказывает выходной критерий этапа 8:
@@ -17,6 +19,15 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	fixture := newAPIFixture(t)
 	owner := register(t, fixture.handler, "risk-flow@example.com", "Владелец риска")
 	tenantID := createOrganization(t, fixture, owner, "Организация риска")
+	linkID, err := (ids.Generator{}).NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(context.Background(), `
+		INSERT INTO telegram_user_links(id, tenant_id, user_id, telegram_user_id, chat_id, linked_at, updated_at)
+		VALUES ($1,$2,$3,7001,7001,now(),now())`, linkID, tenantID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	locationResponse := request(t, fixture.handler, http.MethodPost, "/api/v1/locations", `{
 		"name":"Круглосуточная точка","timezone":"UTC","responseThresholdMinutes":45
@@ -111,6 +122,23 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	}
 	if riskCount != 1 || severity != "HIGH" || status != "OPEN" || source != "RULE" || policyVersion != "no-response/v1" {
 		t.Fatalf("риск: id=%s count=%d severity=%s status=%s source=%s policy=%s", riskID, riskCount, severity, status, source, policyVersion)
+	}
+	if delivered, err := fixture.notifications.DispatchOne(context.Background(), "integration-notifications", time.Minute); err != nil || !delivered {
+		t.Fatalf("доставка уведомления = %v, %v", delivered, err)
+	}
+	var notificationCount, successfulDeliveries int
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT count(DISTINCT notification.id),
+		       count(*) FILTER (WHERE delivery.status = 'SUCCEEDED')
+		FROM notifications AS notification
+		JOIN notification_deliveries AS delivery ON delivery.notification_id = notification.id
+		WHERE notification.tenant_id = $1 AND notification.risk_id = $2`, tenantID, riskID).Scan(
+		&notificationCount, &successfulDeliveries,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if notificationCount != 1 || successfulDeliveries != 1 {
+		t.Fatalf("уведомления=%d успешных доставок=%d", notificationCount, successfulDeliveries)
 	}
 	eventLine, eventErr := stream.ReadString('\n')
 	dataLine, dataErr := stream.ReadString('\n')

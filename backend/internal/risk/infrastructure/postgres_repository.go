@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -10,15 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	eventsdomain "lidradar/backend/internal/events/domain"
+	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	"lidradar/backend/internal/risk/domain"
 )
 
 // PostgresRepository — производственное хранилище агрегатов Risk. Частичный
 // уникальный индекс в миграции является последней защитой от гонок worker.
-type PostgresRepository struct{ pool *pgxpool.Pool }
+type PostgresRepository struct {
+	pool   *pgxpool.Pool
+	events *eventsinfrastructure.PostgresStore
+}
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+	return &PostgresRepository{pool: pool, events: eventsinfrastructure.NewPostgresStore(pool)}
 }
 
 func (repository *PostgresRepository) UpsertActive(
@@ -32,7 +38,11 @@ func (repository *PostgresRepository) UpsertActive(
 	// ожидания конкурентного INSERT следующий снимок READ COMMITTED уже видит
 	// победившую строку. Повтор нужен для редкой гонки с ResolveActive.
 	for range 3 {
-		stored, err := scanRisk(repository.pool.QueryRow(ctx, `
+		tx, beginErr := repository.pool.Begin(ctx)
+		if beginErr != nil {
+			return domain.Risk{}, false, fmt.Errorf("начало создания риска: %w", beginErr)
+		}
+		stored, err := scanRisk(tx.QueryRow(ctx, `
 			INSERT INTO risk_signals(
 				id, tenant_id, opportunity_id, location_id, type, severity, status,
 				reason_code, reason_text, source, risk_engine_version,
@@ -51,10 +61,21 @@ func (repository *PostgresRepository) UpsertActive(
 			candidate.DetectedAt, candidate.DueAt, candidate.UpdatedAt,
 		))
 		if err == nil {
+			if appendErr := repository.appendOpenedEvent(ctx, tx, stored); appendErr != nil {
+				_ = tx.Rollback(ctx)
+				return domain.Risk{}, false, appendErr
+			}
+			if commitErr := tx.Commit(ctx); commitErr != nil {
+				return domain.Risk{}, false, fmt.Errorf("фиксация создания риска: %w", commitErr)
+			}
 			return stored, true, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
 			return domain.Risk{}, false, mapRiskError("создание риска", err)
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return domain.Risk{}, false, fmt.Errorf("фиксация конкурентной проверки риска: %w", commitErr)
 		}
 
 		stored, err = scanRisk(repository.pool.QueryRow(ctx, `
@@ -81,6 +102,37 @@ func (repository *PostgresRepository) UpsertActive(
 		}
 	}
 	return domain.Risk{}, false, fmt.Errorf("состояние активного риска непрерывно изменяется")
+}
+
+type riskOpenedEventData struct {
+	RiskID        string          `json:"riskId"`
+	OpportunityID string          `json:"opportunityId"`
+	LocationID    string          `json:"locationId"`
+	Type          domain.Type     `json:"type"`
+	Severity      domain.Severity `json:"severity"`
+}
+
+func (repository *PostgresRepository) appendOpenedEvent(ctx context.Context, tx pgx.Tx, risk domain.Risk) error {
+	if repository.events == nil {
+		return errors.New("исходящий журнал риска не настроен")
+	}
+	data, err := json.Marshal(riskOpenedEventData{
+		RiskID: risk.ID, OpportunityID: risk.OpportunityID, LocationID: risk.LocationID,
+		Type: risk.Type, Severity: risk.Severity,
+	})
+	if err != nil {
+		return fmt.Errorf("подготовка события риска: %w", err)
+	}
+	event, err := eventsdomain.NewEvent(
+		risk.ID, "risk.opened", 1, risk.TenantID, "risk", risk.ID, risk.ID, data, risk.DetectedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("проверка события риска: %w", err)
+	}
+	if _, _, err := repository.events.AppendTx(ctx, tx, event); err != nil {
+		return fmt.Errorf("добавление события риска: %w", err)
+	}
+	return nil
 }
 
 func (repository *PostgresRepository) FindActive(

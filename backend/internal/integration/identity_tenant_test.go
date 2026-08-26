@@ -30,6 +30,9 @@ import (
 	identitytransport "lidradar/backend/internal/identity/transport"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	notificationapplication "lidradar/backend/internal/notification/application"
+	notificationinfrastructure "lidradar/backend/internal/notification/infrastructure"
+	notificationtransport "lidradar/backend/internal/notification/transport"
 	opportunityapplication "lidradar/backend/internal/opportunity/application"
 	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
 	opportunitytransport "lidradar/backend/internal/opportunity/transport"
@@ -55,6 +58,7 @@ type apiFixture struct {
 	worker        jobsapplication.Worker
 	scheduler     jobsapplication.Scheduler
 	candidates    opportunityapplication.CandidateProcessor
+	notifications notificationapplication.Service
 	pool          *pgxpool.Pool
 }
 
@@ -87,11 +91,18 @@ func newAPIFixture(t *testing.T) apiFixture {
 	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
 	riskPolicy := riskdomain.NoResponsePolicy{}
 	riskEvents := risktransport.NewHub()
+	riskRadar := riskapplication.NewRadar(
+		riskinfrastructure.NewPostgresRadarStore(pool), permissions, riskEvents, time.Now,
+	)
 	riskEvaluator := riskapplication.NewEvaluator(
 		riskRepository, riskStates, riskPolicy, ids.Generator{}, time.Now,
 	).WithInvalidator(riskEvents)
 	riskPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, ids.Generator{}, time.Now,
+	)
+	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
+	notificationService := notificationapplication.NewService(
+		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
 	)
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, "integration-outbox",
@@ -103,6 +114,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 			),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
+			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(
+				notificationService, notificationRepository,
+			),
 		}, time.Now, eventsapplication.DefaultLease,
 	)
 	worker := jobsapplication.NewWorker(
@@ -118,6 +132,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 		identityRepository, cryptoplatform.PasswordHasher{}, ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
 	)
 	resolver := identitytransport.Resolver{Auth: identityService}
+	notificationLinks := notificationapplication.NewLinkService(
+		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),
+		notificationRepository, permissions, "LidRadarDevBot", time.Now,
+	)
 	router := httpplatform.NewRouter(
 		"lidradar-api", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		platformpostgres.NewSchemaReadiness(pool),
@@ -128,17 +146,15 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, resolver).Router())
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, resolver).Router())
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, resolver).Router())
+	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, resolver).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, resolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
-	riskRadar := riskapplication.NewRadar(
-		riskinfrastructure.NewPostgresRadarStore(pool), permissions, riskEvents, time.Now,
-	)
 	risktransport.NewHandler(riskRadar, resolver, riskEvents).RegisterRoutes(router, "/api/v1")
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
-		worker: worker, candidates: candidateProcessor, pool: pool,
+		worker: worker, candidates: candidateProcessor, notifications: notificationService, pool: pool,
 		scheduler: jobsapplication.NewScheduler(jobStore, time.Now),
 	}
 }
@@ -234,6 +250,44 @@ func TestIdentityTenantOwnerFlowPermissionsAndIsolation(t *testing.T) {
 	}
 	forbiddenTenant := request(t, fixture.handler, http.MethodGet, "/api/v1/locations", "", owner.Cookie, organizationBID)
 	requireStatus(t, forbiddenTenant, http.StatusForbidden)
+}
+
+func TestTelegramLinkTokenAPIIsAuthenticatedTenantScopedAndStoresOnlyHash(t *testing.T) {
+	fixture := newAPIFixture(t)
+	owner := register(t, fixture.handler, "telegram-link@example.com", "Владелец Telegram")
+	tenantID := createOrganization(t, fixture, owner, "Организация Telegram")
+
+	status := request(t, fixture.handler, http.MethodGet, "/api/v1/notifications/telegram-link", "", owner.Cookie, tenantID)
+	requireStatus(t, status, http.StatusOK)
+	if status.Body.String() != "{\"linked\":false}\n" {
+		t.Fatalf("начальное состояние привязки = %s", status.Body.String())
+	}
+	issued := request(t, fixture.handler, http.MethodPost, "/api/v1/notifications/telegram-link-token", "", owner.Cookie, tenantID)
+	requireStatus(t, issued, http.StatusCreated)
+	if body := issued.Body.String(); !strings.Contains(body, `"startUrl":"https://t.me/LidRadarDevBot?start=`) ||
+		!strings.Contains(body, `"expiresAt":`) || strings.Contains(body, `"plaintext"`) {
+		t.Fatalf("ответ кода привязки имеет неверную форму")
+	}
+	var tokenRows, malformedHashes int
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT count(*), count(*) FILTER (WHERE token_hash !~ '^[0-9a-f]{64}$')
+		FROM telegram_link_tokens WHERE tenant_id = $1 AND user_id = $2`, tenantID, owner.ID).Scan(&tokenRows, &malformedHashes); err != nil {
+		t.Fatal(err)
+	}
+	if tokenRows != 1 || malformedHashes != 0 {
+		t.Fatalf("коды в PostgreSQL: rows=%d malformed=%d", tokenRows, malformedHashes)
+	}
+
+	other := register(t, fixture.handler, "telegram-link-other@example.com", "Другой владелец")
+	otherTenantID := createOrganization(t, fixture, other, "Другая организация")
+	forbidden := request(
+		t, fixture.handler, http.MethodPost, "/api/v1/notifications/telegram-link-token", "", owner.Cookie, otherTenantID,
+	)
+	requireStatus(t, forbidden, http.StatusForbidden)
+	unauthenticated := request(
+		t, fixture.handler, http.MethodPost, "/api/v1/notifications/telegram-link-token", "", nil, tenantID,
+	)
+	requireStatus(t, unauthenticated, http.StatusUnauthorized)
 }
 
 func register(t *testing.T, handler http.Handler, email, displayName string) registeredUser {

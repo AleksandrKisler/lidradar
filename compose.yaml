@@ -48,6 +48,7 @@ services:
       LIDRADAR_HTTP_ADDRESS: :8080
       LIDRADAR_PUBLIC_BASE_URL: ${LIDRADAR_PUBLIC_BASE_URL:-}
       LIDRADAR_INTEGRATION_ENCRYPTION_KEY: ${LIDRADAR_INTEGRATION_ENCRYPTION_KEY:-}
+      LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:-LidRadarDevBot}
     ports:
       - "8080:8080"
     depends_on:
@@ -64,7 +65,10 @@ services:
       <<: *backend-build
       args:
         COMMAND: worker
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      LIDAR_TELEGRAM_TOKEN: ${LIDAR_TELEGRAM_TOKEN:-}
+      LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:-LidRadarDevBot}
     depends_on:
       migrate:
         condition: service_completed_successfully

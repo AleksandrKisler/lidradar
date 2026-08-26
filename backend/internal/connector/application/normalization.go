@@ -16,12 +16,24 @@ type CanonicalSink interface {
 	IngestCanonical(context.Context, domain.CanonicalEvent) error
 }
 
+// ControlSink принимает служебные обновления канала, которые не являются
+// перепиской: одноразовую Telegram-привязку и безопасные кнопки уведомления.
+type ControlSink interface {
+	HandleConnectorControl(context.Context, string, domain.Provider, []byte) (bool, error)
+}
+
 // NormalizationService преобразует сохранённые события и передаёт их ядру переписок.
 type NormalizationService struct {
 	repository domain.Repository
 	registry   domain.ConnectorRegistry
 	sink       CanonicalSink
+	control    ControlSink
 	now        func() time.Time
+}
+
+func (service NormalizationService) WithControlSink(sink ControlSink) NormalizationService {
+	service.control = sink
+	return service
 }
 
 // NewNormalizationService собирает фоновый сценарий из реестра и портов хранения.
@@ -54,6 +66,19 @@ func (service NormalizationService) Process(ctx context.Context, tenantID, rawEv
 	registration, found := service.registry.Lookup(item.Connection.Provider)
 	if !found || registration.Connector == nil {
 		return ErrUnavailable
+	}
+	if service.control != nil {
+		handled, controlErr := service.control.HandleConnectorControl(
+			ctx, item.Event.TenantID, item.Event.Provider, item.Event.Payload,
+		)
+		if controlErr != nil {
+			return controlErr
+		}
+		if handled {
+			return mapDomainError(service.repository.CompleteNormalization(
+				ctx, item.Event.TenantID, item.Event.ID, service.now().UTC(),
+			))
+		}
 	}
 	events, normalizeErr := registration.Connector.NormalizeEvent(ctx, item.Connection, item.Event)
 	if errors.Is(normalizeErr, domain.ErrInvalidPayload) || invalidCanonicalEvents(events) {

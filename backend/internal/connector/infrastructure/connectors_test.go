@@ -229,7 +229,7 @@ func TestTelegramProvisionerInstallsVerifiesAndDeletesWebhook(t *testing.T) {
 				AllowedUpdates []string `json:"allowed_updates"`
 			}
 			if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil || requestBody.URL != wantWebhookURL ||
-				requestBody.SecretToken != "telegram_secret_123" || len(requestBody.AllowedUpdates) != 4 {
+				requestBody.SecretToken != "telegram_secret_123" || len(requestBody.AllowedUpdates) != 6 {
 				t.Fatalf("setWebhook body = %#v, %v", requestBody, err)
 			}
 			body = `{"ok":true,"result":true}`

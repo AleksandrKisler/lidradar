@@ -168,6 +168,29 @@ func TestLoadRejectsPartialOrUnsafeTelegramConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadNotificationTelegramConfigurationDoesNotExposeInvalidToken(t *testing.T) {
+	const invalidToken = "secret-token-that-must-not-appear"
+	_, err := Load(mapLookup(map[string]string{
+		environmentKey:   string(EnvironmentDevelopment),
+		telegramTokenKey: invalidToken,
+	}))
+	if err == nil || !strings.Contains(err.Error(), telegramTokenKey) || strings.Contains(err.Error(), invalidToken) {
+		t.Fatalf("безопасная ошибка Telegram token = %v", err)
+	}
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey:      string(EnvironmentDevelopment),
+		telegramTokenKey:    "12345:abcdefghijklmnopqrstuvwxyzABCDE",
+		telegramUsernameKey: "LidRadarDevBot",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.Notifications.TelegramUsername != "LidRadarDevBot" ||
+		configuration.Notifications.TelegramBotToken == "" {
+		t.Fatal("настройки Telegram-уведомлений не загружены")
+	}
+}
+
 func mapLookup(values map[string]string) LookupEnv {
 	return func(key string) (string, bool) {
 		value, ok := values[key]

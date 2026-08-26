@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,11 +18,15 @@ import (
 	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	notificationapplication "lidradar/backend/internal/notification/application"
+	notificationinfrastructure "lidradar/backend/internal/notification/infrastructure"
 	opportunityapplication "lidradar/backend/internal/opportunity/application"
 	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
 	riskapplication "lidradar/backend/internal/risk/application"
 	riskdomain "lidradar/backend/internal/risk/domain"
 	riskinfrastructure "lidradar/backend/internal/risk/infrastructure"
+	tenantapplication "lidradar/backend/internal/tenant/application"
+	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
 	"lidradar/backend/platform/bootstrap"
 	"lidradar/backend/platform/config"
 	"lidradar/backend/platform/ids"
@@ -63,21 +68,51 @@ func run(ctx context.Context, configuration config.Config) error {
 	candidateProcessor := opportunityapplication.NewCandidateProcessor(
 		opportunityRepository, conversationService, catalogRepository, generator, time.Now,
 	)
-	normalization := connectorapplication.NewNormalizationService(
-		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
-	)
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
 	eventStore := eventsinfrastructure.NewPostgresStore(pool)
 	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
 	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
 	riskPolicy := riskdomain.NoResponsePolicy{}
 	riskInvalidator := riskinfrastructure.NewPostgresInvalidator(pool)
+	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
+	permissionService := tenantapplication.NewPermissionService(tenantRepository)
+	riskRadar := riskapplication.NewRadar(
+		riskinfrastructure.NewPostgresRadarStore(pool), permissionService, riskInvalidator, time.Now,
+	)
 	riskEvaluator := riskapplication.NewEvaluator(
 		riskRepository, riskStates, riskPolicy, generator, time.Now,
 	).WithInvalidator(riskInvalidator)
 	riskPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, generator, time.Now,
 	)
+	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
+	var notificationTransport notificationapplication.Transport
+	var controlTransport notificationinfrastructure.TelegramControlTransport
+	telegramEnabled := configuration.Notifications.TelegramBotToken != ""
+	if telegramEnabled {
+		telegram := notificationinfrastructure.TelegramTransport{
+			BaseURL: "https://api.telegram.org", BotToken: configuration.Notifications.TelegramBotToken,
+			Client: &http.Client{Timeout: 10 * time.Second},
+		}
+		notificationTransport = telegram
+		controlTransport = telegram
+	} else {
+		logger.Warn(
+			"Telegram-доставка не настроена; уведомления останутся ожидающими",
+			"event", "notification.telegram.disabled",
+		)
+	}
+	notificationService := notificationapplication.NewService(
+		notificationRepository, notificationRepository, notificationTransport, generator, time.Now,
+	)
+	linker := notificationapplication.NewLinker(notificationRepository, generator, time.Now)
+	callbackExecutor := notificationapplication.NewSafeCallbackExecutor(
+		notificationRepository, riskRadar, generator, time.Now,
+	)
+	controlHandler := notificationinfrastructure.NewTelegramControlHandler(linker, callbackExecutor, controlTransport)
+	normalization := connectorapplication.NewNormalizationService(
+		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
+	).WithControlSink(controlHandler)
 
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, ownerID+":outbox",
@@ -89,6 +124,9 @@ func run(ctx context.Context, configuration config.Config) error {
 			),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, generator),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, generator),
+			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(
+				notificationService, notificationRepository,
+			),
 		},
 		time.Now, eventsapplication.DefaultLease,
 	)
@@ -108,6 +146,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		now := time.Now().UTC()
 		if !now.Before(nextDiagnostics) {
 			logQueueStats(ctx, logger, jobStore, now)
+			logNotificationStats(ctx, logger, notificationRepository, now)
 			nextDiagnostics = now.Add(diagnosticInterval)
 		}
 		dispatched, dispatchErr := dispatcher.RunOne(ctx)
@@ -118,22 +157,56 @@ func run(ctx context.Context, configuration config.Config) error {
 		if processErr != nil && ctx.Err() == nil {
 			logger.Error("Ошибка фонового задания", "event", "job.failed", "error", processErr)
 		}
+		delivered := false
+		var deliveryErr error
+		if telegramEnabled {
+			delivered, deliveryErr = notificationService.DispatchOne(ctx, ownerID+":notifications", notificationapplication.DefaultDeliveryLease)
+			if deliveryErr != nil && ctx.Err() == nil {
+				logger.Error("Ошибка доставки уведомления", "event", "notification.delivery_failed", "error", deliveryErr)
+			}
+		}
 		if ctx.Err() != nil {
 			return nil
 		}
-		if dispatchErr != nil || processErr != nil {
+		if dispatchErr != nil || processErr != nil || deliveryErr != nil {
 			if !wait(ctx, errorInterval) {
 				return nil
 			}
 			continue
 		}
-		if dispatched || processed {
+		if dispatched || processed || delivered {
 			continue
 		}
 		if !wait(ctx, idleInterval) {
 			return nil
 		}
 	}
+}
+
+func logNotificationStats(
+	ctx context.Context,
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+	},
+	store *notificationinfrastructure.PostgresRepository,
+	at time.Time,
+) {
+	stats, err := store.DeliveryStats(ctx, at)
+	if err != nil {
+		logger.Warn("Не удалось прочитать состояние доставок", "event", "notification.queue.diagnostics_failed", "error", err)
+		return
+	}
+	logger.Info(
+		"Состояние очереди уведомлений",
+		"event", "notification.queue.status",
+		"deliveries_pending", stats.Pending,
+		"deliveries_processing", stats.Processing,
+		"deliveries_retry", stats.Retry,
+		"deliveries_dead", stats.Dead,
+		"deliveries_expired_leases", stats.ExpiredLeases,
+		"deliveries_overdue", stats.Overdue,
+	)
 }
 
 func logQueueStats(

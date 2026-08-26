@@ -199,6 +199,9 @@ func (connector TelegramConnectedBusinessConnector) NormalizeEvent(
 	if err != nil {
 		return nil, err
 	}
+	if eventType == "notification.control.v1" {
+		return nil, nil
+	}
 	return normalizeTelegramUpdate(connection, event, updateID, eventType)
 }
 
@@ -270,6 +273,7 @@ func (connector TelegramConnectedBusinessConnector) Provision(
 		"url": webhookURL, "secret_token": webhookSecret,
 		"allowed_updates": []string{
 			"business_connection", "business_message", "edited_business_message", "deleted_business_messages",
+			"message", "callback_query",
 		},
 	}
 	var installed bool
@@ -480,6 +484,8 @@ func decodeTelegramUpdate(payload []byte) (string, string, error) {
 		{"business_message", "message.received.v1"},
 		{"edited_business_message", "message.edited.v1"},
 		{"deleted_business_messages", "message.deleted.v1"},
+		{"message", "notification.control.v1"},
+		{"callback_query", "notification.control.v1"},
 	}
 	eventType := ""
 	for _, candidate := range types {

@@ -509,6 +509,39 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/notifications/telegram-link-token:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    post:
+      summary: Выпустить одноразовую ссылку привязки Telegram
+      description: Открытый код возвращается только внутри startUrl, хранится только его SHA-256 отпечаток; срок действия — 15 минут.
+      operationId: issueTelegramLinkToken
+      responses:
+        '201':
+          description: Одноразовая ссылка создана для текущего участника выбранной организации.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TelegramLinkToken' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/notifications/telegram-link:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Получить состояние личной Telegram-привязки
+      operationId: getTelegramLinkStatus
+      responses:
+        '200':
+          description: Состояние привязки без раскрытия Telegram user ID и chat ID.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TelegramLinkStatus' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      summary: Отключить личную Telegram-привязку
+      operationId: disableTelegramLink
+      responses:
+        '204': { description: Привязка отключена либо уже отсутствовала. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks/{riskId}/recommendation:
     x-lidradar-runtime-status: planned
     parameters: [{ $ref: '#/components/parameters/RiskId' }]
@@ -993,6 +1026,20 @@ components:
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED, FALSE_POSITIVE, IGNORED, EXPIRED] }
     RiskSeverity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
     RiskType: { type: string, enum: [NO_RESPONSE] }
+    TelegramLinkToken:
+      type: object
+      additionalProperties: false
+      required: [startUrl, expiresAt]
+      properties:
+        startUrl: { type: string, format: uri, pattern: '^https://t\.me/[A-Za-z0-9_]{5,32}\?start=' }
+        expiresAt: { type: string, format: date-time }
+    TelegramLinkStatus:
+      type: object
+      additionalProperties: false
+      required: [linked]
+      properties:
+        linked: { type: boolean }
+        linkedAt: { type: string, format: date-time }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }
     Recommendation:

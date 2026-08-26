@@ -364,19 +364,19 @@ PostgreSQL `LISTEN/NOTIFY`, а внутри API раздаётся подклю�
 
 ### Telegram risk notifications
 
-The Notification module owns the logical Notification, transport delivery
-attempts, one-time Telegram link tokens, and installed Telegram user links. A
-risk-opened alert uses the deterministic key `risk:{risk_id}:opened`; replaying
-the event or retrying Telegram cannot create another user-visible notification.
-Notification intent and its initial delivery are persisted atomically before
-the external request. Each retry is retained as a separate delivery attempt,
-using the standard retry schedule, and Telegram failure never changes Risk
-state.
+Модуль Notification владеет логическим уведомлением, попытками доставки,
+одноразовыми кодами Telegram и установленными связями пользователя с Telegram.
+Оповещение об открытии риска использует детерминированный ключ
+`risk:{risk_id}:opened`: повтор события или запроса Telegram не создаёт второе
+видимое пользователю уведомление. Намерение и первая доставка сохраняются
+атомарно до внешнего запроса. Каждый повтор остаётся отдельной попыткой по
+общей временной сетке, а отказ Telegram никогда не меняет состояние Risk.
 
-Link token plaintext is never persisted: only its SHA-256 digest, expiry, and
-single-use timestamp are stored. Telegram callbacks require a tenant-scoped
-user link and idempotency key and are restricted to `OPEN_RISK`, `ACKNOWLEDGE`,
-and `SNOOZE`; financial mutations are not accepted through this boundary.
+Открытый код привязки не сохраняется: в PostgreSQL находятся только SHA-256,
+срок действия и время единственного использования. Команды Telegram требуют
+ограниченной организацией связи пользователя и ключа идемпотентности; разрешены
+только `OPEN_RISK`, `ACKNOWLEDGE` и `SNOOZE`. Денежные изменения через эту
+границу запрещены.
 
 ### Recommendations, actions, and outcomes
 

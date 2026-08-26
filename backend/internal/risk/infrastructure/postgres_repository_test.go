@@ -59,6 +59,15 @@ func TestPostgresRiskDedupResolveAndTenantIsolation(t *testing.T) {
 	if createdCount != 1 {
 		t.Fatalf("создано активных рисков = %d, нужен один", createdCount)
 	}
+	var openedEvents int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM outbox_events
+		WHERE tenant_id = $1 AND event_type = 'risk.opened' AND event_version = 1`, pair.A.TenantID).Scan(&openedEvents); err != nil {
+		t.Fatal(err)
+	}
+	if openedEvents != 1 {
+		t.Fatalf("событий risk.opened.v1 = %d, нужно одно", openedEvents)
+	}
 	if _, found, err := repository.FindActive(ctx, pair.B.TenantID, fixture.opportunityID, domain.TypeNoResponse); err != nil || found {
 		t.Fatalf("чужой tenant: found=%v, err=%v", found, err)
 	}
@@ -82,6 +91,14 @@ func TestPostgresRiskDedupResolveAndTenantIsolation(t *testing.T) {
 	}
 	if total != 2 || active != 1 {
 		t.Fatalf("всего=%d, активных=%d", total, active)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM outbox_events
+		WHERE tenant_id = $1 AND event_type = 'risk.opened' AND event_version = 1`, pair.A.TenantID).Scan(&openedEvents); err != nil {
+		t.Fatal(err)
+	}
+	if openedEvents != 2 {
+		t.Fatalf("событий двух эпизодов риска = %d, нужно два", openedEvents)
 	}
 }
 
