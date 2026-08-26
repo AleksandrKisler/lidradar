@@ -33,6 +33,14 @@ func TestPostgresRadarPriorityCursorSummaryDetailAndIsolation(t *testing.T) {
 	booking := storeRadarRisk(t, pool, bookingFixture, domain.SeverityHigh, base.Add(-2*time.Hour), base.Add(time.Minute))
 	revenue := storeRadarRisk(t, pool, revenueFixture, domain.SeverityHigh, base.Add(-3*time.Hour), base.Add(2*time.Minute))
 	foreign := storeRadarRisk(t, pool, foreignFixture, domain.SeverityCritical, base.Add(-4*time.Hour), base.Add(3*time.Minute))
+	insertRadarCorrectiveFacts(
+		t, pool, tenants.A.TenantID, tenants.A.UserID, critical.ID,
+		critical.OpportunityID, base.Add(4*time.Minute),
+	)
+	insertRadarCorrectiveFacts(
+		t, pool, tenants.B.TenantID, tenants.B.UserID, foreign.ID,
+		foreign.OpportunityID, base.Add(4*time.Minute),
+	)
 
 	store := NewPostgresRadarStore(pool)
 	first, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{Limit: 1})
@@ -41,6 +49,10 @@ func TestPostgresRadarPriorityCursorSummaryDetailAndIsolation(t *testing.T) {
 	}
 	if len(first.Items) != 1 || first.Items[0].Risk.ID != critical.ID || first.NextCursor == "" {
 		t.Fatalf("первая страница = %#v", first)
+	}
+	if first.Items[0].Recommendation == nil || len(first.Items[0].Actions) != 2 ||
+		first.Items[0].Outcome == nil || first.Items[0].Outcome.Type != "THINKING" {
+		t.Fatalf("корректирующие факты первой страницы = %#v", first.Items[0])
 	}
 	second, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{Limit: 1, After: first.NextCursor})
 	if err != nil {
@@ -81,11 +93,55 @@ func TestPostgresRadarPriorityCursorSummaryDetailAndIsolation(t *testing.T) {
 	detail, found, err := store.Get(ctx, tenants.A.TenantID, critical.ID)
 	if err != nil || !found || detail.Opportunity == nil || detail.Conversation == nil ||
 		detail.Opportunity.PotentialRevenue == nil || *detail.Opportunity.PotentialRevenue != "1000.00" ||
-		detail.Opportunity.LocationID != tenants.A.LocationID || detail.Actions == nil {
+		detail.Opportunity.LocationID != tenants.A.LocationID || detail.Recommendation == nil ||
+		detail.Recommendation.Text != "Ответить клиенту сейчас." || len(detail.Actions) != 2 ||
+		detail.Actions[0].Type != "OPEN_CONVERSATION" || detail.Actions[1].Type != "MARK_CONTACTED" ||
+		detail.Outcome == nil || detail.Outcome.Type != "THINKING" {
 		t.Fatalf("детали = %#v, found = %v, ошибка = %v", detail, found, err)
 	}
 	if _, found, err := store.Get(ctx, tenants.A.TenantID, foreign.ID); err != nil || found {
 		t.Fatalf("чужой риск раскрыт: found=%v, err=%v", found, err)
+	}
+}
+
+func insertRadarCorrectiveFacts(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	tenantID, userID, riskID, opportunityID string,
+	at time.Time,
+) {
+	t.Helper()
+	newID := func() string {
+		id, err := (ids.Generator{}).NewID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO recommendations(id, tenant_id, risk_id, text, source, created_at)
+		VALUES ($1,$2,$3,'Ответить клиенту сейчас.','TEMPLATE',$4)`,
+		newID(), tenantID, riskID, at,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO actions(id, tenant_id, risk_id, actor_user_id, type, note, created_at)
+		VALUES
+			($1,$2,$3,$4,'OPEN_CONVERSATION','',$5),
+			($6,$2,$3,$4,'MARK_CONTACTED','Готово',$7)`,
+		newID(), tenantID, riskID, userID, at, newID(), at.Add(time.Minute),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO outcomes(id, tenant_id, opportunity_id, actor_user_id, status, note, created_at)
+		VALUES
+			($1,$2,$3,$4,'BOOKED','',$5),
+			($6,$2,$3,$4,'THINKING','Исправление',$7)`,
+		newID(), tenantID, opportunityID, userID, at, newID(), at.Add(time.Minute),
+	); err != nil {
+		t.Fatal(err)
 	}
 }
 

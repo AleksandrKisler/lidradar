@@ -1,5 +1,5 @@
-// Package domain owns corrective recommendations and the append-only facts
-// recorded after a Risk is detected.
+// Package domain содержит рекомендации и неизменяемые факты, записанные после
+// обнаружения риска.
 package domain
 
 import (
@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
-var ErrInvalid = errors.New("invalid corrective record")
+var ErrInvalid = errors.New("некорректный корректирующий факт")
+
+const maximumTextLength = 2000
 
 type ActionType string
 
@@ -62,24 +64,29 @@ type Outcome struct {
 }
 
 func NewRecommendation(id, tenantID, riskID, text string, at time.Time) (Recommendation, error) {
-	if id == "" || tenantID == "" || riskID == "" || strings.TrimSpace(text) == "" || at.IsZero() {
+	text = strings.TrimSpace(text)
+	if id == "" || tenantID == "" || riskID == "" || text == "" || len([]rune(text)) > maximumTextLength || at.IsZero() {
 		return Recommendation{}, ErrInvalid
 	}
 	return Recommendation{ID: id, TenantID: tenantID, RiskID: riskID, Text: text, Source: "TEMPLATE", CreatedAt: at.UTC()}, nil
 }
 
 func NewAction(id, tenantID, riskID, actorID string, kind ActionType, note string, at time.Time) (Action, error) {
-	if id == "" || tenantID == "" || riskID == "" || actorID == "" || !validAction(kind) || at.IsZero() {
+	note = strings.TrimSpace(note)
+	if id == "" || tenantID == "" || riskID == "" || actorID == "" || !validAction(kind) ||
+		len([]rune(note)) > maximumTextLength || at.IsZero() {
 		return Action{}, ErrInvalid
 	}
-	return Action{ID: id, TenantID: tenantID, RiskID: riskID, ActorID: actorID, Type: kind, Note: strings.TrimSpace(note), CreatedAt: at.UTC()}, nil
+	return Action{ID: id, TenantID: tenantID, RiskID: riskID, ActorID: actorID, Type: kind, Note: note, CreatedAt: at.UTC()}, nil
 }
 
 func NewOutcome(id, tenantID, opportunityID, actorID string, status OutcomeStatus, note string, at time.Time) (Outcome, error) {
-	if id == "" || tenantID == "" || opportunityID == "" || actorID == "" || !validOutcome(status) || at.IsZero() {
+	note = strings.TrimSpace(note)
+	if id == "" || tenantID == "" || opportunityID == "" || actorID == "" || !validOutcome(status) ||
+		len([]rune(note)) > maximumTextLength || at.IsZero() {
 		return Outcome{}, ErrInvalid
 	}
-	return Outcome{ID: id, TenantID: tenantID, OpportunityID: opportunityID, ActorID: actorID, Status: status, Note: strings.TrimSpace(note), CreatedAt: at.UTC()}, nil
+	return Outcome{ID: id, TenantID: tenantID, OpportunityID: opportunityID, ActorID: actorID, Status: status, Note: note, CreatedAt: at.UTC()}, nil
 }
 
 func validAction(value ActionType) bool {

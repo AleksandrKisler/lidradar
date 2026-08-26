@@ -12,9 +12,10 @@ import (
 	"lidradar/backend/platform/ids"
 )
 
-// TestNoResponseRiskRealMessageFlow доказывает выходной критерий этапа 8:
+// TestNoResponseRiskRealMessageFlow доказывает выходные критерии этапов 8–11:
 // внешний webhook проходит канонизацию, создаёт Opportunity, долговечную
-// проверку и Risk без AI; ответ бизнеса закрывает тот же Risk автоматически.
+// проверку и Risk без AI; затем API создаёт рекомендацию, действие и исход, а
+// ответ бизнеса закрывает тот же Risk автоматически.
 func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	fixture := newAPIFixture(t)
 	owner := register(t, fixture.handler, "risk-flow@example.com", "Владелец риска")
@@ -110,13 +111,13 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	}
 	processExactly(t, fixture, 1)
 
-	var riskID, severity, status, source, policyVersion string
+	var riskID, opportunityID, severity, status, source, policyVersion string
 	var riskCount int
 	if err := fixture.pool.QueryRow(context.Background(), `
-		SELECT min(id::text), min(severity), min(status), min(source), min(risk_engine_version), count(*)
+		SELECT min(id::text), min(opportunity_id::text), min(severity), min(status), min(source), min(risk_engine_version), count(*)
 		FROM risk_signals
 		WHERE tenant_id = $1 AND type = 'NO_RESPONSE'`, tenantID).Scan(
-		&riskID, &severity, &status, &source, &policyVersion, &riskCount,
+		&riskID, &opportunityID, &severity, &status, &source, &policyVersion, &riskCount,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +171,64 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 		t.Fatalf("детали Radar = %s", body)
 	}
 
+	recommendation := request(
+		t, fixture.handler, http.MethodPost, "/api/v1/risks/"+riskID+"/recommendation", "", owner.Cookie, tenantID,
+	)
+	requireStatus(t, recommendation, http.StatusOK)
+	if body := recommendation.Body.String(); !strings.Contains(body, `"source":"TEMPLATE"`) ||
+		!strings.Contains(body, "Ответить клиенту сейчас.") {
+		t.Fatalf("рекомендация = %s", body)
+	}
+	action := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/risks/"+riskID+"/actions",
+		`{"type":"MARK_CONTACTED","note":"Связались с клиентом"}`,
+		owner.Cookie, tenantID, "e2e-action",
+	)
+	requireStatus(t, action, http.StatusCreated)
+	actionID := jsonID(t, action)
+	replayedAction := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/risks/"+riskID+"/actions",
+		`{"type":"MARK_CONTACTED","note":"Связались с клиентом"}`,
+		owner.Cookie, tenantID, "e2e-action",
+	)
+	requireStatus(t, replayedAction, http.StatusOK)
+	if replayedID := jsonID(t, replayedAction); replayedID != actionID {
+		t.Fatalf("повтор действия вернул %s вместо %s", replayedID, actionID)
+	}
+	conflictingAction := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/risks/"+riskID+"/actions",
+		`{"type":"CALL"}`, owner.Cookie, tenantID, "e2e-action",
+	)
+	requireStatus(t, conflictingAction, http.StatusConflict)
+	outcome := idempotentRequest(
+		t, fixture.handler, http.MethodPost, "/api/v1/opportunities/"+opportunityID+"/outcomes",
+		`{"status":"BOOKED","note":"Запись подтверждена"}`,
+		owner.Cookie, tenantID, "e2e-outcome",
+	)
+	requireStatus(t, outcome, http.StatusCreated)
+
+	correctiveDetail := request(t, fixture.handler, http.MethodGet, "/api/v1/risks/"+riskID, "", owner.Cookie, tenantID)
+	requireStatus(t, correctiveDetail, http.StatusOK)
+	if body := correctiveDetail.Body.String(); !strings.Contains(body, `"status":"ACTED"`) ||
+		!strings.Contains(body, `"recommendation"`) || !strings.Contains(body, `"type":"MARK_CONTACTED"`) ||
+		!strings.Contains(body, `"outcome":{"id"`) || !strings.Contains(body, `"type":"BOOKED"`) {
+		t.Fatalf("полная корректирующая карточка = %s", body)
+	}
+	var actionCount, outcomeCount, auditCount, keyCount int
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT
+			(SELECT count(*) FROM actions WHERE tenant_id = $1 AND risk_id = $2),
+			(SELECT count(*) FROM outcomes WHERE tenant_id = $1 AND opportunity_id = $3),
+			(SELECT count(*) FROM audit_log WHERE tenant_id = $1),
+			(SELECT count(*) FROM idempotency_keys WHERE tenant_id = $1)`,
+		tenantID, riskID, opportunityID,
+	).Scan(&actionCount, &outcomeCount, &auditCount, &keyCount); err != nil {
+		t.Fatal(err)
+	}
+	if actionCount != 1 || outcomeCount != 1 || auditCount != 2 || keyCount != 2 {
+		t.Fatalf("корректирующие записи: actions=%d outcomes=%d audits=%d keys=%d", actionCount, outcomeCount, auditCount, keyCount)
+	}
+
 	outsider := register(t, fixture.handler, "risk-outsider@example.com", "Посторонний")
 	forbidden := request(t, fixture.handler, http.MethodGet, "/api/v1/risks/"+riskID, "", outsider.Cookie, tenantID)
 	requireStatus(t, forbidden, http.StatusForbidden)
@@ -177,7 +236,7 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 		t, fixture.handler, http.MethodPost, "/api/v1/risks/"+riskID+"/acknowledge", "", owner.Cookie, tenantID,
 	)
 	requireStatus(t, acknowledged, http.StatusOK)
-	if !strings.Contains(acknowledged.Body.String(), `"status":"ACKNOWLEDGED"`) {
+	if !strings.Contains(acknowledged.Body.String(), `"status":"ACTED"`) {
 		t.Fatalf("подтверждение риска = %s", acknowledged.Body.String())
 	}
 	replayed := request(

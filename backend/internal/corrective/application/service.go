@@ -1,5 +1,5 @@
-// Package application coordinates corrective records without coupling their
-// domain to HTTP or PostgreSQL.
+// Package application согласует корректирующие факты, не связывая предметную
+// область с HTTP или PostgreSQL.
 package application
 
 import (
@@ -7,16 +7,17 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"lidradar/backend/internal/corrective/domain"
 )
 
 var (
-	ErrForbidden = errors.New("forbidden")
-	ErrNotFound  = errors.New("resource not found")
-	ErrInvalid   = errors.New("invalid request")
-	ErrConflict  = errors.New("idempotency conflict")
+	ErrForbidden = errors.New("нет разрешения на корректирующую операцию")
+	ErrNotFound  = errors.New("связанный объект не найден")
+	ErrInvalid   = errors.New("некорректная корректирующая команда")
+	ErrConflict  = errors.New("конфликт ключа идемпотентности")
 )
 
 const PermissionManage = "risks.manage"
@@ -24,14 +25,24 @@ const PermissionManage = "risks.manage"
 type Authorizer interface {
 	Allowed(context.Context, string, string, string) (bool, error)
 }
-type IDs interface{ NewID() string }
+type IDs interface{ NewID() (string, error) }
+
+type Invalidator interface {
+	Publish(tenantID, eventType, resourceID string)
+}
+
+type RiskReference struct {
+	OpportunityID string
+	Type          string
+}
+
 type AuditRecord struct {
-	TenantID, ActorID, Operation, ResourceID string
-	At                                       time.Time
+	ID, TenantID, ActorID, Operation, ResourceType, ResourceID string
+	At                                                         time.Time
 }
 
 type Store interface {
-	RiskOpportunity(ctx context.Context, tenantID, riskID string) (string, bool, error)
+	Risk(ctx context.Context, tenantID, riskID string) (RiskReference, bool, error)
 	OpportunityExists(ctx context.Context, tenantID, opportunityID string) (bool, error)
 	EnsureRecommendation(ctx context.Context, recommendation domain.Recommendation) (domain.Recommendation, bool, error)
 	AppendAction(ctx context.Context, action domain.Action, key string, requestHash [32]byte, audit AuditRecord) (domain.Action, bool, error)
@@ -39,14 +50,22 @@ type Store interface {
 }
 
 type Service struct {
-	store Store
-	auth  Authorizer
-	ids   IDs
-	now   func() time.Time
+	store  Store
+	auth   Authorizer
+	ids    IDs
+	now    func() time.Time
+	events Invalidator
 }
 
 func NewService(store Store, auth Authorizer, ids IDs, now func() time.Time) Service {
-	return Service{store, auth, ids, now}
+	return Service{store: store, auth: auth, ids: ids, now: now}
+}
+
+// WithInvalidator включает краткий сигнал после долговечной записи. Сигнал не
+// является источником истины: клиент после него перечитывает REST-модель.
+func (s Service) WithInvalidator(events Invalidator) Service {
+	s.events = events
+	return s
 }
 
 func (s Service) permit(ctx context.Context, actor, tenant string) error {
@@ -64,27 +83,38 @@ func (s Service) permit(ctx context.Context, actor, tenant string) error {
 }
 
 var templates = map[string]string{
-	"NO_RESPONSE":           "Ответить клиенту сейчас.",
-	"BOOKING_NOT_CONFIRMED": "Предложить клиенту конкретный свободный слот.",
-	"FOLLOW_UP_CANDIDATE":   "Уточнить, остаётся ли услуга актуальной.",
+	"NO_RESPONSE":                 "Ответить клиенту сейчас.",
+	"BOOKING_NOT_CONFIRMED":       "Предложить клиенту конкретный свободный слот.",
+	"PROMISE_NOT_FULFILLED":       "Выполнить обещанное клиенту или сообщить новый точный срок.",
+	"CUSTOMER_SILENT_AFTER_PRICE": "Напомнить клиенту о предложении и уточнить, остались ли вопросы.",
+	"FOLLOW_UP_CANDIDATE":         "Уточнить, остаётся ли услуга актуальной.",
 }
 
-// EnsureRecommendation supplies a deterministic useful fallback and never
-// invokes AI. The store enforces one template recommendation per tenant/risk.
-func (s Service) EnsureRecommendation(ctx context.Context, actor, tenant, riskID, riskType string) (domain.Recommendation, error) {
+// EnsureRecommendation создаёт полезную шаблонную рекомендацию и никогда не
+// обращается к AI. Тип риска читается из авторитетной записи, а не от клиента.
+func (s Service) EnsureRecommendation(ctx context.Context, actor, tenant, riskID string) (domain.Recommendation, error) {
 	if err := s.permit(ctx, actor, tenant); err != nil {
 		return domain.Recommendation{}, err
 	}
-	text, ok := templates[riskType]
-	if !ok || riskID == "" || s.store == nil || s.ids == nil || s.now == nil {
+	if riskID == "" || s.store == nil || s.ids == nil || s.now == nil {
 		return domain.Recommendation{}, ErrInvalid
 	}
-	if _, found, err := s.store.RiskOpportunity(ctx, tenant, riskID); err != nil {
+	risk, found, err := s.store.Risk(ctx, tenant, riskID)
+	if err != nil {
 		return domain.Recommendation{}, err
-	} else if !found {
+	}
+	if !found {
 		return domain.Recommendation{}, ErrNotFound
 	}
-	recommendation, err := domain.NewRecommendation(s.ids.NewID(), tenant, riskID, text, s.now())
+	text, ok := templates[risk.Type]
+	if !ok {
+		return domain.Recommendation{}, ErrInvalid
+	}
+	recommendationID, err := s.ids.NewID()
+	if err != nil {
+		return domain.Recommendation{}, fmt.Errorf("создание идентификатора рекомендации: %w", err)
+	}
+	recommendation, err := domain.NewRecommendation(recommendationID, tenant, riskID, text, s.now())
 	if err != nil {
 		return domain.Recommendation{}, ErrInvalid
 	}
@@ -96,27 +126,42 @@ func (s Service) AddAction(ctx context.Context, actor, tenant, riskID, key strin
 	if err := s.permit(ctx, actor, tenant); err != nil {
 		return domain.Action{}, false, err
 	}
-	if key == "" || s.store == nil || s.ids == nil || s.now == nil {
+	if !validIdempotencyKey(key) || s.store == nil || s.ids == nil || s.now == nil {
 		return domain.Action{}, false, ErrInvalid
 	}
-	if _, found, err := s.store.RiskOpportunity(ctx, tenant, riskID); err != nil {
+	if _, found, err := s.store.Risk(ctx, tenant, riskID); err != nil {
 		return domain.Action{}, false, err
 	} else if !found {
 		return domain.Action{}, false, ErrNotFound
 	}
-	action, err := domain.NewAction(s.ids.NewID(), tenant, riskID, actor, kind, note, s.now())
+	actionID, err := s.ids.NewID()
+	if err != nil {
+		return domain.Action{}, false, fmt.Errorf("создание идентификатора действия: %w", err)
+	}
+	auditID, err := s.ids.NewID()
+	if err != nil {
+		return domain.Action{}, false, fmt.Errorf("создание идентификатора аудита: %w", err)
+	}
+	action, err := domain.NewAction(actionID, tenant, riskID, actor, kind, note, s.now())
 	if err != nil {
 		return domain.Action{}, false, ErrInvalid
 	}
-	hash := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s", riskID, kind, note)))
-	return s.store.AppendAction(ctx, action, key, hash, AuditRecord{tenant, actor, "ACTION_CREATED", action.ID, action.CreatedAt})
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s", actor, riskID, kind, action.Note)))
+	stored, created, err := s.store.AppendAction(ctx, action, key, hash, AuditRecord{
+		ID: auditID, TenantID: tenant, ActorID: actor, Operation: "ACTION_RECORDED",
+		ResourceType: "ACTION", ResourceID: action.ID, At: action.CreatedAt,
+	})
+	if err == nil && created && s.events != nil {
+		s.events.Publish(tenant, "risk.changed", riskID)
+	}
+	return stored, created, err
 }
 
 func (s Service) AddOutcome(ctx context.Context, actor, tenant, opportunityID, key string, status domain.OutcomeStatus, note string) (domain.Outcome, bool, error) {
 	if err := s.permit(ctx, actor, tenant); err != nil {
 		return domain.Outcome{}, false, err
 	}
-	if key == "" || s.store == nil || s.ids == nil || s.now == nil {
+	if !validIdempotencyKey(key) || s.store == nil || s.ids == nil || s.now == nil {
 		return domain.Outcome{}, false, ErrInvalid
 	}
 	if found, err := s.store.OpportunityExists(ctx, tenant, opportunityID); err != nil {
@@ -124,10 +169,26 @@ func (s Service) AddOutcome(ctx context.Context, actor, tenant, opportunityID, k
 	} else if !found {
 		return domain.Outcome{}, false, ErrNotFound
 	}
-	outcome, err := domain.NewOutcome(s.ids.NewID(), tenant, opportunityID, actor, status, note, s.now())
+	outcomeID, err := s.ids.NewID()
+	if err != nil {
+		return domain.Outcome{}, false, fmt.Errorf("создание идентификатора исхода: %w", err)
+	}
+	auditID, err := s.ids.NewID()
+	if err != nil {
+		return domain.Outcome{}, false, fmt.Errorf("создание идентификатора аудита: %w", err)
+	}
+	outcome, err := domain.NewOutcome(outcomeID, tenant, opportunityID, actor, status, note, s.now())
 	if err != nil {
 		return domain.Outcome{}, false, ErrInvalid
 	}
-	hash := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s", opportunityID, status, note)))
-	return s.store.AppendOutcome(ctx, outcome, key, hash, AuditRecord{tenant, actor, "OUTCOME_CREATED", outcome.ID, outcome.CreatedAt})
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s", actor, opportunityID, status, outcome.Note)))
+	stored, created, err := s.store.AppendOutcome(ctx, outcome, key, hash, AuditRecord{
+		ID: auditID, TenantID: tenant, ActorID: actor, Operation: "OUTCOME_RECORDED",
+		ResourceType: "OUTCOME", ResourceID: outcome.ID, At: outcome.CreatedAt,
+	})
+	return stored, created, err
+}
+
+func validIdempotencyKey(key string) bool {
+	return key != "" && key == strings.TrimSpace(key) && len([]rune(key)) <= 255
 }

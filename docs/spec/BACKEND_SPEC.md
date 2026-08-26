@@ -378,20 +378,31 @@ PostgreSQL `LISTEN/NOTIFY`, а внутри API раздаётся подклю�
 только `OPEN_RISK`, `ACKNOWLEDGE` и `SNOOZE`. Денежные изменения через эту
 границу запрещены.
 
-### Recommendations, actions, and outcomes
+### Рекомендации, действия и исходы
 
-Every supported Risk type has a deterministic template recommendation, so a
-useful corrective instruction does not depend on AI availability. Actions are
-tenant-scoped append-only facts attached to a Risk. Outcomes are tenant-scoped
-append-only facts attached to an Opportunity; a correction creates another
-Outcome rather than rewriting history.
+Каждый поддерживаемый тип Risk имеет детерминированную шаблонную рекомендацию,
+поэтому полезная инструкция не зависит от доступности AI. Тип сервер читает из
+авторитетной записи Risk и не принимает от клиента. Одна шаблонная рекомендация
+на Risk создаётся или возвращается повторно без дублирования.
 
-Action and Outcome commands require the `risks.manage` permission and an
-`Idempotency-Key`. The key is scoped by tenant and operation: replaying the
-same request returns the stored response, while reusing it for different
-content returns a conflict. Each successful new Action or Outcome is recorded
-in the audit trail atomically with the fact. Cross-tenant identifiers are
-indistinguishable from missing resources and cannot produce records.
+Action — ограниченный организацией неизменяемый факт, связанный с Risk. Первая
+запись Action атомарно переводит активный Risk из `OPEN` или `ACKNOWLEDGED` в
+`ACTED`, заполняя недостающие отметки ознакомления и действия. Повторный Action
+остаётся отдельным фактом; для уже закрытого Risk история дополняется без
+повторного открытия.
+
+Outcome — ограниченный организацией неизменяемый факт, связанный с Opportunity.
+Исправление создаёт новый Outcome вместо переписывания истории. В карточке Risk
+показывается последний Outcome этой Opportunity, а полный журнал остаётся в
+PostgreSQL.
+
+Команды Action и Outcome требуют разрешение `risks.manage` и заголовок
+`Idempotency-Key` длиной до 255 знаков. Ключ ограничен организацией и операцией:
+точный повтор возвращает сохранённый ответ, а повторное использование с другим
+содержимым даёт конфликт. Action либо Outcome, запись `idempotency_keys` и
+`audit_log` фиксируются одной транзакцией. Эти таблицы, как и сами факты,
+защищены от `UPDATE` и `DELETE` триггером PostgreSQL. Чужие идентификаторы
+неотличимы от отсутствующих и не позволяют создать запись.
 
 Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
 

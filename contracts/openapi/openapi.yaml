@@ -543,37 +543,48 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks/{riskId}/recommendation:
-    x-lidradar-runtime-status: planned
-    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }]
     post:
-      summary: Ensure a deterministic Risk recommendation
+      summary: Создать или получить детерминированную рекомендацию по риску
+      description: Тип риска читается сервером из PostgreSQL; команда не обращается к AI.
       operationId: ensureRiskRecommendation
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [riskType], properties: { riskType: { type: string } } } } } }
       responses:
-        '200': { description: Deterministic template recommendation, content: { application/json: { schema: { $ref: '#/components/schemas/Recommendation' } } } }
+        '200': { description: Созданная ранее либо новая шаблонная рекомендация., content: { application/json: { schema: { $ref: '#/components/schemas/Recommendation' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/actions:
-    x-lidradar-runtime-status: planned
-    parameters: [{ $ref: '#/components/parameters/RiskId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+    parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
     post:
-      summary: Record a corrective Action
+      summary: Записать неизменяемое корректирующее действие
       operationId: createRiskAction
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [type], properties: { type: { $ref: '#/components/schemas/ActionType' }, note: { type: string } } } } } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [type], properties: { type: { $ref: '#/components/schemas/ActionType' }, note: { type: string, maxLength: 2000 } } } } } }
       responses:
-        '201': { description: Append-only Action created, content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } } }
-        '409': { description: Idempotency key conflict }
+        '200': { description: Ранее сохранённый ответ при точном повторе., content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } } }
+        '201': { description: Неизменяемое действие создано вместе с аудитом., content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Ключ идемпотентности использован с другим содержимым., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/opportunities/{opportunityId}/outcomes:
-    x-lidradar-runtime-status: planned
     parameters:
-      - { name: opportunityId, in: path, required: true, schema: { type: string } }
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/OpportunityId' }
       - { $ref: '#/components/parameters/IdempotencyKey' }
     post:
-      summary: Record an Opportunity Outcome
+      summary: Записать неизменяемый исход коммерческой возможности
       operationId: createOpportunityOutcome
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string } } } } } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [status], properties: { status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string, maxLength: 2000 } } } } } }
       responses:
-        '201': { description: Append-only Outcome created, content: { application/json: { schema: { $ref: '#/components/schemas/Outcome' } } } }
-        '409': { description: Idempotency key conflict }
+        '200': { description: Ранее сохранённый ответ при точном повторе., content: { application/json: { schema: { $ref: '#/components/schemas/Outcome' } } } }
+        '201': { description: Неизменяемый исход создан вместе с аудитом., content: { application/json: { schema: { $ref: '#/components/schemas/Outcome' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Ключ идемпотентности использован с другим содержимым., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/events:
     get:
       summary: Получать сигналы об изменениях организации
@@ -621,7 +632,7 @@ components:
     OpportunityId: { name: opportunityId, in: path, required: true, schema: { type: string, format: uuid } }
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string, format: uuid } }
-    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1 } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
   responses:
     BadRequest: { description: 'Request body, tenant selector, or domain value is invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Unauthorized: { description: 'Opaque session cookie is missing, expired, revoked, or invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -1044,16 +1055,19 @@ components:
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }
     Recommendation:
       type: object
+      additionalProperties: false
       required: [id, riskId, text, source, createdAt]
-      properties: { id: { type: string }, riskId: { type: string }, text: { type: string }, source: { type: string, enum: [TEMPLATE] }, createdAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, riskId: { type: string, format: uuid }, text: { type: string, minLength: 1, maxLength: 2000 }, source: { type: string, enum: [TEMPLATE] }, createdAt: { type: string, format: date-time } }
     Action:
       type: object
+      additionalProperties: false
       required: [id, riskId, actorId, type, createdAt]
-      properties: { id: { type: string }, riskId: { type: string }, actorId: { type: string }, type: { $ref: '#/components/schemas/ActionType' }, note: { type: string }, createdAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, riskId: { type: string, format: uuid }, actorId: { type: string, format: uuid }, type: { $ref: '#/components/schemas/ActionType' }, note: { type: string, maxLength: 2000 }, createdAt: { type: string, format: date-time } }
     Outcome:
       type: object
+      additionalProperties: false
       required: [id, opportunityId, actorId, status, createdAt]
-      properties: { id: { type: string }, opportunityId: { type: string }, actorId: { type: string }, status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string }, createdAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, opportunityId: { type: string, format: uuid }, actorId: { type: string, format: uuid }, status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string, maxLength: 2000 }, createdAt: { type: string, format: date-time } }
     Money:
       type: object
       required: [amount, currency]

@@ -20,9 +20,8 @@ import (
 	"lidradar/backend/platform/ids"
 )
 
-// PostgresRadarStore собирает принадлежащую Radar проекцию чтения из
-// авторитетных таблиц Risk, Opportunity и Conversation. Записи будущих этапов
-// не имитируются: необязательные поля отсутствуют, actions остаётся пустым.
+// PostgresRadarStore собирает проекцию Radar из авторитетных таблиц Risk,
+// Opportunity, Conversation и уже созданных корректирующих фактов.
 type PostgresRadarStore struct{ pool *pgxpool.Pool }
 
 func NewPostgresRadarStore(pool *pgxpool.Pool) *PostgresRadarStore {
@@ -123,6 +122,9 @@ func (store *PostgresRadarStore) List(
 	if err := rows.Err(); err != nil {
 		return application.Page{}, fmt.Errorf("обход Radar: %w", err)
 	}
+	if err := store.loadCorrective(ctx, tenantID, items); err != nil {
+		return application.Page{}, err
+	}
 	page := application.Page{Items: make([]application.Detail, 0, min(query.Limit, len(items)))}
 	for index := 0; index < len(items) && index < query.Limit; index++ {
 		page.Items = append(page.Items, items[index].Detail)
@@ -156,7 +158,128 @@ func (store *PostgresRadarStore) Get(
 	if err != nil {
 		return application.Detail{}, false, mapRadarError("чтение деталей риска", err)
 	}
-	return item.Detail, true, nil
+	items := []rankedDetail{item}
+	if err := store.loadCorrective(ctx, tenantID, items); err != nil {
+		return application.Detail{}, false, err
+	}
+	return items[0].Detail, true, nil
+}
+
+func (store *PostgresRadarStore) loadCorrective(
+	ctx context.Context,
+	tenantID string,
+	items []rankedDetail,
+) error {
+	if len(items) == 0 {
+		return nil
+	}
+	riskIndices := make(map[string][]int, len(items))
+	opportunityIndices := make(map[string][]int, len(items))
+	riskIDs := make([]string, 0, len(items))
+	opportunityIDs := make([]string, 0, len(items))
+	for index := range items {
+		riskID := items[index].Detail.Risk.ID
+		opportunityID := items[index].Detail.Risk.OpportunityID
+		if _, exists := riskIndices[riskID]; !exists {
+			riskIDs = append(riskIDs, riskID)
+		}
+		if _, exists := opportunityIndices[opportunityID]; !exists {
+			opportunityIDs = append(opportunityIDs, opportunityID)
+		}
+		riskIndices[riskID] = append(riskIndices[riskID], index)
+		opportunityIndices[opportunityID] = append(opportunityIndices[opportunityID], index)
+	}
+
+	riskArguments, riskPlaceholders := identifierArguments(tenantID, riskIDs)
+	recommendations, err := store.pool.Query(ctx, `
+		SELECT risk_id, id, text
+		FROM recommendations
+		WHERE tenant_id = $1 AND risk_id IN (`+riskPlaceholders+`)
+		ORDER BY risk_id, created_at, id`, riskArguments...)
+	if err != nil {
+		return mapRadarError("чтение рекомендаций Radar", err)
+	}
+	for recommendations.Next() {
+		var riskID string
+		var recommendation application.Recommendation
+		if err := recommendations.Scan(&riskID, &recommendation.ID, &recommendation.Text); err != nil {
+			recommendations.Close()
+			return fmt.Errorf("чтение строки рекомендации Radar: %w", err)
+		}
+		for _, index := range riskIndices[riskID] {
+			copy := recommendation
+			items[index].Detail.Recommendation = &copy
+		}
+	}
+	if err := recommendations.Err(); err != nil {
+		recommendations.Close()
+		return fmt.Errorf("обход рекомендаций Radar: %w", err)
+	}
+	recommendations.Close()
+
+	actions, err := store.pool.Query(ctx, `
+		SELECT risk_id, id, type, created_at
+		FROM actions
+		WHERE tenant_id = $1 AND risk_id IN (`+riskPlaceholders+`)
+		ORDER BY risk_id, created_at, id`, riskArguments...)
+	if err != nil {
+		return mapRadarError("чтение действий Radar", err)
+	}
+	for actions.Next() {
+		var riskID string
+		var action application.Action
+		if err := actions.Scan(&riskID, &action.ID, &action.Type, &action.CreatedAt); err != nil {
+			actions.Close()
+			return fmt.Errorf("чтение строки действия Radar: %w", err)
+		}
+		for _, index := range riskIndices[riskID] {
+			items[index].Detail.Actions = append(items[index].Detail.Actions, action)
+		}
+	}
+	if err := actions.Err(); err != nil {
+		actions.Close()
+		return fmt.Errorf("обход действий Radar: %w", err)
+	}
+	actions.Close()
+
+	opportunityArguments, opportunityPlaceholders := identifierArguments(tenantID, opportunityIDs)
+	outcomes, err := store.pool.Query(ctx, `
+		SELECT DISTINCT ON (opportunity_id) opportunity_id, id, status, created_at
+		FROM outcomes
+		WHERE tenant_id = $1 AND opportunity_id IN (`+opportunityPlaceholders+`)
+		ORDER BY opportunity_id, created_at DESC, id DESC`, opportunityArguments...)
+	if err != nil {
+		return mapRadarError("чтение исходов Radar", err)
+	}
+	for outcomes.Next() {
+		var opportunityID string
+		var outcome application.Outcome
+		if err := outcomes.Scan(&opportunityID, &outcome.ID, &outcome.Type, &outcome.CreatedAt); err != nil {
+			outcomes.Close()
+			return fmt.Errorf("чтение строки исхода Radar: %w", err)
+		}
+		for _, index := range opportunityIndices[opportunityID] {
+			copy := outcome
+			items[index].Detail.Outcome = &copy
+		}
+	}
+	if err := outcomes.Err(); err != nil {
+		outcomes.Close()
+		return fmt.Errorf("обход исходов Radar: %w", err)
+	}
+	outcomes.Close()
+	return nil
+}
+
+func identifierArguments(tenantID string, identifiers []string) ([]any, string) {
+	arguments := make([]any, 1, len(identifiers)+1)
+	arguments[0] = tenantID
+	placeholders := make([]string, len(identifiers))
+	for index, identifier := range identifiers {
+		arguments = append(arguments, identifier)
+		placeholders[index] = fmt.Sprintf("$%d", index+2)
+	}
+	return arguments, strings.Join(placeholders, ",")
 }
 
 func (store *PostgresRadarStore) Summary(

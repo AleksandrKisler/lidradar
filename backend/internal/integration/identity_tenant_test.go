@@ -23,6 +23,9 @@ import (
 	conversationapplication "lidradar/backend/internal/conversation/application"
 	conversationinfrastructure "lidradar/backend/internal/conversation/infrastructure"
 	conversationtransport "lidradar/backend/internal/conversation/transport"
+	correctiveapplication "lidradar/backend/internal/corrective/application"
+	correctiveinfrastructure "lidradar/backend/internal/corrective/infrastructure"
+	correctivetransport "lidradar/backend/internal/corrective/transport"
 	eventsapplication "lidradar/backend/internal/events/application"
 	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	identityapplication "lidradar/backend/internal/identity/application"
@@ -94,6 +97,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 	riskRadar := riskapplication.NewRadar(
 		riskinfrastructure.NewPostgresRadarStore(pool), permissions, riskEvents, time.Now,
 	)
+	correctiveService := correctiveapplication.NewService(
+		correctiveinfrastructure.NewPostgresStore(pool), permissions, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents)
 	riskEvaluator := riskapplication.NewEvaluator(
 		riskRepository, riskStates, riskPolicy, ids.Generator{}, time.Now,
 	).WithInvalidator(riskEvents)
@@ -152,6 +158,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
 	risktransport.NewHandler(riskRadar, resolver, riskEvents).RegisterRoutes(router, "/api/v1")
+	correctivetransport.NewHandler(correctiveService, resolver).RegisterRoutes(router, "/api/v1")
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
 		worker: worker, candidates: candidateProcessor, notifications: notificationService, pool: pool,
@@ -330,6 +337,30 @@ func request(t *testing.T, handler http.Handler, method, path, body string, cook
 	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
+	return response
+}
+
+func idempotentRequest(
+	t *testing.T,
+	handler http.Handler,
+	method, path, body string,
+	cookie *http.Cookie,
+	tenantID, key string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, "http://api.example"+path, bytes.NewBufferString(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	if tenantID != "" {
+		req.Header.Set("X-Tenant-ID", tenantID)
+	}
+	req.Header.Set("Idempotency-Key", key)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
 	return response
 }
 

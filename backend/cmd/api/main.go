@@ -17,6 +17,9 @@ import (
 	conversationapplication "lidradar/backend/internal/conversation/application"
 	conversationinfrastructure "lidradar/backend/internal/conversation/infrastructure"
 	conversationtransport "lidradar/backend/internal/conversation/transport"
+	correctiveapplication "lidradar/backend/internal/corrective/application"
+	correctiveinfrastructure "lidradar/backend/internal/corrective/infrastructure"
+	correctivetransport "lidradar/backend/internal/corrective/transport"
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
@@ -89,6 +92,9 @@ func run(ctx context.Context, configuration config.Config) error {
 	opportunityService := opportunityapplication.NewService(
 		opportunityRepository, permissionService, ids.Generator{}, time.Now,
 	)
+	correctiveService := correctiveapplication.NewService(
+		correctiveinfrastructure.NewPostgresStore(pool), permissionService, ids.Generator{}, time.Now,
+	).WithInvalidator(riskInvalidator)
 	identityService := identityapplication.NewService(
 		identityRepository,
 		cryptoplatform.PasswordHasher{},
@@ -122,5 +128,6 @@ func run(ctx context.Context, configuration config.Config) error {
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, principalResolver).Router())
 	risktransport.NewHandler(riskRadar, principalResolver, riskEvents).RegisterRoutes(router, "/api/v1")
+	correctivetransport.NewHandler(correctiveService, principalResolver).RegisterRoutes(router, "/api/v1")
 	return httpplatform.Serve(ctx, configuration.HTTP, router, logger)
 }

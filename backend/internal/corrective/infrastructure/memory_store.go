@@ -1,4 +1,4 @@
-// Package infrastructure provides adapters for the corrective application.
+// Package infrastructure содержит адаптеры хранения корректирующих фактов.
 package infrastructure
 
 import (
@@ -15,11 +15,16 @@ type idem struct {
 	outcome *domain.Outcome
 }
 
+type memoryRisk struct {
+	opportunityID string
+	riskType      string
+}
+
 // MemoryStore — внутрипроцессный испытательный адаптер. Рабочим командам нельзя
 // использовать его: корректирующие факты требуют транзакционного PostgreSQL.
 type MemoryStore struct {
 	mu              sync.Mutex
-	risks           map[string]string
+	risks           map[string]memoryRisk
 	opportunities   map[string]bool
 	recommendations map[string]domain.Recommendation
 	actions         []domain.Action
@@ -29,20 +34,23 @@ type MemoryStore struct {
 }
 
 func NewTestMemoryStore() *MemoryStore {
-	return &MemoryStore{risks: map[string]string{}, opportunities: map[string]bool{}, recommendations: map[string]domain.Recommendation{}, idempotency: map[string]idem{}}
+	return &MemoryStore{risks: map[string]memoryRisk{}, opportunities: map[string]bool{}, recommendations: map[string]domain.Recommendation{}, idempotency: map[string]idem{}}
 }
 func scoped(tenant, id string) string { return tenant + "\x00" + id }
 func (s *MemoryStore) AddRisk(tenant, risk, opportunity string) {
+	s.AddRiskType(tenant, risk, opportunity, "NO_RESPONSE")
+}
+func (s *MemoryStore) AddRiskType(tenant, risk, opportunity, riskType string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.risks[scoped(tenant, risk)] = opportunity
+	s.risks[scoped(tenant, risk)] = memoryRisk{opportunityID: opportunity, riskType: riskType}
 	s.opportunities[scoped(tenant, opportunity)] = true
 }
-func (s *MemoryStore) RiskOpportunity(_ context.Context, tenant, risk string) (string, bool, error) {
+func (s *MemoryStore) Risk(_ context.Context, tenant, risk string) (application.RiskReference, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v, ok := s.risks[scoped(tenant, risk)]
-	return v, ok, nil
+	return application.RiskReference{OpportunityID: v.opportunityID, Type: v.riskType}, ok, nil
 }
 func (s *MemoryStore) OpportunityExists(_ context.Context, tenant, opportunity string) (bool, error) {
 	s.mu.Lock()
