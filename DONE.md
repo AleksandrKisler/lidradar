@@ -410,21 +410,35 @@ PostgreSQL либо настоящий внешний сервис) не зак�
 
 ## Этап 13 — Home AI Node
 
-- **LR-BE-1301 — LR-BE-1304 — выполнены в памяти.** Есть Node, Job, Run и
-  freshness snapshots; durable PostgreSQL tables отсутствуют.
-- **LR-BE-1305 — выполнено.** Node secret хранится как SHA-256 digest и
-  проверяется constant-time сравнением.
-- **LR-BE-1306 — LR-BE-1309 — выполнены в сервисе.** Heartbeat, atomic claim,
-  start/complete/fail, 120-second lease, renewal и reclaim проверены тестами;
-  durability между процессами отсутствует.
-- **LR-BE-1310 — выполнено.** Go AI Agent использует outbound polling и не пишет
+- **LR-BE-1301 — LR-BE-1304 — выполнены в PostgreSQL.** Миграция 000013 хранит
+  Node, Job, Run, freshness snapshots и производное ConversationSummary с
+  tenant FK, индексами и ограничениями жизненного цикла.
+- **LR-BE-1305 — выполнено для части 13A.** В PostgreSQL хранится только SHA-256
+  digest node secret; каждый запрос связывает Bearer, Node ID, UTC timestamp,
+  UUID запроса и hash тела HMAC-SHA256-подписью. Повтор nonce отклоняется.
+  Команда `ai-node-manage` вращает секрет либо отзывает узел без его вывода.
+- **LR-BE-1306 — LR-BE-1309 — выполнены долговечно.** Heartbeat, atomic claim
+  через `FOR UPDATE SKIP LOCKED`, started/complete/failed, 120-second lease,
+  renewal, bounded retry и reclaim проходят PostgreSQL-тесты. Прежний владелец
+  не завершает повторно захваченное задание. Freshness повторно сверяется под
+  блокировкой переписки в транзакции завершения.
+- **LR-BE-1310 — выполнено.** Go AI Agent использует настоящий подписанный
+  outbound HTTP-клиент, поддерживает heartbeat во время inference и не пишет
   customer text на диск.
-- **LR-BE-1311 — выполнено.** Реализован клиент OpenAI-compatible llama.cpp.
-- **LR-BE-1312 — частично.** Agent после запуска продолжает polling, но Docker/
-  systemd automatic reboot recovery не настроен.
-- **LR-BE-1313 — выполнено.** Есть deterministic Fake AI Provider.
-- **LR-BE-1314 — выполнено на unit-уровне.** Проверены expiry/reclaim и запрет
-  завершения job прежним owner; реального node disconnect E2E нет.
+- **LR-BE-1311 — код выполнен, натурная проверка ожидает 13B.** LlamaProvider
+  проверяет health и вызывает OpenAI-compatible llama.cpp; CUDA/model на RTX
+  4060 ещё не запускались.
+- **LR-BE-1312 — конфигурация выполнена, reboot proof ожидает 13B.** Отдельный
+  `docker-compose.ai.yml` не публикует llama.cpp и использует
+  `restart: unless-stopped`; физическая перезагрузка Ubuntu ещё не проверена.
+- **LR-BE-1313 — выполнено.** Deterministic Fake AI Provider остаётся доступен
+  только development/tests и использует фактический message ID задания.
+- **LR-BE-1314 — автоматизировано без физического узла.** PostgreSQL-тест
+  доказывает expiry/reclaim между двумя узлами и fencing прежнего владельца;
+  физический обрыв домашнего интернета остаётся частью 13B.
+- **Exit Gate этапа 13 — частично.** Серверная часть 13A готова; цепочка
+  `Ubuntu reboot → CUDA llama.cpp → READY → real inference` будет доказана после
+  восстановления оборудования.
 
 ## Этап 14 — AI Conversation Analysis
 
@@ -435,15 +449,20 @@ PostgreSQL либо настоящий внешний сервис) не зак�
   facts.
 - **LR-BE-1407 — выполнено.** Заданы strong/weak/untrusted thresholds; факты ниже
   0.65 не поступают policy.
-- **LR-BE-1408 — LR-BE-1409 — выполнены в памяти.** Job/Run сохраняют model,
-  prompt/schema versions и сырой output; durable audit отсутствует.
-- **LR-BE-1410 — LR-BE-1411 — выполнены.** Revision и through-message freshness
-  проверяются, stale result сохраняется как STALE и ставит replacement job.
-- **LR-BE-1412 — выполнено в памяти.** Fresh result обновляет только derived
-  ConversationSummary.
+- **LR-BE-1408 — LR-BE-1409 — выполнены в PostgreSQL.** Job/Run долговечно
+  сохраняют версии model/prompt/schema, снимок свежести, сырой результат и
+  ошибку проверки для каждой попытки.
+- **LR-BE-1410 — LR-BE-1411 — выполнены в PostgreSQL.** Revision и
+  through-message freshness повторно проверяются в транзакции завершения;
+  `STALE` не меняет производное состояние и атомарно ставит replacement job.
+- **LR-BE-1412 — выполнено в PostgreSQL.** Только свежий валидный результат
+  обновляет производный `ConversationSummary`; устаревшая запись защищена
+  сравнением revision.
 - **LR-BE-1413 — выполнено.** Contract tests покрывают invalid/missing/unknown,
   low confidence, stale revision и provider failures; реальный timeout зависит
   от переданного context.
+- **Exit Gate этапа 14 — выполнен автоматизированно.** Invalid и stale output не
+  меняют Opportunity/Risk и не создают доверенное производное резюме.
 
 ## Этап 15 — AI Benchmark / Model Freeze
 
@@ -483,15 +502,15 @@ PostgreSQL либо настоящий внешний сервис) не зак�
 18. Не закрыты все живые сценарии Telegram, перенос двоичных вложений в
 объектное хранилище и RLS, который по ТЗ относится к этапу 24.
 
-Общая очередь этапа 6 готова принимать задания следующих доменов, но сама по
-себе не превращает прототипы этапов 10–15 в производственные PostgreSQL-модули.
-Этап 15 даёт воспроизводимый контур измерений, но его выходной критерий не
-пройден без размеченного набора, выбранной модели и измерения на целевом
-оборудовании.
+Часть 13A перенесла узлы, AI Job/Run, freshness и ConversationSummary из
+испытательной памяти в PostgreSQL. Производственная композиция больше не
+подключает memory-адаптер. Этап 15 даёт воспроизводимый контур измерений, но его
+выходной критерий не пройден без размеченного набора, выбранной модели и
+измерения на целевом оборудовании.
 
 ## Проверки текущего аудита
 
-Проверки выполнены 2026-08-26 на PostgreSQL 18:
+Проверки обновлены 2026-08-27 на PostgreSQL 18:
 
 - весь набор `go test -race -count=1 ./...`, включая изолированные схемы двух
   организаций, сквозной путь этапов 5–6 и настоящий `kill -9` дочернего worker;
@@ -499,14 +518,21 @@ PostgreSQL либо настоящий внешний сервис) не зак�
 - проверка направлений зависимостей `archcheck`;
 - двукратное применение всех миграций, подтверждающее повторяемость запуска;
 - проверка конкурентного `FOR UPDATE SKIP LOCKED`, восстановления аренды,
-  `RETRY`, `DEAD`, планировщика, исходящего журнала и повторного побочного эффекта;
+  `RETRY`, `DEAD`, переподключения двух AI-узлов, fencing прежнего владельца,
+  совпадения версии модели, rotation/revocation и атомарной freshness;
 - проверка приоритета Radar, курсорной пагинации, денежных сумм, разрешений,
   межорганизационной изоляции, идемпотентных команд и `Risk → SSE → REST`;
 - проверка OpenAPI через Redocly;
 - сборка всех команд `backend/cmd/...`;
-- запуск API с успешными `/health/ready` и `/health/live`;
+- запуск API с успешным `/health/ready`, версией миграции
+  `000013_home_ai_node` и штатной остановкой;
 - запуск и штатная остановка фонового обработчика;
-- сборка контейнерного образа API.
+- проверка основного `compose.yaml` и отдельного `docker-compose.ai.yml`.
+
+Локальная сборка контейнерного образа остановилась до компиляции, потому что
+Docker Desktop запретил BuildKit исходящие подключения к Alpine и Go Proxy
+(`connection refused`). `make build` для всех команд прошёл; CI повторяет
+контейнерную сборку в среде с сетевым доступом.
 
 Ни одна из этих локальных проверок не подменяет обязательные испытания на
 настоящем Telegram, загрузку двоичных файлов в объектное хранилище и измерения

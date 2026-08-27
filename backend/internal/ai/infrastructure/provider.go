@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // FakeProvider makes the agent and disconnect recovery testable without a GPU.
@@ -16,12 +17,26 @@ type FakeProvider struct {
 	Err    error
 }
 
-func (p FakeProvider) Infer(context.Context, string) (string, error) {
+func (p FakeProvider) Ready(context.Context) error { return p.Err }
+
+func (p FakeProvider) Infer(_ context.Context, prompt string) (string, error) {
 	if p.Err != nil {
 		return "", p.Err
 	}
 	if p.Output == "" {
-		return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"message","summary":"No material facts.","facts":[]}`, nil
+		var request struct {
+			AnalysisThroughMessageID string `json:"analysisThroughMessageId"`
+		}
+		if err := json.Unmarshal([]byte(prompt), &request); err != nil || request.AnalysisThroughMessageID == "" {
+			return "", errors.New("fake AI received invalid versioned prompt")
+		}
+		result, _ := json.Marshal(map[string]any{
+			"schemaVersion":            "analyze-conversation.v1",
+			"analysisThroughMessageId": request.AnalysisThroughMessageID,
+			"summary":                  "Существенные факты не обнаружены.",
+			"facts":                    []any{},
+		})
+		return string(result), nil
 	}
 	return p.Output, nil
 }
@@ -29,8 +44,36 @@ func (p FakeProvider) Infer(context.Context, string) (string, error) {
 // LlamaProvider calls a llama.cpp OpenAI-compatible endpoint reachable only
 // from the node. It deliberately retains neither prompts nor responses.
 type LlamaProvider struct {
-	URL    string
-	Client *http.Client
+	URL, HealthURL, Model string
+	Client                *http.Client
+}
+
+func (p LlamaProvider) Ready(ctx context.Context) error {
+	healthURL := p.HealthURL
+	if healthURL == "" {
+		healthURL = strings.TrimSuffix(p.URL, "/v1/chat/completions") + "/health"
+	}
+	if healthURL == "/health" {
+		return errors.New("llama.cpp health URL is required")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		return err
+	}
+	client := p.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	if response.StatusCode/100 != 2 {
+		return fmt.Errorf("llama.cpp health returned status %d", response.StatusCode)
+	}
+	return nil
 }
 
 func (p LlamaProvider) Infer(ctx context.Context, prompt string) (string, error) {
@@ -41,7 +84,12 @@ func (p LlamaProvider) Infer(ctx context.Context, prompt string) (string, error)
 	if client == nil {
 		client = http.DefaultClient
 	}
-	body, _ := json.Marshal(map[string]any{"messages": []map[string]string{{"role": "user", "content": prompt}}, "temperature": 0})
+	body, _ := json.Marshal(map[string]any{
+		"model":           p.Model,
+		"messages":        []map[string]string{{"role": "user", "content": prompt}},
+		"temperature":     0,
+		"response_format": map[string]string{"type": "json_object"},
+	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.URL, bytes.NewReader(body))
 	if err != nil {
 		return "", err

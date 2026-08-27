@@ -8,6 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	aiapplication "lidradar/backend/internal/ai/application"
+	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
+	aitransport "lidradar/backend/internal/ai/transport"
 	catalogapplication "lidradar/backend/internal/catalog/application"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	catalogtransport "lidradar/backend/internal/catalog/transport"
@@ -69,6 +72,10 @@ func run(ctx context.Context, configuration config.Config) error {
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
 	opportunityRepository := opportunityinfrastructure.NewPostgresRepository(pool)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
+	aiStore := aiinfrastructure.NewPostgresStore(pool)
+	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).
+		WithSignatureWindow(configuration.AI.SignatureWindow).
+		WithStaleJobBuilder(aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, configuration.AI.ModelVersion))
 	connectorRegistry := connectorinfrastructure.NewRegistry()
 	connectorOptions := make([]connectorapplication.Option, 0, 1)
 	if configuration.Integrations.PublicBaseURL != "" {
@@ -125,6 +132,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		tenantService,
 		identitytransport.CookieConfiguration{Secure: configuration.Auth.CookieSecure, TTL: configuration.Auth.SessionTTL},
 	).Router())
+	router.Mount("/internal/v1/ai", aitransport.Handler{Service: aiService})
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, principalResolver).Router())
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, principalResolver).Router())
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, principalResolver).Router())

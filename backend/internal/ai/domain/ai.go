@@ -12,33 +12,43 @@ type NodeStatus string
 const (
 	NodeReady   NodeStatus = "READY"
 	NodeOffline NodeStatus = "OFFLINE"
+	NodeRevoked NodeStatus = "REVOKED"
 )
 
 type Node struct {
-	ID, Name        string
-	SecretHash      [32]byte
-	Status          NodeStatus
-	LastHeartbeatAt time.Time
-	CreatedAt       time.Time
+	ID, Name                    string
+	SecretHash                  [32]byte
+	Status                      NodeStatus
+	ModelVersion                string
+	AvailableSlots, MaxInflight int
+	LastHeartbeatAt             time.Time
+	RevokedAt                   time.Time
+	CreatedAt, UpdatedAt        time.Time
 }
 
 type JobStatus string
 
 const (
-	JobQueued    JobStatus = "QUEUED"
+	JobPending   JobStatus = "PENDING"
+	JobLeased    JobStatus = "LEASED"
 	JobRunning   JobStatus = "RUNNING"
 	JobSucceeded JobStatus = "SUCCEEDED"
-	JobFailed    JobStatus = "FAILED"
+	JobRetry     JobStatus = "RETRY"
+	JobDead      JobStatus = "DEAD"
 )
 
 type Job struct {
-	ID, TenantID, ConversationID, Prompt       string
+	ID, TenantID, JobType, EntityType          string
+	ConversationID, Prompt                     string
 	BaseConversationRevision                   int64
 	AnalysisThroughMessageID                   string
 	ModelVersion, PromptVersion, SchemaVersion string
+	Priority, Attempts, MaxAttempts            int
 	Status                                     JobStatus
 	ClaimedBy                                  string
-	LeaseUntil                                 time.Time
+	AvailableAt, LeaseUntil                    time.Time
+	LastErrorCode                              string
+	CompletedAt                                time.Time
 	CreatedAt, UpdatedAt                       time.Time
 }
 
@@ -51,15 +61,31 @@ const (
 	ApplicationRejected ApplicationStatus = "REJECTED"
 )
 
+type RunStatus string
+
+const (
+	RunRunning   RunStatus = "RUNNING"
+	RunSucceeded RunStatus = "SUCCEEDED"
+	RunFailed    RunStatus = "FAILED"
+)
+
 type Run struct {
-	ID, JobID, NodeID, TenantID, ConversationID, Output, Error string
-	Status                                                     JobStatus
-	ApplicationStatus                                          ApplicationStatus
-	BaseConversationRevision                                   int64
-	AnalysisThroughMessageID                                   string
-	ModelVersion, PromptVersion, SchemaVersion                 string
-	ValidationError                                            string
-	StartedAt, CompletedAt                                     time.Time
+	ID, JobID, NodeID, TenantID, ConversationID, Output string
+	ErrorCode                                           string
+	Status                                              RunStatus
+	ApplicationStatus                                   ApplicationStatus
+	BaseConversationRevision                            int64
+	AnalysisThroughMessageID                            string
+	ModelVersion, PromptVersion, SchemaVersion          string
+	ValidationError                                     string
+	StartedAt, CompletedAt                              time.Time
+}
+
+// ConversationSnapshot — авторитетное состояние переписки на момент проверки
+// свежести результата. Его читает Cloud Core, а не присылает домашний узел.
+type ConversationSnapshot struct {
+	Revision      int64
+	LastMessageID string
 }
 
 // ConversationSummary is derived AI data, never authoritative conversation

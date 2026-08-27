@@ -415,14 +415,32 @@ form. A ready heartbeat renews only leases currently owned by that node. Jobs
 carry the tenant, conversation, base conversation revision, and last analyzed
 message identifier.
 
-The default lease is 120 seconds. Claim is atomic, expired work may be reclaimed
-after a node disconnect, and a former owner cannot complete a reclaimed job.
+Каждый машинный POST-запрос содержит `Authorization: Bearer`,
+`X-LidRadar-Node-ID`, UTC `X-LidRadar-Timestamp`, уникальный
+`X-LidRadar-Request-ID` и `X-LidRadar-Signature`. HMAC-SHA256 связывает method,
+path, точный timestamp, request ID и SHA-256 точного тела. Cloud Core отклоняет
+неверную подпись, время вне 60-секундного окна и повтор request ID. Реквизиты,
+подписи и тела запросов не журналируются.
+
+Локальные административные команды создают реквизиты в новом файле `0600` и
+никогда не выводят открытый секрет. Вращение секрета переводит узел в `OFFLINE`,
+сразу запрещает старый секрет и оставляет текущей аренде только естественное
+истечение. Отзыв переводит узел в `REVOKED`, сохраняя историю Job и Run.
+
+The default lease is 120 seconds. Claim is atomic, requires an exact match
+between the job model requirement and node model version, expired work may be
+reclaimed after a node disconnect, and a former owner cannot complete a reclaimed job.
 Each attempt has a durable AI run with snapshot freshness fields. Successful
 inference is recorded independently from application status: invalid output is
 `REJECTED`, and a changed revision or analyzed-message identifier is `STALE`.
 Neither state mutates domain data. The Go AI agent retains no customer text on
 disk, uses outbound calls, and resumes polling after restart. A deterministic
 fake provider supports development and disconnect testing without a GPU.
+
+Проверка свежести перед применением результата выполняется повторно внутри
+транзакции завершения под блокировкой строки Conversation. Изменение между
+предварительным чтением и фиксацией переводит Run в `STALE` и создаёт новое
+задание из заново прочитанного контекста.
 
 ### Выручка и атрибуция
 

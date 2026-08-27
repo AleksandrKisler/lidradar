@@ -1,7 +1,7 @@
 .PHONY: build check clean fmt test test-db vet
 
 BIN_DIR ?= bin
-COMMANDS := api worker scheduler ai-agent migrate
+COMMANDS := api worker scheduler ai-agent ai-node-register ai-node-manage migrate
 BUILD_VERSION ?= development
 BUILD_REVISION ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_LDFLAGS := -X lidradar/backend/platform/buildinfo.Version=$(BUILD_VERSION) -X lidradar/backend/platform/buildinfo.Revision=$(BUILD_REVISION)

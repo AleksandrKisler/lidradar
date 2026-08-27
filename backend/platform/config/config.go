@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,28 +14,44 @@ import (
 )
 
 const (
-	environmentKey      = "LIDRADAR_ENV"
-	httpAddressKey      = "LIDRADAR_HTTP_ADDRESS"
-	databaseURLKey      = "LIDRADAR_DATABASE_URL"
-	shutdownTimeoutKey  = "LIDRADAR_SHUTDOWN_TIMEOUT"
-	databaseMaxConnsKey = "LIDRADAR_DATABASE_MAX_CONNS"
-	databaseMinConnsKey = "LIDRADAR_DATABASE_MIN_CONNS"
-	databaseTimeoutKey  = "LIDRADAR_DATABASE_TIMEOUT"
-	allowedOriginsKey   = "LIDRADAR_ALLOWED_ORIGINS"
-	sessionTTLKey       = "LIDRADAR_SESSION_TTL"
-	cookieSecureKey     = "LIDRADAR_COOKIE_SECURE"
-	publicBaseURLKey    = "LIDRADAR_PUBLIC_BASE_URL"
-	credentialKeyKey    = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
-	telegramTokenKey    = "LIDAR_TELEGRAM_TOKEN"
-	telegramUsernameKey = "LIDRADAR_TELEGRAM_BOT_USERNAME"
-	defaultHTTPAddress  = ":8080"
-	defaultDatabaseURL  = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
-	defaultShutdown     = 10 * time.Second
-	defaultDatabaseWait = 5 * time.Second
-	defaultSessionTTL   = 30 * 24 * time.Hour
-	defaultDatabaseMax  = int32(10)
-	defaultDatabaseMin  = int32(1)
-	defaultTelegramBot  = "LidRadarDevBot"
+	environmentKey           = "LIDRADAR_ENV"
+	httpAddressKey           = "LIDRADAR_HTTP_ADDRESS"
+	databaseURLKey           = "LIDRADAR_DATABASE_URL"
+	shutdownTimeoutKey       = "LIDRADAR_SHUTDOWN_TIMEOUT"
+	databaseMaxConnsKey      = "LIDRADAR_DATABASE_MAX_CONNS"
+	databaseMinConnsKey      = "LIDRADAR_DATABASE_MIN_CONNS"
+	databaseTimeoutKey       = "LIDRADAR_DATABASE_TIMEOUT"
+	allowedOriginsKey        = "LIDRADAR_ALLOWED_ORIGINS"
+	sessionTTLKey            = "LIDRADAR_SESSION_TTL"
+	cookieSecureKey          = "LIDRADAR_COOKIE_SECURE"
+	publicBaseURLKey         = "LIDRADAR_PUBLIC_BASE_URL"
+	credentialKeyKey         = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
+	telegramTokenKey         = "LIDAR_TELEGRAM_TOKEN"
+	telegramUsernameKey      = "LIDRADAR_TELEGRAM_BOT_USERNAME"
+	aiCloudURLKey            = "LIDRADAR_AI_CLOUD_URL"
+	aiCredentialsKey         = "LIDRADAR_AI_CREDENTIALS_FILE"
+	aiProviderKey            = "LIDRADAR_AI_PROVIDER"
+	aiLlamaURLKey            = "LIDRADAR_AI_LLAMA_URL"
+	aiModelVersionKey        = "LIDRADAR_AI_MODEL_VERSION"
+	aiPollIntervalKey        = "LIDRADAR_AI_POLL_INTERVAL"
+	aiHeartbeatKey           = "LIDRADAR_AI_HEARTBEAT_INTERVAL"
+	aiHTTPTimeoutKey         = "LIDRADAR_AI_HTTP_TIMEOUT"
+	aiSignatureWindowKey     = "LIDRADAR_AI_SIGNATURE_WINDOW"
+	defaultHTTPAddress       = ":8080"
+	defaultDatabaseURL       = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
+	defaultShutdown          = 10 * time.Second
+	defaultDatabaseWait      = 5 * time.Second
+	defaultSessionTTL        = 30 * 24 * time.Hour
+	defaultDatabaseMax       = int32(10)
+	defaultDatabaseMin       = int32(1)
+	defaultTelegramBot       = "LidRadarDevBot"
+	defaultAIProvider        = "fake"
+	defaultAILlamaURL        = "http://llama-server:8080/v1/chat/completions"
+	defaultAIModel           = "local-4b-8b-q4"
+	defaultAIPoll            = time.Second
+	defaultAIHeartbeat       = 10 * time.Second
+	defaultAIHTTPTimeout     = 5 * time.Minute
+	defaultAISignatureWindow = 60 * time.Second
 )
 
 // LookupEnv is the environment lookup contract used by Load. Keeping the
@@ -60,6 +77,7 @@ type Config struct {
 	Auth          Auth
 	Integrations  Integrations
 	Notifications Notifications
+	AI            AI
 }
 
 // HTTP contains process-level HTTP server settings.
@@ -86,6 +104,15 @@ type Integrations struct {
 type Notifications struct {
 	TelegramBotToken string
 	TelegramUsername string
+}
+
+// AI содержит машинные настройки Cloud Core и одноразового домашнего узла.
+// Реквизиты узла читаются только из файла с ограниченными правами.
+type AI struct {
+	CloudURL, CredentialsFile, Provider string
+	LlamaURL, ModelVersion              string
+	PollInterval, HeartbeatInterval     time.Duration
+	HTTPTimeout, SignatureWindow        time.Duration
 }
 
 // Database contains PostgreSQL connection-pool settings.
@@ -130,6 +157,17 @@ func Load(lookup LookupEnv) (Config, error) {
 			TelegramBotToken: valueOrDefault(lookup, telegramTokenKey, ""),
 			TelegramUsername: strings.TrimPrefix(strings.TrimSpace(valueOrDefault(lookup, telegramUsernameKey, defaultTelegramBot)), "@"),
 		},
+		AI: AI{
+			CloudURL:          strings.TrimRight(strings.TrimSpace(valueOrDefault(lookup, aiCloudURLKey, "")), "/"),
+			CredentialsFile:   strings.TrimSpace(valueOrDefault(lookup, aiCredentialsKey, "")),
+			Provider:          strings.ToLower(strings.TrimSpace(valueOrDefault(lookup, aiProviderKey, defaultAIProvider))),
+			LlamaURL:          strings.TrimSpace(valueOrDefault(lookup, aiLlamaURLKey, defaultAILlamaURL)),
+			ModelVersion:      strings.TrimSpace(valueOrDefault(lookup, aiModelVersionKey, defaultAIModel)),
+			PollInterval:      defaultAIPoll,
+			HeartbeatInterval: defaultAIHeartbeat,
+			HTTPTimeout:       defaultAIHTTPTimeout,
+			SignatureWindow:   defaultAISignatureWindow,
+		},
 	}
 	if configuration.Integrations.CredentialKey, err = encryptionKeyValue(lookup, credentialKeyKey); err != nil {
 		return Config{}, err
@@ -148,6 +186,18 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if configuration.Auth.SessionTTL, err = durationValue(lookup, sessionTTLKey, defaultSessionTTL); err != nil {
+		return Config{}, err
+	}
+	if configuration.AI.PollInterval, err = durationValue(lookup, aiPollIntervalKey, defaultAIPoll); err != nil {
+		return Config{}, err
+	}
+	if configuration.AI.HeartbeatInterval, err = durationValue(lookup, aiHeartbeatKey, defaultAIHeartbeat); err != nil {
+		return Config{}, err
+	}
+	if configuration.AI.HTTPTimeout, err = durationValue(lookup, aiHTTPTimeoutKey, defaultAIHTTPTimeout); err != nil {
+		return Config{}, err
+	}
+	if configuration.AI.SignatureWindow, err = durationValue(lookup, aiSignatureWindowKey, defaultAISignatureWindow); err != nil {
 		return Config{}, err
 	}
 	secureDefault := configuration.Environment == EnvironmentStaging || configuration.Environment == EnvironmentProduction
@@ -203,6 +253,33 @@ func (c Config) Validate() error {
 	}
 	if c.Notifications.TelegramBotToken != "" && !telegramTokenPattern.MatchString(c.Notifications.TelegramBotToken) {
 		return fmt.Errorf("%s has invalid format", telegramTokenKey)
+	}
+	if c.AI.Provider != "fake" && c.AI.Provider != "llama" {
+		return fmt.Errorf("%s has unsupported value", aiProviderKey)
+	}
+	if c.AI.ModelVersion == "" || len(c.AI.ModelVersion) > 200 {
+		return fmt.Errorf("%s has invalid value", aiModelVersionKey)
+	}
+	if c.AI.CloudURL != "" {
+		parsed, err := url.Parse(c.AI.CloudURL)
+		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+			(parsed.Path != "" && parsed.Path != "/") ||
+			(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			((c.Environment == EnvironmentStaging || c.Environment == EnvironmentProduction) && parsed.Scheme != "https") {
+			return fmt.Errorf("%s has unsafe value", aiCloudURLKey)
+		}
+	}
+	if c.AI.CredentialsFile != "" &&
+		(c.Environment == EnvironmentStaging || c.Environment == EnvironmentProduction) &&
+		!filepath.IsAbs(c.AI.CredentialsFile) {
+		return fmt.Errorf("%s must be an absolute path", aiCredentialsKey)
+	}
+	if parsed, err := url.Parse(c.AI.LlamaURL); err != nil || parsed.Host == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" {
+		return fmt.Errorf("%s has invalid value", aiLlamaURLKey)
+	}
+	if c.AI.PollInterval <= 0 || c.AI.HeartbeatInterval <= 0 || c.AI.HTTPTimeout <= 0 || c.AI.SignatureWindow <= 0 {
+		return fmt.Errorf("AI runtime durations must be positive")
 	}
 	if (c.Environment == EnvironmentStaging || c.Environment == EnvironmentProduction) && !c.Auth.CookieSecure {
 		return fmt.Errorf("%s must be true in %s", cookieSecureKey, c.Environment)

@@ -1,0 +1,76 @@
+name: lidradar-ai-node
+
+# Домашний узел не содержит PostgreSQL и не публикует входящие порты. Только
+# ai-agent имеет исходящий доступ к Cloud Core; llama.cpp виден лишь во
+# внутренней Docker-сети.
+services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    restart: unless-stopped
+    gpus: all
+    command:
+      - --model
+      - /models/${LIDRADAR_AI_MODEL_FILE:-Qwen3-4B-Q4_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - "4096"
+      - --parallel
+      - "1"
+      - --n-gpu-layers
+      - "99"
+      - --jinja
+    volumes:
+      - ${LIDRADAR_AI_MODELS_DIR:-/srv/lidradar/models}:/models:ro
+    networks:
+      - ai-internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  ai-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COMMAND: ai-agent
+        VERSION: ${LIDRADAR_BUILD_VERSION:-development}
+        REVISION: ${LIDRADAR_BUILD_REVISION:-unknown}
+    restart: unless-stopped
+    user: "0:0"
+    depends_on:
+      llama-server:
+        condition: service_started
+    environment:
+      LIDRADAR_ENV: production
+      LIDRADAR_AI_CLOUD_URL: ${LIDRADAR_AI_CLOUD_URL:?LIDRADAR_AI_CLOUD_URL is required}
+      LIDRADAR_AI_CREDENTIALS_FILE: /run/secrets/ai-node.json
+      LIDRADAR_AI_PROVIDER: llama
+      LIDRADAR_AI_LLAMA_URL: http://llama-server:8080/v1/chat/completions
+      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-candidate-q4}
+      LIDRADAR_AI_POLL_INTERVAL: ${LIDRADAR_AI_POLL_INTERVAL:-1s}
+      LIDRADAR_AI_HEARTBEAT_INTERVAL: ${LIDRADAR_AI_HEARTBEAT_INTERVAL:-10s}
+      LIDRADAR_AI_HTTP_TIMEOUT: ${LIDRADAR_AI_HTTP_TIMEOUT:-5m}
+    volumes:
+      - ${LIDRADAR_AI_CREDENTIALS_HOST_FILE:?LIDRADAR_AI_CREDENTIALS_HOST_FILE is required}:/run/secrets/ai-node.json:ro
+    networks:
+      - ai-internal
+      - ai-egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  ai-internal:
+    internal: true
+  ai-egress: {}

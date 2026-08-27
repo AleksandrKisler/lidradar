@@ -10,58 +10,119 @@ import (
 )
 
 type Cloud interface {
-	Heartbeat(context.Context) error
+	Heartbeat(context.Context, domain.NodeStatus, string, int) error
 	Claim(context.Context) (domain.Job, bool, error)
 	Started(context.Context, string) (string, error)
-	Complete(context.Context, string, string, string, int64, string) error
+	Complete(context.Context, string, string, string) error
 	Failed(context.Context, string, string, string) error
 }
+
 type Provider interface {
+	Ready(context.Context) error
 	Infer(context.Context, string) (string, error)
 }
+
 type Runner struct {
-	Cloud        Cloud
-	Provider     Provider
-	PollInterval time.Duration
+	Cloud             Cloud
+	Provider          Provider
+	ModelVersion      string
+	PollInterval      time.Duration
+	HeartbeatInterval time.Duration
+	OnError           func(error)
 }
 
-// Run keeps no durable customer data. On restart it simply heartbeats and
-// resumes polling; abandoned work is reclaimed by the cloud after lease expiry.
-func (r Runner) Run(ctx context.Context) error {
-	if r.Cloud == nil || r.Provider == nil {
-		return errors.New("AI cloud and provider are required")
+// Run keeps no durable customer data. Heartbeat continues while inference is
+// running, renewing the current lease; max_inflight remains one.
+func (runner Runner) Run(ctx context.Context) error {
+	if runner.Cloud == nil || runner.Provider == nil || runner.ModelVersion == "" {
+		return errors.New("AI cloud, provider and model version are required")
 	}
-	if r.PollInterval <= 0 {
-		r.PollInterval = time.Second
+	if runner.PollInterval <= 0 {
+		runner.PollInterval = time.Second
 	}
-	t := time.NewTicker(r.PollInterval)
-	defer t.Stop()
+	if runner.HeartbeatInterval <= 0 {
+		runner.HeartbeatInterval = 10 * time.Second
+	}
+	pollTicker := time.NewTicker(runner.PollInterval)
+	heartbeatTicker := time.NewTicker(runner.HeartbeatInterval)
+	defer pollTicker.Stop()
+	defer heartbeatTicker.Stop()
+
+	busy := false
+	ready := runner.providerReady(ctx)
+	runner.heartbeat(ctx, ready, busy)
+	finished := make(chan error, 1)
 	for {
-		if err := r.step(ctx); err != nil && ctx.Err() != nil {
-			return ctx.Err()
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-t.C:
+		case err := <-finished:
+			busy = false
+			if err != nil {
+				runner.report(err)
+			}
+			runner.heartbeat(ctx, ready, busy)
+		case <-heartbeatTicker.C:
+			ready = runner.providerReady(ctx)
+			runner.heartbeat(ctx, ready, busy)
+		case <-pollTicker.C:
+			if busy || !ready {
+				continue
+			}
+			job, found, err := runner.Cloud.Claim(ctx)
+			if err != nil {
+				runner.report(err)
+				continue
+			}
+			if !found {
+				continue
+			}
+			busy = true
+			runner.heartbeat(ctx, ready, busy)
+			go func() { finished <- runner.process(ctx, job) }()
 		}
 	}
 }
-func (r Runner) step(ctx context.Context) error {
-	if err := r.Cloud.Heartbeat(ctx); err != nil {
-		return err
-	}
-	j, ok, err := r.Cloud.Claim(ctx)
-	if err != nil || !ok {
-		return err
-	}
-	run, err := r.Cloud.Started(ctx, j.ID)
+
+func (runner Runner) process(ctx context.Context, job domain.Job) error {
+	runID, err := runner.Cloud.Started(ctx, job.ID)
 	if err != nil {
 		return err
 	}
-	out, err := r.Provider.Infer(ctx, j.Prompt)
+	output, err := runner.Provider.Infer(ctx, job.Prompt)
 	if err != nil {
-		return r.Cloud.Failed(ctx, j.ID, run, err.Error())
+		if failedErr := runner.Cloud.Failed(ctx, job.ID, runID, "PROVIDER_INFERENCE_FAILED"); failedErr != nil {
+			return failedErr
+		}
+		return err
 	}
-	return r.Cloud.Complete(ctx, j.ID, run, out, j.BaseConversationRevision, j.AnalysisThroughMessageID)
+	return runner.Cloud.Complete(ctx, job.ID, runID, output)
+}
+
+func (runner Runner) providerReady(ctx context.Context) bool {
+	if err := runner.Provider.Ready(ctx); err != nil {
+		runner.report(err)
+		return false
+	}
+	return true
+}
+
+func (runner Runner) heartbeat(ctx context.Context, ready, busy bool) {
+	status := domain.NodeOffline
+	slots := 0
+	if ready {
+		status = domain.NodeReady
+		if !busy {
+			slots = 1
+		}
+	}
+	if err := runner.Cloud.Heartbeat(ctx, status, runner.ModelVersion, slots); err != nil {
+		runner.report(err)
+	}
+}
+
+func (runner Runner) report(err error) {
+	if err != nil && runner.OnError != nil {
+		runner.OnError(err)
+	}
 }

@@ -191,6 +191,50 @@ func TestLoadNotificationTelegramConfigurationDoesNotExposeInvalidToken(t *testi
 	}
 }
 
+func TestLoadAIConfiguration(t *testing.T) {
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey:       string(EnvironmentDevelopment),
+		aiCloudURLKey:        "http://127.0.0.1:8080/",
+		aiCredentialsKey:     "runtime/node.json",
+		aiProviderKey:        "llama",
+		aiLlamaURLKey:        "http://llama-server:8080/v1/chat/completions",
+		aiModelVersionKey:    "candidate-q4",
+		aiPollIntervalKey:    "2s",
+		aiHeartbeatKey:       "9s",
+		aiHTTPTimeoutKey:     "3m",
+		aiSignatureWindowKey: "45s",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.AI.CloudURL != "http://127.0.0.1:8080" ||
+		configuration.AI.Provider != "llama" || configuration.AI.PollInterval != 2*time.Second ||
+		configuration.AI.HeartbeatInterval != 9*time.Second || configuration.AI.SignatureWindow != 45*time.Second {
+		t.Fatalf("AI = %#v", configuration.AI)
+	}
+}
+
+func TestLoadRejectsUnsafeAIConfiguration(t *testing.T) {
+	for name, values := range map[string]map[string]string{
+		"неизвестный поставщик": {
+			environmentKey: string(EnvironmentDevelopment), aiProviderKey: "unknown",
+		},
+		"небезопасный cloud в production": {
+			environmentKey: string(EnvironmentProduction), aiCloudURLKey: "http://ai.example.com",
+		},
+		"относительный secret в production": {
+			environmentKey: string(EnvironmentProduction), aiCloudURLKey: "https://ai.example.com",
+			aiCredentialsKey: "node.json",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(mapLookup(values)); err == nil {
+				t.Fatal("unsafe AI configuration was accepted")
+			}
+		})
+	}
+}
+
 func mapLookup(values map[string]string) LookupEnv {
 	return func(key string) (string, bool) {
 		value, ok := values[key]

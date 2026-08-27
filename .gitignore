@@ -1,6 +1,7 @@
 /bin/
 .DS_Store
 .idea/
+/runtime/
 .env
 .env.*
 !.env.example

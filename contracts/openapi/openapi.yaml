@@ -15,6 +15,93 @@ servers:
 security:
   - sessionCookie: []
 paths:
+  /internal/v1/ai/nodes/heartbeat:
+    post:
+      summary: Renew AI node readiness and leases owned by this node
+      operationId: heartbeatAINode
+      security: [{ aiNodeBearer: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/AINodeId' }
+        - { $ref: '#/components/parameters/AITimestamp' }
+        - { $ref: '#/components/parameters/AIRequestId' }
+        - { $ref: '#/components/parameters/AISignature' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AINodeHeartbeatRequest' } } }
+      responses:
+        '204': { description: Heartbeat accepted and current leases renewed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AINodeUnauthorized' }
+  /internal/v1/ai/jobs/claim:
+    post:
+      summary: Atomically lease one available AI job
+      operationId: claimAIJob
+      security: [{ aiNodeBearer: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/AINodeId' }
+        - { $ref: '#/components/parameters/AITimestamp' }
+        - { $ref: '#/components/parameters/AIRequestId' }
+        - { $ref: '#/components/parameters/AISignature' }
+      responses:
+        '200': { description: One job leased to the authenticated node., content: { application/json: { schema: { $ref: '#/components/schemas/AIJobClaim' } } } }
+        '204': { description: No compatible job is currently available. }
+        '401': { $ref: '#/components/responses/AINodeUnauthorized' }
+  /internal/v1/ai/jobs/{aiJobId}/started:
+    parameters:
+      - { $ref: '#/components/parameters/AIJobId' }
+      - { $ref: '#/components/parameters/AINodeId' }
+      - { $ref: '#/components/parameters/AITimestamp' }
+      - { $ref: '#/components/parameters/AIRequestId' }
+      - { $ref: '#/components/parameters/AISignature' }
+    post:
+      summary: Mark a leased AI job as running and create its durable run
+      operationId: startAIJob
+      security: [{ aiNodeBearer: [] }]
+      responses:
+        '200': { description: Durable run created or returned idempotently., content: { application/json: { schema: { $ref: '#/components/schemas/AIJobStarted' } } } }
+        '401': { $ref: '#/components/responses/AINodeUnauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AILeaseLost' }
+  /internal/v1/ai/jobs/{aiJobId}/complete:
+    parameters:
+      - { $ref: '#/components/parameters/AIJobId' }
+      - { $ref: '#/components/parameters/AINodeId' }
+      - { $ref: '#/components/parameters/AITimestamp' }
+      - { $ref: '#/components/parameters/AIRequestId' }
+      - { $ref: '#/components/parameters/AISignature' }
+    post:
+      summary: Persist and validate a successful inference result
+      operationId: completeAIJob
+      security: [{ aiNodeBearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIJobCompleteRequest' } } }
+      responses:
+        '204': { description: 'Run recorded as applied, stale, or rejected; invalid and stale results do not mutate business state.' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AINodeUnauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AILeaseLost' }
+  /internal/v1/ai/jobs/{aiJobId}/failed:
+    parameters:
+      - { $ref: '#/components/parameters/AIJobId' }
+      - { $ref: '#/components/parameters/AINodeId' }
+      - { $ref: '#/components/parameters/AITimestamp' }
+      - { $ref: '#/components/parameters/AIRequestId' }
+      - { $ref: '#/components/parameters/AISignature' }
+    post:
+      summary: Record a technical inference failure and schedule bounded retry
+      operationId: failAIJob
+      security: [{ aiNodeBearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIJobFailedRequest' } } }
+      responses:
+        '204': { description: Failure recorded; job moved to RETRY or DEAD. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AINodeUnauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AILeaseLost' }
   /api/v1/auth/register:
     post:
       summary: Register a LidRadar user
@@ -631,6 +718,10 @@ components:
       type: apiKey
       in: cookie
       name: lidradar_session
+    aiNodeBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: LidRadar AI node secret
   parameters:
     TenantId: { name: X-Tenant-ID, in: header, required: true, description: Explicit Organization tenant selected from /auth/me memberships., schema: { type: string, format: uuid } }
     LocationId: { name: locationId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -642,6 +733,11 @@ components:
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string, format: uuid } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+    AINodeId: { name: X-LidRadar-Node-ID, in: header, required: true, schema: { type: string, format: uuid } }
+    AITimestamp: { name: X-LidRadar-Timestamp, in: header, required: true, description: UTC RFC3339Nano timestamp inside the configured replay window., schema: { type: string, format: date-time } }
+    AIRequestId: { name: X-LidRadar-Request-ID, in: header, required: true, description: Unique request nonce retained only for the replay window., schema: { type: string, format: uuid } }
+    AISignature: { name: X-LidRadar-Signature, in: header, required: true, description: 'HMAC-SHA256 over method, path, timestamp, request ID, and SHA-256 body hash.', schema: { type: string, pattern: '^sha256=[0-9a-f]{64}$' } }
+    AIJobId: { name: aiJobId, in: path, required: true, schema: { type: string, format: uuid } }
   responses:
     BadRequest: { description: 'Request body, tenant selector, or domain value is invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Unauthorized: { description: 'Opaque session cookie is missing, expired, revoked, or invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -649,11 +745,57 @@ components:
     Forbidden: { description: Request origin is not trusted or Membership does not grant the required named permission., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     NotFound: { description: Resource does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: A unique resource already exists., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    AINodeUnauthorized: { description: 'AI node credentials, timestamp, nonce, body hash, or request signature are invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    AILeaseLost: { description: The AI job lease expired or belongs to another node., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   headers:
     SessionCookie:
       description: HttpOnly SameSite=Strict opaque session cookie; Secure is mandatory in staging and production.
       schema: { type: string }
   schemas:
+    AINodeHeartbeatRequest:
+      type: object
+      additionalProperties: false
+      required: [status, modelVersion, availableSlots]
+      properties:
+        status: { type: string, enum: [READY, OFFLINE] }
+        modelVersion: { type: string, minLength: 1, maxLength: 200 }
+        availableSlots: { type: integer, minimum: 0, maximum: 1 }
+    AIJobClaim:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, jobType, entityType, entityId, prompt, baseConversationRevision, analysisThroughMessageId, modelVersion, promptVersion, schemaVersion, leaseUntil]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        jobType: { type: string, enum: [ANALYZE_CONVERSATION] }
+        entityType: { type: string, enum: [CONVERSATION] }
+        entityId: { type: string, format: uuid }
+        prompt: { type: string, minLength: 1, writeOnly: true }
+        baseConversationRevision: { type: integer, format: int64, minimum: 1 }
+        analysisThroughMessageId: { type: string, format: uuid }
+        modelVersion: { type: string }
+        promptVersion: { type: string }
+        schemaVersion: { type: string }
+        leaseUntil: { type: string, format: date-time }
+    AIJobStarted:
+      type: object
+      additionalProperties: false
+      required: [runId]
+      properties: { runId: { type: string, format: uuid } }
+    AIJobCompleteRequest:
+      type: object
+      additionalProperties: false
+      required: [runId, output]
+      properties:
+        runId: { type: string, format: uuid }
+        output: { type: string, minLength: 1, maxLength: 1048576, writeOnly: true }
+    AIJobFailedRequest:
+      type: object
+      additionalProperties: false
+      required: [runId, errorCode]
+      properties:
+        runId: { type: string, format: uuid }
+        errorCode: { type: string, pattern: '^[A-Z0-9_]{1,100}$' }
     Error:
       type: object
       required: [error]
