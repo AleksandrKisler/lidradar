@@ -1,0 +1,29 @@
+{
+  "datasetSha256": "c85cd54d3c6f43134c509381247a278c4f8ec05975acf1f6a3f54aa90e55e4f2",
+  "cases": 60,
+  "truePositive": 51,
+  "falsePositive": 0,
+  "falseNegative": 1,
+  "invalid": 0,
+  "exact": 59,
+  "precision": 1,
+  "recall": 0.9807692307692307,
+  "f1": 0.9902912621359223,
+  "exactRate": 0.9833333333333333,
+  "validRate": 1,
+  "evidenceExactRate": 0.9411764705882353,
+  "p50Ms": 1799,
+  "p95Ms": 3848,
+  "p99Ms": 4183,
+  "throughputCasesPerSecond": 0.5203111379419012,
+  "byFactType": {
+    "BOOKING_INTENT": {"truePositive": 19, "falsePositive": 0, "falseNegative": 1, "precision": 1, "recall": 0.95, "f1": 0.9743589743589743},
+    "BUSINESS_COMMITMENT": {"truePositive": 8, "falsePositive": 0, "falseNegative": 0, "precision": 1, "recall": 1, "f1": 1},
+    "FOLLOW_UP_CANDIDATE": {"truePositive": 8, "falsePositive": 0, "falseNegative": 0, "precision": 1, "recall": 1, "f1": 1},
+    "PRICE_MENTIONED": {"truePositive": 16, "falsePositive": 0, "falseNegative": 0, "precision": 1, "recall": 1, "f1": 1}
+  },
+  "failures": [
+    {"caseId": "booking-question-golden-17", "reason": "факты не совпали с разметкой", "expectedFacts": [{"type": "BOOKING_INTENT", "value": true, "confidence": 1, "evidenceMessageIds": ["case-057-message-1"]}]}
+  ],
+  "passed": true
+}

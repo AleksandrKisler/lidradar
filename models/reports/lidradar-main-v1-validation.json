@@ -1,0 +1,31 @@
+{
+  "datasetSha256": "ef3d598382f998a35278b08fba5a709084cbab810d0deee2367c86928946d3d3",
+  "cases": 60,
+  "truePositive": 51,
+  "falsePositive": 2,
+  "falseNegative": 1,
+  "invalid": 0,
+  "exact": 57,
+  "precision": 0.9622641509433962,
+  "recall": 0.9807692307692307,
+  "f1": 0.9714285714285714,
+  "exactRate": 0.95,
+  "validRate": 1,
+  "evidenceExactRate": 0.9411764705882353,
+  "p50Ms": 1883,
+  "p95Ms": 4038,
+  "p99Ms": 4228,
+  "throughputCasesPerSecond": 0.49481907217501936,
+  "byFactType": {
+    "BOOKING_INTENT": {"truePositive": 19, "falsePositive": 0, "falseNegative": 1, "precision": 1, "recall": 0.95, "f1": 0.9743589743589743},
+    "BUSINESS_COMMITMENT": {"truePositive": 8, "falsePositive": 1, "falseNegative": 0, "precision": 0.8888888888888888, "recall": 1, "f1": 0.9411764705882353},
+    "FOLLOW_UP_CANDIDATE": {"truePositive": 8, "falsePositive": 0, "falseNegative": 0, "precision": 1, "recall": 1, "f1": 1},
+    "PRICE_MENTIONED": {"truePositive": 16, "falsePositive": 1, "falseNegative": 0, "precision": 0.9411764705882353, "recall": 1, "f1": 0.9696969696969697}
+  },
+  "failures": [
+    {"caseId": "booking-question-validation-13", "reason": "факты не совпали с разметкой", "expectedFacts": [{"type": "BOOKING_INTENT", "value": true, "confidence": 1, "evidenceMessageIds": ["case-053-message-1"]}]},
+    {"caseId": "price-no-amount-validation-13", "reason": "факты не совпали с разметкой", "actualFacts": [{"type": "PRICE_MENTIONED", "value": false, "confidence": 0.95, "evidenceMessageIds": ["case-133-message-1"]}]},
+    {"caseId": "commitment-negative-validation-16", "reason": "факты не совпали с разметкой", "actualFacts": [{"type": "BUSINESS_COMMITMENT", "value": true, "confidence": 0.95, "evidenceMessageIds": ["case-176-message-2"]}]}
+  ],
+  "passed": true
+}
