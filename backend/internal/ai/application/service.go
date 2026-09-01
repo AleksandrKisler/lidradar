@@ -397,7 +397,7 @@ func (s Service) newJob(command EnqueueCommand) (domain.Job, error) {
 		command.ModelVersion = DefaultModelVersion
 	}
 	if command.PromptVersion == "" {
-		command.PromptVersion = AnalysisPromptV1
+		command.PromptVersion = CurrentAnalysisPrompt
 	}
 	if command.SchemaVersion == "" {
 		command.SchemaVersion = AnalysisSchemaV1

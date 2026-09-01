@@ -47,7 +47,7 @@ const (
 	defaultTelegramBot       = "LidRadarDevBot"
 	defaultAIProvider        = "fake"
 	defaultAILlamaURL        = "http://llama-server:8080/v1/chat/completions"
-	defaultAIModel           = "local-4b-8b-q4"
+	defaultAIModel           = "lidradar-main-v1"
 	defaultAIPoll            = time.Second
 	defaultAIHeartbeat       = 10 * time.Second
 	defaultAIHTTPTimeout     = 5 * time.Minute

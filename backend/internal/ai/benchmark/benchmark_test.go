@@ -5,10 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"lidradar/backend/internal/ai/domain"
 	"lidradar/backend/internal/ai/infrastructure"
 )
 
-const dataset = `{"version":"lidradar-ai-benchmark.v1","id":"booking-001","split":"GOLDEN","input":{"task":"ANALYZE_CONVERSATION","schemaVersion":"analyze-conversation.v1","promptVersion":"analyze-conversation.prompt.v1","conversationId":"conversation-1","baseConversationRevision":1,"analysisThroughMessageId":"message-1","companyContext":"Детейлинг","messages":[{"id":"message-1","direction":"INCOMING","body":"Можно завтра?"}]},"expectedFacts":[{"type":"BOOKING_INTENT","value":true,"confidence":1,"evidenceMessageIds":["message-1"]}]}
+const dataset = `{"version":"lidradar-ai-benchmark.v1","id":"booking-001","split":"GOLDEN","input":{"task":"ANALYZE_CONVERSATION","schemaVersion":"analyze-conversation.v1","promptVersion":"analyze-conversation.prompt.v5","conversationId":"conversation-1","baseConversationRevision":1,"analysisThroughMessageId":"message-1","companyContext":"Детейлинг","messages":[{"id":"message-1","direction":"INCOMING","body":"Можно завтра?"}]},"expectedFacts":[{"type":"BOOKING_INTENT","value":true,"confidence":1,"evidenceMessageIds":["message-1"]}]}
 `
 
 func TestLoadRunAndGoldenProtection(t *testing.T) {
@@ -43,5 +44,53 @@ func TestLoadRejectsDuplicateAndRunCountsInvalid(t *testing.T) {
 	}
 	if report.Passed || report.Invalid != 1 || report.FalseNegative != 1 {
 		t.Fatalf("unexpected report: %+v", report)
+	}
+}
+
+func TestLoadRejectsUnknownEvidenceAndTrailingJSON(t *testing.T) {
+	unknownEvidence := strings.Replace(dataset, `"message-1"]}]}`, `"missing-message"]}]}`, 1)
+	if _, _, err := Load(strings.NewReader(unknownEvidence)); err == nil {
+		t.Fatal("expected unknown evidence rejection")
+	}
+	withTrailingJSON := strings.TrimSpace(dataset) + `{}` + "\n"
+	if _, _, err := Load(strings.NewReader(withTrailingJSON)); err == nil {
+		t.Fatal("expected trailing JSON rejection")
+	}
+}
+
+func TestAuditRejectsConversationLeakage(t *testing.T) {
+	cases, _, err := Load(strings.NewReader(dataset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyCase := cases[0]
+	copyCase.ID = "booking-validation-001"
+	copyCase.Split = SplitValidation
+	if _, err := AuditCases(append(cases, copyCase)); err == nil {
+		t.Fatal("expected duplicate conversation rejection")
+	}
+}
+
+func TestPriceComparisonNormalizesDecimalNotation(t *testing.T) {
+	expectedAmount := "15000.00"
+	actualAmount := "015000.0"
+	expected := domain.SemanticFact{Type: domain.FactPriceMentioned, Value: true, Amount: &expectedAmount, Currency: "RUB", EvidenceMessageIDs: []string{"message-1"}}
+	actual := domain.SemanticFact{Type: domain.FactPriceMentioned, Value: true, Amount: &actualAmount, Currency: "RUB", EvidenceMessageIDs: []string{"message-1"}}
+	if !sameSemanticFact(actual, expected) {
+		t.Fatal("equivalent decimal amounts must match")
+	}
+}
+
+func TestRunAppliesValidRateThreshold(t *testing.T) {
+	cases, digest, err := Load(strings.NewReader(dataset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(context.Background(), infrastructure.FakeProvider{Output: `not json`}, cases, digest, Thresholds{MinimumValidRate: .99})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ValidRate != 0 || report.Passed {
+		t.Fatalf("unexpected valid-rate result: %+v", report)
 	}
 }

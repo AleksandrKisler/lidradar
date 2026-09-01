@@ -49,7 +49,7 @@ services:
       LIDRADAR_PUBLIC_BASE_URL: ${LIDRADAR_PUBLIC_BASE_URL:-}
       LIDRADAR_INTEGRATION_ENCRYPTION_KEY: ${LIDRADAR_INTEGRATION_ENCRYPTION_KEY:-}
       LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:-LidRadarDevBot}
-      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-fake-ai-v1}
+      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-lidradar-main-v1}
     ports:
       - "8080:8080"
     depends_on:
@@ -95,7 +95,7 @@ services:
       LIDRADAR_AI_CLOUD_URL: http://api:8080
       LIDRADAR_AI_CREDENTIALS_FILE: /run/secrets/ai-node.json
       LIDRADAR_AI_PROVIDER: fake
-      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-fake-ai-v1}
+      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-lidradar-main-v1}
     volumes:
       - ${LIDRADAR_AI_CREDENTIALS_HOST_FILE:-./runtime/ai-node.json}:/run/secrets/ai-node.json:ro
     depends_on:

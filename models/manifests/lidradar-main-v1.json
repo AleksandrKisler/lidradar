@@ -1,14 +1,73 @@
 {
   "name": "lidradar-main-v1",
-  "status": "CANDIDATE_NOT_FROZEN",
+  "status": "FROZEN",
   "contractVersion": "analyze-conversation.v1",
-  "promptVersion": "analyze-conversation.prompt.v1",
+  "promptVersion": "analyze-conversation.prompt.v5",
   "datasetVersion": "lidradar-ai-benchmark.v1",
+  "dataset": {
+    "cases": 300,
+    "trainCases": 180,
+    "validationCases": 60,
+    "goldenCases": 60,
+    "goldenSHA256": "c85cd54d3c6f43134c509381247a278c4f8ec05975acf1f6a3f54aa90e55e4f2"
+  },
   "runtime": "llama.cpp",
-  "targetHardware": "RTX 4060 8 GB",
-  "qualityGate": null,
-  "performanceGate": null,
-  "modelArtifact": null,
-  "modelSHA256": null,
-  "freezeReason": "Ожидаются утверждённые gate, 300–500 размеченных случаев и измерение на RTX 4060"
+  "targetHardware": "NVIDIA GeForce RTX 4060 8 GB",
+  "generation": {
+    "temperature": 0.7,
+    "topP": 0.8,
+    "topK": 20,
+    "minP": 0,
+    "presencePenalty": 1.5,
+    "seed": 42,
+    "thinking": false,
+    "contextSize": 4096,
+    "parallelism": 1
+  },
+  "qualityGate": {
+    "minimumPrecision": 0.9,
+    "minimumFactPrecision": 0.85,
+    "minimumRecall": 0.9,
+    "minimumF1": 0.9,
+    "minimumExactRate": 0.85,
+    "minimumValidRate": 0.99,
+    "minimumEvidenceExactRate": 0.9
+  },
+  "performanceGate": {
+    "maximumP95Ms": 8000,
+    "maximumVRAMMiB": 7500,
+    "maximumOOM": 0,
+    "minimumTokensPerSecond": 20
+  },
+  "modelArtifact": "Qwen3-8B-Q4_K_M.gguf",
+  "modelSHA256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+  "validationResult": {
+    "report": "models/reports/lidradar-main-v1-validation.json",
+    "precision": 0.9622641509433962,
+    "recall": 0.9807692307692307,
+    "f1": 0.9714285714285714,
+    "exactRate": 0.95,
+    "validRate": 1,
+    "evidenceExactRate": 0.9411764705882353,
+    "p95Ms": 4038,
+    "passed": true
+  },
+  "goldenResult": {
+    "report": "models/reports/lidradar-main-v1-golden.json",
+    "precision": 1,
+    "recall": 0.9807692307692307,
+    "f1": 0.9902912621359223,
+    "exactRate": 0.9833333333333333,
+    "validRate": 1,
+    "evidenceExactRate": 0.9411764705882353,
+    "p95Ms": 3848,
+    "passed": true
+  },
+  "hardwareResult": {
+    "peakObservedVRAMMiB": 5360,
+    "oom": 0,
+    "minimumObservedTokensPerSecond": 46.66,
+    "passed": true
+  },
+  "frozenAt": "2026-09-01T18:36:00Z"
 }

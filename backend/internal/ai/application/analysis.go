@@ -13,11 +13,16 @@ import (
 )
 
 const (
-	AnalysisSchemaV1    = "analyze-conversation.v1"
-	AnalysisPromptV1    = "analyze-conversation.prompt.v1"
-	DefaultModelVersion = "local-4b-8b-q4"
-	MaxContextMessages  = 20
-	MaxContextRunes     = 12000 // консервативная оценка для цели в 3000 токенов
+	AnalysisSchemaV1      = "analyze-conversation.v1"
+	AnalysisPromptV1      = "analyze-conversation.prompt.v1"
+	AnalysisPromptV2      = "analyze-conversation.prompt.v2"
+	AnalysisPromptV3      = "analyze-conversation.prompt.v3"
+	AnalysisPromptV4      = "analyze-conversation.prompt.v4"
+	AnalysisPromptV5      = "analyze-conversation.prompt.v5"
+	CurrentAnalysisPrompt = AnalysisPromptV5
+	DefaultModelVersion   = "lidradar-main-v1"
+	MaxContextMessages    = 20
+	MaxContextRunes       = 12000 // консервативная оценка для цели в 3000 токенов
 )
 
 var ErrInvalidAIOutput = errors.New("invalid AI output")
@@ -70,7 +75,7 @@ func BuildAnalysisContext(c ConversationContext) (AnalyzeConversationRequestV1, 
 		}
 	}
 	return AnalyzeConversationRequestV1{
-		Task: "ANALYZE_CONVERSATION", SchemaVersion: AnalysisSchemaV1, PromptVersion: AnalysisPromptV1,
+		Task: "ANALYZE_CONVERSATION", SchemaVersion: AnalysisSchemaV1, PromptVersion: CurrentAnalysisPrompt,
 		ConversationID: c.ConversationID, BaseConversationRevision: c.Revision,
 		AnalysisThroughMessageID: messages[len(messages)-1].ID, CompanyContext: c.CompanyContext,
 		ConversationSummary: c.ExistingSummary, Messages: messages,
@@ -146,7 +151,7 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 		}
 		fact.EvidenceMessageIDs = normalizedEvidence
 		if fact.Type == domain.FactPriceMentioned {
-			if fact.Value && (fact.Amount == nil || strings.TrimSpace(*fact.Amount) == "" || !validCurrency(fact.Currency)) {
+			if fact.Value && (fact.Amount == nil || !validDecimalAmount(*fact.Amount) || !validCurrency(fact.Currency)) {
 				return result, fmt.Errorf("%w: mentioned price lacks amount/currency", ErrInvalidAIOutput)
 			}
 			if !fact.Value && (fact.Amount != nil || fact.Currency != "") {
@@ -190,6 +195,25 @@ func validCurrency(value string) bool {
 		}
 	}
 	return true
+}
+
+func validDecimalAmount(value string) bool {
+	if value == "" {
+		return false
+	}
+	dotSeen := false
+	digitSeen := false
+	for index := 0; index < len(value); index++ {
+		switch {
+		case value[index] >= '0' && value[index] <= '9':
+			digitSeen = true
+		case value[index] == '.' && !dotSeen && index > 0 && index < len(value)-1:
+			dotSeen = true
+		default:
+			return false
+		}
+	}
+	return digitSeen
 }
 
 func appendUnique(values []string, additional ...string) []string {

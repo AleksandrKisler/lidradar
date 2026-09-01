@@ -10,7 +10,7 @@ services:
     gpus: all
     command:
       - --model
-      - /models/${LIDRADAR_AI_MODEL_FILE:-Qwen3-4B-Q4_K_M.gguf}
+      - /models/${LIDRADAR_AI_MODEL_FILE:-Qwen3-8B-Q4_K_M.gguf}
       - --host
       - 0.0.0.0
       - --port
@@ -62,7 +62,7 @@ services:
       LIDRADAR_AI_CREDENTIALS_FILE: /run/secrets/ai-node.json
       LIDRADAR_AI_PROVIDER: llama
       LIDRADAR_AI_LLAMA_URL: http://llama-server:8080/v1/chat/completions
-      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-candidate-q4}
+      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-lidradar-main-v1}
       LIDRADAR_AI_POLL_INTERVAL: ${LIDRADAR_AI_POLL_INTERVAL:-1s}
       LIDRADAR_AI_HEARTBEAT_INTERVAL: ${LIDRADAR_AI_HEARTBEAT_INTERVAL:-10s}
       LIDRADAR_AI_HTTP_TIMEOUT: ${LIDRADAR_AI_HTTP_TIMEOUT:-5m}

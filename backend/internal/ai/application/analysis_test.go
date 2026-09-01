@@ -26,7 +26,7 @@ func TestContextBuilderBoundsAndVersionsRequest(t *testing.T) {
 	if len(r.Messages) != application.MaxContextMessages || r.Messages[0].ID != "f" || r.AnalysisThroughMessageID != "y" {
 		t.Fatalf("unexpected window: %#v", r.Messages)
 	}
-	if r.SchemaVersion != application.AnalysisSchemaV1 || r.PromptVersion != application.AnalysisPromptV1 {
+	if r.SchemaVersion != application.AnalysisSchemaV1 || r.PromptVersion != application.CurrentAnalysisPrompt {
 		t.Fatalf("versions = %q %q", r.SchemaVersion, r.PromptVersion)
 	}
 	encoded, err := application.EncodeAnalysisRequest(r)
@@ -68,6 +68,7 @@ func TestAnalysisContractRejectsMalformedAndInconsistentResults(t *testing.T) {
 		"missing evidence":     validResult(`[{"type":"BOOKING_INTENT","value":true,"confidence":0.9,"evidenceMessageIds":[]}]`),
 		"semantic consistency": validResult(`[{"type":"PRICE_MENTIONED","value":false,"confidence":0.9,"evidenceMessageIds":["m2"],"amount":"` + amount + `","currency":"RUB"}]`),
 		"invalid currency":     validResult(`[{"type":"PRICE_MENTIONED","value":true,"confidence":0.9,"evidenceMessageIds":["m2"],"amount":"` + amount + `","currency":"rub"}]`),
+		"invalid amount":       validResult(`[{"type":"PRICE_MENTIONED","value":true,"confidence":0.9,"evidenceMessageIds":["m2"],"amount":"price","currency":"RUB"}]`),
 		"multiple JSON values": validResult(`[]`) + ` {}`,
 		"garbage after JSON":   validResult(`[]`) + ` недоверенные данные`,
 	}

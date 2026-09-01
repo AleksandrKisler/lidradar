@@ -405,15 +405,17 @@ PostgreSQL.
 защищены от `UPDATE` и `DELETE` триггером PostgreSQL. Чужие идентификаторы
 неотличимы от отсутствующих и не позволяют создать запись.
 
-Architecture changes require an ADR; see [`../adr/README.md`](../adr/README.md).
+Изменения архитектуры требуют ADR; перечень решений находится в
+[`../adr/README.md`](../adr/README.md).
 
-### Home AI node infrastructure
+### Домашний AI-узел
 
-AI inference uses the outbound pull model from ADR 0030. Registered nodes are
-authenticated by a rotatable secret whose SHA-256 digest is the only persisted
-form. A ready heartbeat renews only leases currently owned by that node. Jobs
-carry the tenant, conversation, base conversation revision, and last analyzed
-message identifier.
+Выполнение AI-задач использует исходящую модель опроса из ADR 0030.
+Зарегистрированные узлы удостоверяются заменяемым секретом; в постоянном
+хранилище находится только его SHA-256. Сигнал готовности продлевает только те
+аренды, которыми уже владеет отправивший его узел. Задание содержит организацию,
+переписку, исходную ревизию переписки и идентификатор последнего
+проанализированного сообщения.
 
 Каждый машинный POST-запрос содержит `Authorization: Bearer`,
 `X-LidRadar-Node-ID`, UTC `X-LidRadar-Timestamp`, уникальный
@@ -427,15 +429,17 @@ path, точный timestamp, request ID и SHA-256 точного тела. Clo
 сразу запрещает старый секрет и оставляет текущей аренде только естественное
 истечение. Отзыв переводит узел в `REVOKED`, сохраняя историю Job и Run.
 
-The default lease is 120 seconds. Claim is atomic, requires an exact match
-between the job model requirement and node model version, expired work may be
-reclaimed after a node disconnect, and a former owner cannot complete a reclaimed job.
-Each attempt has a durable AI run with snapshot freshness fields. Successful
-inference is recorded independently from application status: invalid output is
-`REJECTED`, and a changed revision or analyzed-message identifier is `STALE`.
-Neither state mutates domain data. The Go AI agent retains no customer text on
-disk, uses outbound calls, and resumes polling after restart. A deterministic
-fake provider supports development and disconnect testing without a GPU.
+Стандартная аренда длится 120 секунд. Захват атомарен и требует точного
+совпадения требуемой заданием версии модели с версией узла. Просроченное задание
+можно перехватить после отключения узла, а прежний владелец уже не может его
+завершить. Каждая попытка создаёт долговечную запись запуска AI с полями
+свежести снимка. Успешное обращение к модели учитывается отдельно от результата
+применения: недопустимый ответ получает `REJECTED`, а изменившаяся ревизия или
+идентификатор последнего сообщения — `STALE`. Ни одно из этих состояний не
+изменяет предметные данные. Агент на Go не сохраняет переписки на диске,
+использует только исходящие соединения и возобновляет опрос после перезапуска.
+Детерминированная заглушка позволяет разрабатывать и проверять потерю связи без
+графического ускорителя.
 
 Проверка свежести перед применением результата выполняется повторно внутри
 транзакции завершения под блокировкой строки Conversation. Изменение между
@@ -490,20 +494,39 @@ Opportunity. Каждый факт должен существовать не п
 будущие Risk-функции обязаны получать доверенные смысловые факты через
 детерминированные правила.
 
-### AI benchmark and model freeze
+### Проверка и фиксация AI-модели
 
-Conversation-analysis models are compared offline with the versioned JSONL
-format `lidradar-ai-benchmark.v1`. Dataset case IDs are unique and cases are
-assigned explicitly to `TRAIN`, `VALIDATION`, or `GOLDEN`; a case with no facts
-uses an empty `expectedFacts` array rather than omitting its labels. Repository
-fixtures contain synthetic content only. The reviewed golden file is protected
-by SHA-256 and the runner fails closed when its digest changes.
+Модели анализа переписки сравниваются вне рабочего контура на версионированных
+случаях JSONL `lidradar-ai-benchmark.v1`. Идентификаторы случаев уникальны, а
+каждый случай явно относится к `TRAIN`, `VALIDATION` или `GOLDEN`. Отсутствие
+ожидаемых фактов задаётся пустым `expectedFacts`, а не пропуском разметки.
+Репозиторий содержит только синтетические переписки. Проверенный контрольный
+файл защищён SHA-256; несовпадение суммы прекращает запуск.
 
-The runner sends the same versioned request consumed in production, applies the
-production output validator and confidence policy, and reports precision,
-recall, F1, exact-case rate, invalid output count, p50/p95/p99 latency, and
-throughput. Quality and performance thresholds must be supplied explicitly
-until product owners approve fixed values. A model manifest may be marked
-frozen only after a 300–500 case labelled dataset passes those approved gates on
-the target RTX 4060; a missing artifact digest or hardware run leaves it a
-candidate.
+Исполнитель отправляет тот же версионированный запрос, который используется в
+рабочем контуре, применяет рабочую проверку ответа и порог доверия. Отчёт
+содержит точность, полноту, F1, долю полностью верных случаев, долю допустимого
+JSON, точное совпадение доказательств, p50/p95/p99 задержки и пропускную
+способность. Отдельно рассчитывается точность каждого типа смыслового факта,
+чтобы общий результат не скрывал небезопасную категорию.
+
+До открытия контрольной выборки для `lidradar-main-v1` установлены следующие
+границы: общая точность не ниже 0,90; точность каждого поддерживаемого типа
+факта не ниже 0,85; полнота и F1 не ниже 0,90; полностью верные случаи не ниже
+0,85; допустимый JSON не ниже 0,99; точное совпадение доказательств не ниже
+0,90; p95 не выше 8000 мс. На RTX 4060 дополнительно требуются отсутствие OOM,
+пиковое потребление видеопамяти не выше 7500 МиБ и скорость генерации не ниже
+20 токенов/с.
+
+Манифест можно перевести в `FROZEN` только после прохождения всех границ на
+размеченном наборе из 300–500 случаев и целевой RTX 4060, с записанными SHA-256
+модели и контрольной выборки. Настройка инструкции и параметров генерации
+допускается по обучающей и проверочной частям; контрольная часть запускается
+один раз для окончательного решения и после этого не используется для
+подгонки. Любой незаполненный обязательный результат оставляет модель
+кандидатом.
+
+Текущая версия `analyze-conversation.v1` измеряет четыре поддерживаемых факта:
+намерение записаться, деловое обязательство, необходимость следующего контакта
+и упоминание цены. Метрики лида, стадии и вида услуги нельзя объявлять
+проверенными, пока эти поля не появятся в контракте и размеченном наборе.

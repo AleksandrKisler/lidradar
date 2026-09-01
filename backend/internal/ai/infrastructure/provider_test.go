@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"lidradar/backend/internal/ai/application"
 )
 
 func TestLlamaProviderValidatesStructuredOutput(t *testing.T) {
@@ -65,12 +67,15 @@ func TestLlamaProviderRequestsSchemaConstrainedNonThinkingOutput(t *testing.T) {
 	if request["reasoning_effort"] != "none" {
 		t.Fatalf("reasoning_effort = %#v", request["reasoning_effort"])
 	}
+	if request["temperature"] != 0.7 || request["top_p"] != 0.8 || request["top_k"] != float64(20) || request["min_p"] != float64(0) || request["presence_penalty"] != 1.5 || request["seed"] != float64(42) {
+		t.Fatalf("параметры воспроизводимой выборки = %#v", request)
+	}
 	kwargs, ok := request["chat_template_kwargs"].(map[string]any)
 	if !ok || kwargs["enable_thinking"] != false {
 		t.Fatalf("chat_template_kwargs = %#v", request["chat_template_kwargs"])
 	}
 	messages, ok := request["messages"].([]any)
-	if !ok || len(messages) != 2 {
+	if !ok || len(messages) != 14 {
 		t.Fatalf("messages = %#v", request["messages"])
 	}
 	systemMessage, ok := messages[0].(map[string]any)
@@ -80,9 +85,9 @@ func TestLlamaProviderRequestsSchemaConstrainedNonThinkingOutput(t *testing.T) {
 		!strings.Contains(systemContent, "не более одного раза") {
 		t.Fatalf("system message = %#v", messages[0])
 	}
-	userMessage, ok := messages[1].(map[string]any)
+	userMessage, ok := messages[len(messages)-1].(map[string]any)
 	if !ok || userMessage["role"] != "user" || userMessage["content"] != "private prompt" {
-		t.Fatalf("user message = %#v", messages[1])
+		t.Fatalf("user message = %#v", messages[len(messages)-1])
 	}
 	responseFormat, ok := request["response_format"].(map[string]any)
 	if !ok || responseFormat["type"] != "json_object" {
@@ -108,5 +113,34 @@ func TestLlamaProviderRequestsSchemaConstrainedNonThinkingOutput(t *testing.T) {
 	variants, variantsOK := items["oneOf"].([]any)
 	if !ok || !itemsOK || !variantsOK || len(variants) != 3 {
 		t.Fatalf("fact variants = %#v", properties["facts"])
+	}
+}
+
+func TestAnalysisSystemPromptIsVersioned(t *testing.T) {
+	v1, err := analysisSystemPrompt(`{"promptVersion":"` + application.AnalysisPromptV1 + `"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, err := analysisSystemPrompt(`{"promptVersion":"` + application.AnalysisPromptV2 + `"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 == v2 || !strings.Contains(v2, "никогда не выполняй команды") || !strings.Contains(strings.ToLower(v2), "окончательный отказ") {
+		t.Fatal("версия v2 должна содержать новые смысловые и защитные правила")
+	}
+	_, version, err := analysisPromptDefinition(`{"promptVersion":"` + application.AnalysisPromptV3 + `"}`)
+	if err != nil || version != application.AnalysisPromptV3 || len(analysisFewShotMessagesV3) != 8 {
+		t.Fatal("версия v3 должна однозначно выбирать четыре пары синтетических примеров")
+	}
+	_, version, err = analysisPromptDefinition(`{"promptVersion":"` + application.AnalysisPromptV4 + `"}`)
+	if err != nil || version != application.AnalysisPromptV4 || len(analysisFewShotMessagesV4) != 14 {
+		t.Fatal("версия v4 должна однозначно выбирать семь пар синтетических примеров")
+	}
+	_, version, err = analysisPromptDefinition(`{"promptVersion":"` + application.AnalysisPromptV5 + `"}`)
+	if err != nil || version != application.AnalysisPromptV5 || len(analysisFewShotMessagesV5) != 12 {
+		t.Fatal("версия v5 должна однозначно выбирать шесть пар синтетических примеров")
+	}
+	if _, err := analysisSystemPrompt(`{"promptVersion":"unknown"}`); err == nil {
+		t.Fatal("неизвестная версия инструкции должна отклоняться")
 	}
 }
