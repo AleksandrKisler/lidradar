@@ -33,8 +33,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
 
   ai-agent:
+    image: ${LIDRADAR_AI_AGENT_IMAGE:-lidradar/ai-agent:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -46,9 +53,11 @@ services:
     user: "0:0"
     depends_on:
       llama-server:
-        condition: service_started
+        condition: service_healthy
     environment:
-      LIDRADAR_ENV: production
+      # production остаётся безопасным значением по умолчанию и требует HTTPS.
+      # development разрешён только для изолированного испытания в локальной сети.
+      LIDRADAR_ENV: ${LIDRADAR_AI_ENV:-production}
       LIDRADAR_AI_CLOUD_URL: ${LIDRADAR_AI_CLOUD_URL:?LIDRADAR_AI_CLOUD_URL is required}
       LIDRADAR_AI_CREDENTIALS_FILE: /run/secrets/ai-node.json
       LIDRADAR_AI_PROVIDER: llama

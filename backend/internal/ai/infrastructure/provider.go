@@ -48,6 +48,38 @@ type LlamaProvider struct {
 	Client                *http.Client
 }
 
+// analysisResultGenerationSchemaV1 is the grammar-compatible subset of the
+// canonical analyze-conversation.v1 contract. The application validator stays
+// authoritative and additionally checks length and semantic consistency.
+// Keeping summary.maxLength out is intentional: llama.cpp expands large string
+// bounds into a grammar that exceeds its safe repetition limit.
+var analysisResultGenerationSchemaV1 = json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "analysisThroughMessageId", "summary", "facts"],
+  "properties": {
+    "schemaVersion": {"const": "analyze-conversation.v1"},
+    "analysisThroughMessageId": {"type": "string", "minLength": 1},
+    "summary": {"type": "string", "minLength": 1},
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value", "confidence", "evidenceMessageIds"],
+        "properties": {
+          "type": {"enum": ["BOOKING_INTENT", "BUSINESS_COMMITMENT", "PRICE_MENTIONED", "FOLLOW_UP_CANDIDATE"]},
+          "value": {"type": "boolean"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "evidenceMessageIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "amount": {"type": "string", "minLength": 1},
+          "currency": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}`)
+
 func (p LlamaProvider) Ready(ctx context.Context) error {
 	healthURL := p.HealthURL
 	if healthURL == "" {
@@ -85,10 +117,18 @@ func (p LlamaProvider) Infer(ctx context.Context, prompt string) (string, error)
 		client = http.DefaultClient
 	}
 	body, _ := json.Marshal(map[string]any{
-		"model":           p.Model,
-		"messages":        []map[string]string{{"role": "user", "content": prompt}},
-		"temperature":     0,
-		"response_format": map[string]string{"type": "json_object"},
+		"model": p.Model,
+		"messages": []map[string]string{
+			{"role": "system", "content": "Верни только JSON, строго соответствующий переданной схеме."},
+			{"role": "user", "content": prompt},
+		},
+		"temperature":          0,
+		"reasoning_effort":     "none",
+		"chat_template_kwargs": map[string]bool{"enable_thinking": false},
+		"response_format": map[string]any{
+			"type":   "json_object",
+			"schema": analysisResultGenerationSchemaV1,
+		},
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.URL, bytes.NewReader(body))
 	if err != nil {
