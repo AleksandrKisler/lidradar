@@ -463,26 +463,32 @@ Opportunity. Каждый факт должен существовать не п
 
 ### AI conversation analysis
 
-Conversation analysis uses the versioned `analyze-conversation.v1` contract in
-`contracts/ai/analyze_conversation_v1.schema.json`. Context is limited to the
-latest 20 messages and a conservative 3,000-token target, and contains the
-company context, prior derived summary, task, and output contract. Tenant IDs
-are not sent to the model.
+Анализ переписки использует версионированный контракт
+`analyze-conversation.v1` из
+`contracts/ai/analyze_conversation_v1.schema.json`. Контекст ограничен 20
+последними анализируемыми сообщениями и консервативной целью примерно 3000
+токенов. Он содержит контекст компании, прежнее производное резюме, задачу и
+версию результата. Идентификатор организации модели не передаётся.
 
-Provider output is retained for audit and is strictly decoded before use.
-Unknown fields, missing fields, unsupported fact enums, confidence outside
-0–1, missing evidence, and inconsistent price facts are rejected. Confidence
-of 0.85 or above is strong, 0.65–0.849 is weak, and below 0.65 is untrusted;
-untrusted facts are not supplied to domain policies. Model, prompt, schema,
-conversation revision, and last-message versions are retained on jobs, runs,
-and derived summaries.
+Исходный ответ поставщика сохраняется для аудита и строго разбирается до
+использования. Лишние и отсутствующие поля, дополнительные данные после JSON,
+неподдерживаемые типы фактов, уверенность вне диапазона 0–1, отсутствующие
+доказательства и несогласованные поля цены отклоняются. Одинаковые факты
+объединяются с минимальной уверенностью и общей доказательной базой;
+противоречивые повторы отклоняются. Уверенность от 0,85 считается сильной, от
+0,65 до 0,849 — слабой, ниже 0,65 — недоверенной. Недоверенные факты не
+передаются предметным правилам. Версии модели, инструкции, схемы, revision и
+последнего анализируемого сообщения сохраняются в заданиях, попытках и
+производных резюме.
 
-Freshness is checked against both the conversation revision and last analyzed
-message. A stale run is preserved with `STALE` application status and schedules
-a replacement analysis for the current snapshot. Rejected and stale output
-cannot mutate Opportunity or Risk state. A fresh valid result may update only
-the derived ConversationSummary; later risk features must consume trusted
-semantic facts through deterministic policies.
+Свежесть проверяется одновременно по revision переписки и последнему
+анализируемому текстовому сообщению. Материал без текста учитывается revision,
+но не создаёт ложное несовпадение message ID. Устаревшая попытка сохраняется со
+статусом применения `STALE` и ставит повторный анализ актуального снимка.
+Отклонённый и устаревший ответ не может изменять Opportunity или Risk. Свежий
+допустимый результат может обновить только производное ConversationSummary;
+будущие Risk-функции обязаны получать доверенные смысловые факты через
+детерминированные правила.
 
 ### AI benchmark and model freeze
 

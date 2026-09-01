@@ -316,6 +316,193 @@ func TestPostgresFinalizationAtomicallyRejectsFreshnessRace(t *testing.T) {
 	}
 }
 
+func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	tenant := testsupport.TwoTenants(t, ctx, pool).A
+	now := time.Date(2026, 9, 1, 1, 0, 0, 0, time.UTC)
+	modelVersion := "stage-14-test-model"
+	secret := "stage-14-secret-with-at-least-32-characters"
+	store := infrastructure.NewPostgresStore(pool)
+	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, modelVersion)
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).
+		WithStaleJobBuilder(builder)
+	node, err := service.RegisterNode(ctx, "AI-NODE-STAGE-14", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name        string
+		stale       bool
+		output      func(string) string
+		wantStatus  domain.ApplicationStatus
+		wantSummary int
+	}{
+		{
+			name: "invalid",
+			output: func(string) string {
+				return `{"schemaVersion":"analyze-conversation.v1","facts":[]}`
+			},
+			wantStatus: domain.ApplicationRejected,
+		},
+		{
+			name: "low confidence",
+			output: func(messageID string) string {
+				return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Недостоверное предположение.","facts":[{"type":"BOOKING_INTENT","value":true,"confidence":0.64,"evidenceMessageIds":["` + messageID + `"]}]}`
+			},
+			wantStatus: domain.ApplicationApplied, wantSummary: 1,
+		},
+		{
+			name:  "stale",
+			stale: true,
+			output: func(messageID string) string {
+				return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Устаревший результат.","facts":[]}`
+			},
+			wantStatus: domain.ApplicationStale,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			conversationID, messageID := insertAIConversation(t, pool, tenant, "Можно записаться завтра?")
+			opportunityID := mustID(t)
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO opportunities(
+					id, tenant_id, conversation_id, stage, currency,
+					opened_at, created_at, updated_at
+				) VALUES ($1, $2, $3, 'ENGAGED', 'RUB', $4, $4, $4)`,
+				opportunityID, tenant.TenantID, conversationID, now.Add(-time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			command, err := builder.BuildAnalysisJob(ctx, tenant.TenantID, conversationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			job, err := service.Enqueue(ctx, command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := service.Heartbeat(ctx, node.ID, secret, application.HeartbeatCommand{
+				Status: domain.NodeReady, ModelVersion: modelVersion, AvailableSlots: 1,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if claimed, found, err := service.Claim(ctx, node.ID, secret); err != nil || !found || claimed.ID != job.ID {
+				t.Fatalf("захват задания = %#v, %v, %v", claimed, found, err)
+			}
+			run, err := service.Started(ctx, node.ID, secret, job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if testCase.stale {
+				if _, err := pool.Exec(ctx, `
+					UPDATE conversations SET revision = revision + 1
+					WHERE tenant_id = $1 AND id = $2`, tenant.TenantID, conversationID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			completed, err := service.Complete(ctx, node.ID, secret, job.ID, run.ID, testCase.output(messageID))
+			if err != nil || completed.ApplicationStatus != testCase.wantStatus {
+				t.Fatalf("завершение = %#v, %v", completed, err)
+			}
+
+			var stage string
+			var updatedAt time.Time
+			var riskCount, summaryCount int
+			if err := pool.QueryRow(ctx, `
+				SELECT stage, updated_at FROM opportunities
+				WHERE tenant_id = $1 AND id = $2`, tenant.TenantID, opportunityID).Scan(&stage, &updatedAt); err != nil {
+				t.Fatal(err)
+			}
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*) FROM risk_signals
+				WHERE tenant_id = $1 AND opportunity_id = $2`, tenant.TenantID, opportunityID).Scan(&riskCount); err != nil {
+				t.Fatal(err)
+			}
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*) FROM conversation_summaries
+				WHERE tenant_id = $1 AND conversation_id = $2`, tenant.TenantID, conversationID).Scan(&summaryCount); err != nil {
+				t.Fatal(err)
+			}
+			if stage != "ENGAGED" || !updatedAt.Equal(now.Add(-time.Hour)) || riskCount != 0 || summaryCount != testCase.wantSummary {
+				t.Fatalf("предметное состояние изменилось: stage=%s updated=%s risks=%d summaries=%d",
+					stage, updatedAt, riskCount, summaryCount)
+			}
+		})
+	}
+}
+
+func TestPostgresFreshnessUsesLastAnalyzableMessage(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	tenant := testsupport.TwoTenants(t, ctx, pool).A
+	conversationID, textMessageID := insertAIConversation(t, pool, tenant, "Нужна запись на завтра")
+	var connectionID string
+	if err := pool.QueryRow(ctx, `
+		SELECT connection_id FROM conversations
+		WHERE tenant_id = $1 AND id = $2`, tenant.TenantID, conversationID).Scan(&connectionID); err != nil {
+		t.Fatal(err)
+	}
+	mediaMessageID := mustID(t)
+	mediaTime := time.Date(2026, 8, 26, 11, 0, 1, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages(
+			id, tenant_id, conversation_id, connection_id, external_id, direction,
+			type, text, sent_at, received_at
+		) VALUES ($1, $2, $3, $4, $5, 'INCOMING', 'IMAGE', NULL, $6, $6)`,
+		mediaMessageID, tenant.TenantID, conversationID, connectionID,
+		"media-"+mediaMessageID, mediaTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE conversations
+		SET revision = 2, last_message_at = $3, last_message_direction = 'INCOMING', updated_at = $3
+		WHERE tenant_id = $1 AND id = $2`, tenant.TenantID, conversationID, mediaTime); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
+	modelVersion := "stage-14-media-model"
+	secret := "stage-14-media-secret-with-at-least-32-characters"
+	store := infrastructure.NewPostgresStore(pool)
+	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, modelVersion)
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).
+		WithStaleJobBuilder(builder)
+	node, err := service.RegisterNode(ctx, "AI-NODE-STAGE-14-MEDIA", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := builder.BuildAnalysisJob(ctx, tenant.TenantID, conversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.BaseConversationRevision != 2 || command.AnalysisThroughMessageID != textMessageID {
+		t.Fatalf("снимок контекста = revision %d, message %s", command.BaseConversationRevision, command.AnalysisThroughMessageID)
+	}
+	job, err := service.Enqueue(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Heartbeat(ctx, node.ID, secret, application.HeartbeatCommand{
+		Status: domain.NodeReady, ModelVersion: modelVersion, AvailableSlots: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := service.Claim(ctx, node.ID, secret); err != nil || !found {
+		t.Fatalf("захват задания = %v, %v", found, err)
+	}
+	run, err := service.Started(ctx, node.ID, secret, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + textMessageID + `","summary":"Клиент хочет записаться завтра.","facts":[]}`
+	completed, err := service.Complete(ctx, node.ID, secret, job.ID, run.ID, output)
+	if err != nil || completed.ApplicationStatus != domain.ApplicationApplied {
+		t.Fatalf("завершение = %#v, %v", completed, err)
+	}
+}
+
 func insertAIConversation(t *testing.T, pool *pgxpool.Pool, tenant testsupport.TenantFixture, text string) (string, string) {
 	t.Helper()
 	ctx := context.Background()

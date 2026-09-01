@@ -442,6 +442,9 @@ func (store *PostgresStore) ConversationSnapshot(ctx context.Context, tenantID, 
 			FROM messages AS message
 			WHERE message.tenant_id = conversation.tenant_id
 			  AND message.conversation_id = conversation.id
+			  AND message.direction IN ('INCOMING', 'OUTGOING')
+			  AND message.provider_deleted_at IS NULL
+			  AND message.text IS NOT NULL AND btrim(message.text) <> ''
 			ORDER BY message.sent_at DESC, message.id DESC
 			LIMIT 1
 		), '')
@@ -520,6 +523,9 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 				FROM messages AS message
 				WHERE message.tenant_id = conversation.tenant_id
 				  AND message.conversation_id = conversation.id
+				  AND message.direction IN ('INCOMING', 'OUTGOING')
+				  AND message.provider_deleted_at IS NULL
+				  AND message.text IS NOT NULL AND btrim(message.text) <> ''
 				ORDER BY message.sent_at DESC, message.id DESC
 				LIMIT 1
 			), '')

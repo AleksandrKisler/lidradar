@@ -12,8 +12,9 @@ import (
 	"lidradar/backend/internal/ai/application"
 )
 
-// PostgresAnalysisJobBuilder creates a fresh, bounded prompt from one
-// repeatable-read snapshot. Tenant identifiers never enter model context.
+// PostgresAnalysisJobBuilder строит свежую ограниченную инструкцию из одного
+// согласованного снимка repeatable read. Идентификатор организации никогда не
+// попадает в контекст модели.
 type PostgresAnalysisJobBuilder struct {
 	pool         *pgxpool.Pool
 	modelVersion string

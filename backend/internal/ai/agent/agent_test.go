@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ type recordingCloud struct {
 	claimed        bool
 	heartbeatSlots []int
 	completed      chan struct{}
+	failed         chan string
 }
 
 func (cloud *recordingCloud) Heartbeat(_ context.Context, status domain.NodeStatus, _ string, slots int) error {
@@ -47,7 +49,15 @@ func (cloud *recordingCloud) Complete(context.Context, string, string, string) e
 	return nil
 }
 
-func (*recordingCloud) Failed(context.Context, string, string, string) error { return nil }
+func (cloud *recordingCloud) Failed(_ context.Context, _, _, errorCode string) error {
+	if cloud.failed != nil {
+		select {
+		case cloud.failed <- errorCode:
+		default:
+		}
+	}
+	return nil
+}
 
 type slowProvider struct{ delay time.Duration }
 
@@ -59,6 +69,13 @@ func (provider slowProvider) Infer(ctx context.Context, _ string) (string, error
 	case <-time.After(provider.delay):
 		return `{}`, nil
 	}
+}
+
+type failingProvider struct{ err error }
+
+func (failingProvider) Ready(context.Context) error { return nil }
+func (provider failingProvider) Infer(context.Context, string) (string, error) {
+	return "", provider.err
 }
 
 func TestRunnerRenewsHeartbeatWhileInferenceIsBusy(t *testing.T) {
@@ -93,5 +110,36 @@ func TestRunnerRenewsHeartbeatWhileInferenceIsBusy(t *testing.T) {
 	}
 	if busyHeartbeats < 2 {
 		t.Fatalf("busy heartbeats = %d, all = %#v", busyHeartbeats, cloud.heartbeatSlots)
+	}
+}
+
+func TestRunnerReportsProviderTimeoutAsFailedRun(t *testing.T) {
+	cloud := &recordingCloud{completed: make(chan struct{}), failed: make(chan string, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- (agent.Runner{
+			Cloud: cloud, Provider: failingProvider{err: context.DeadlineExceeded},
+			ModelVersion: "test-model", PollInterval: time.Millisecond,
+			HeartbeatInterval: 5 * time.Millisecond,
+		}).Run(ctx)
+	}()
+
+	select {
+	case code := <-cloud.failed:
+		if code != "PROVIDER_INFERENCE_FAILED" {
+			t.Fatalf("код ошибки = %q", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("агент не сообщил Cloud Core об ошибке провайдера")
+	}
+	select {
+	case <-cloud.completed:
+		t.Fatal("ошибочный результат был отмечен как успешно завершённый")
+	default:
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("завершение агента = %v", err)
 	}
 }

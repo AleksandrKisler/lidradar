@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// FakeProvider makes the agent and disconnect recovery testable without a GPU.
+// FakeProvider позволяет проверять агент и восстановление после разрыва без GPU.
 type FakeProvider struct {
 	Output string
 	Err    error
@@ -41,18 +41,18 @@ func (p FakeProvider) Infer(_ context.Context, prompt string) (string, error) {
 	return p.Output, nil
 }
 
-// LlamaProvider calls a llama.cpp OpenAI-compatible endpoint reachable only
-// from the node. It deliberately retains neither prompts nor responses.
+// LlamaProvider вызывает совместимый с OpenAI маршрут llama.cpp, доступный
+// только внутри узла. Запросы и ответы намеренно не сохраняются.
 type LlamaProvider struct {
 	URL, HealthURL, Model string
 	Client                *http.Client
 }
 
-// analysisResultGenerationSchemaV1 is the grammar-compatible subset of the
-// canonical analyze-conversation.v1 contract. The application validator stays
-// authoritative and additionally checks length and semantic consistency.
-// Keeping summary.maxLength out is intentional: llama.cpp expands large string
-// bounds into a grammar that exceeds its safe repetition limit.
+// analysisResultGenerationSchemaV1 — совместимое с грамматикой подмножество
+// канонического контракта analyze-conversation.v1. Валидатор приложения
+// остаётся авторитетным и дополнительно проверяет длину и смысловую
+// согласованность. Ограничение summary.maxLength намеренно отсутствует:
+// llama.cpp разворачивает большую строковую границу в слишком крупную грамматику.
 var analysisResultGenerationSchemaV1 = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -64,17 +64,43 @@ var analysisResultGenerationSchemaV1 = json.RawMessage(`{
     "facts": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["type", "value", "confidence", "evidenceMessageIds"],
-        "properties": {
-          "type": {"enum": ["BOOKING_INTENT", "BUSINESS_COMMITMENT", "PRICE_MENTIONED", "FOLLOW_UP_CANDIDATE"]},
-          "value": {"type": "boolean"},
-          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-          "evidenceMessageIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-          "amount": {"type": "string", "minLength": 1},
-          "currency": {"type": "string", "minLength": 1}
-        }
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "value", "confidence", "evidenceMessageIds", "amount", "currency"],
+            "properties": {
+              "type": {"const": "PRICE_MENTIONED"},
+              "value": {"const": true},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+              "evidenceMessageIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+              "amount": {"type": "string", "minLength": 1},
+              "currency": {"type": "string", "minLength": 1}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "value", "confidence", "evidenceMessageIds"],
+            "properties": {
+              "type": {"const": "PRICE_MENTIONED"},
+              "value": {"const": false},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+              "evidenceMessageIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "value", "confidence", "evidenceMessageIds"],
+            "properties": {
+              "type": {"enum": ["BOOKING_INTENT", "BUSINESS_COMMITMENT", "FOLLOW_UP_CANDIDATE"]},
+              "value": {"type": "boolean"},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+              "evidenceMessageIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            }
+          }
+        ]
       }
     }
   }
@@ -119,7 +145,10 @@ func (p LlamaProvider) Infer(ctx context.Context, prompt string) (string, error)
 	body, _ := json.Marshal(map[string]any{
 		"model": p.Model,
 		"messages": []map[string]string{
-			{"role": "system", "content": "Верни только JSON, строго соответствующий переданной схеме."},
+			{"role": "system", "content": `Верни только JSON, строго соответствующий переданной схеме.
+Каждый тип факта указывай не более одного раза, объединяя подтверждающие сообщения в evidenceMessageIds.
+Для PRICE_MENTIONED с value=true обязательно укажи amount строкой и currency трёхбуквенным кодом; с value=false не указывай amount и currency.
+Для остальных типов никогда не указывай amount и currency. В evidenceMessageIds используй только ID сообщений из запроса.`},
 			{"role": "user", "content": prompt},
 		},
 		"temperature":          0,

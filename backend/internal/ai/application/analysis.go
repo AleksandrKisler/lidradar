@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"unicode/utf8"
 
@@ -16,7 +17,7 @@ const (
 	AnalysisPromptV1    = "analyze-conversation.prompt.v1"
 	DefaultModelVersion = "local-4b-8b-q4"
 	MaxContextMessages  = 20
-	MaxContextRunes     = 12000 // conservative 3,000-token target
+	MaxContextRunes     = 12000 // консервативная оценка для цели в 3000 токенов
 )
 
 var ErrInvalidAIOutput = errors.New("invalid AI output")
@@ -45,9 +46,9 @@ type AnalyzeConversationRequestV1 struct {
 	Messages                 []ContextMessage `json:"messages"`
 }
 
-// BuildAnalysisContext creates a bounded, versioned request from the latest
-// messages. Tenant identity is used for validation but is intentionally not
-// sent to the model.
+// BuildAnalysisContext строит ограниченный версионированный запрос из последних
+// сообщений. Идентификатор организации нужен для проверки, но намеренно не
+// передаётся модели.
 func BuildAnalysisContext(c ConversationContext) (AnalyzeConversationRequestV1, error) {
 	if c.TenantID == "" || c.ConversationID == "" || c.Revision < 1 || len(c.Messages) == 0 {
 		return AnalyzeConversationRequestV1{}, ErrInvalid
@@ -99,9 +100,9 @@ func confidenceBand(v float64) domain.ConfidenceBand {
 	return domain.ConfidenceUntrusted
 }
 
-// ValidateAnalysisResultV1 performs strict JSON/schema, enum/range and
-// semantic-consistency validation. Unknown fields are rejected so schema
-// changes cannot silently alter application behavior.
+// ValidateAnalysisResultV1 строго проверяет JSON, схему, перечни, диапазоны и
+// смысловую согласованность. Неизвестные поля отклоняются, чтобы изменение
+// схемы не могло незаметно изменить поведение приложения.
 func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.AnalysisResultV1, error) {
 	var result domain.AnalysisResultV1
 	dec := json.NewDecoder(bytes.NewBufferString(raw))
@@ -109,8 +110,8 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 	if err := dec.Decode(&result); err != nil {
 		return result, fmt.Errorf("%w: JSON: %v", ErrInvalidAIOutput, err)
 	}
-	if dec.Decode(&struct{}{}) == nil {
-		return result, fmt.Errorf("%w: multiple JSON values", ErrInvalidAIOutput)
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return result, fmt.Errorf("%w: trailing data after JSON", ErrInvalidAIOutput)
 	}
 	if result.SchemaVersion != AnalysisSchemaV1 || result.AnalysisThroughMessageID == "" || (throughMessageID != "" && result.AnalysisThroughMessageID != throughMessageID) || strings.TrimSpace(result.Summary) == "" || result.Facts == nil {
 		return result, fmt.Errorf("%w: missing or mismatched required field", ErrInvalidAIOutput)
@@ -118,6 +119,8 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 	if utf8.RuneCountInString(result.Summary) > 2000 {
 		return result, fmt.Errorf("%w: summary too long", ErrInvalidAIOutput)
 	}
+	normalizedFacts := make([]domain.SemanticFact, 0, len(result.Facts))
+	factIndexes := make(map[domain.FactType]int, len(result.Facts))
 	for i, fact := range result.Facts {
 		switch fact.Type {
 		case domain.FactBookingIntent, domain.FactBusinessCommitment, domain.FactPriceMentioned, domain.FactFollowUpCandidate:
@@ -130,13 +133,20 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 		if len(fact.EvidenceMessageIDs) == 0 {
 			return result, fmt.Errorf("%w: fact %d has no evidence", ErrInvalidAIOutput, i)
 		}
+		evidenceSeen := make(map[string]struct{}, len(fact.EvidenceMessageIDs))
+		normalizedEvidence := make([]string, 0, len(fact.EvidenceMessageIDs))
 		for _, id := range fact.EvidenceMessageIDs {
-			if id == "" {
+			if strings.TrimSpace(id) == "" {
 				return result, fmt.Errorf("%w: empty evidence id", ErrInvalidAIOutput)
 			}
+			if _, duplicated := evidenceSeen[id]; !duplicated {
+				evidenceSeen[id] = struct{}{}
+				normalizedEvidence = append(normalizedEvidence, id)
+			}
 		}
+		fact.EvidenceMessageIDs = normalizedEvidence
 		if fact.Type == domain.FactPriceMentioned {
-			if fact.Value && (fact.Amount == nil || *fact.Amount == "" || fact.Currency == "") {
+			if fact.Value && (fact.Amount == nil || strings.TrimSpace(*fact.Amount) == "" || !validCurrency(fact.Currency)) {
 				return result, fmt.Errorf("%w: mentioned price lacks amount/currency", ErrInvalidAIOutput)
 			}
 			if !fact.Value && (fact.Amount != nil || fact.Currency != "") {
@@ -145,8 +155,56 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 		} else if fact.Amount != nil || fact.Currency != "" {
 			return result, fmt.Errorf("%w: price fields on non-price fact", ErrInvalidAIOutput)
 		}
+		if index, duplicated := factIndexes[fact.Type]; duplicated {
+			existing := &normalizedFacts[index]
+			if existing.Value != fact.Value || existing.Currency != fact.Currency || !sameOptionalString(existing.Amount, fact.Amount) {
+				return result, fmt.Errorf("%w: fact %d contradicts type %s", ErrInvalidAIOutput, i, fact.Type)
+			}
+			if fact.Confidence < existing.Confidence {
+				existing.Confidence = fact.Confidence
+			}
+			existing.EvidenceMessageIDs = appendUnique(existing.EvidenceMessageIDs, fact.EvidenceMessageIDs...)
+			continue
+		}
+		factIndexes[fact.Type] = len(normalizedFacts)
+		normalizedFacts = append(normalizedFacts, fact)
 	}
+	result.Facts = normalizedFacts
 	return result, nil
+}
+
+func sameOptionalString(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func validCurrency(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < 'A' || value[index] > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+func appendUnique(values []string, additional ...string) []string {
+	seen := make(map[string]struct{}, len(values)+len(additional))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, value := range additional {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
 }
 
 func TrustedFacts(result domain.AnalysisResultV1) []domain.SemanticFact {

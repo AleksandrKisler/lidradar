@@ -3,9 +3,12 @@ package infrastructure
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLlamaProviderValidatesStructuredOutput(t *testing.T) {
@@ -28,6 +31,21 @@ func TestLlamaProviderRejectsInvalidOutput(t *testing.T) {
 	defer srv.Close()
 	if _, err := (LlamaProvider{URL: srv.URL}).Infer(context.Background(), "prompt"); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestLlamaProviderHonorsInferenceTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := (LlamaProvider{URL: srv.URL}).Infer(ctx, "prompt")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ошибка = %v", err)
 	}
 }
 
@@ -55,6 +73,13 @@ func TestLlamaProviderRequestsSchemaConstrainedNonThinkingOutput(t *testing.T) {
 	if !ok || len(messages) != 2 {
 		t.Fatalf("messages = %#v", request["messages"])
 	}
+	systemMessage, ok := messages[0].(map[string]any)
+	systemContent, contentOK := systemMessage["content"].(string)
+	if !ok || !contentOK || systemMessage["role"] != "system" ||
+		!strings.Contains(systemContent, "PRICE_MENTIONED") ||
+		!strings.Contains(systemContent, "не более одного раза") {
+		t.Fatalf("system message = %#v", messages[0])
+	}
 	userMessage, ok := messages[1].(map[string]any)
 	if !ok || userMessage["role"] != "user" || userMessage["content"] != "private prompt" {
 		t.Fatalf("user message = %#v", messages[1])
@@ -77,5 +102,11 @@ func TestLlamaProviderRequestsSchemaConstrainedNonThinkingOutput(t *testing.T) {
 	}
 	if _, incompatible := summary["maxLength"]; incompatible {
 		t.Fatal("generation schema must not expand summary maxLength into an unsafe llama.cpp grammar")
+	}
+	facts, ok := properties["facts"].(map[string]any)
+	items, itemsOK := facts["items"].(map[string]any)
+	variants, variantsOK := items["oneOf"].([]any)
+	if !ok || !itemsOK || !variantsOK || len(variants) != 3 {
+		t.Fatalf("fact variants = %#v", properties["facts"])
 	}
 }
