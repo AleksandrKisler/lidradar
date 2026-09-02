@@ -40,10 +40,12 @@ func (repository *semanticRepository) Transition(_ context.Context, command doma
 }
 
 type semanticFacts struct {
-	fact       application.BookingIntentFact
-	found      bool
-	price      application.PriceFact
-	priceFound bool
+	fact          application.BookingIntentFact
+	found         bool
+	price         application.PriceFact
+	priceFound    bool
+	followUp      application.BookingIntentFact
+	followUpFound bool
 }
 
 func (facts semanticFacts) TrustedBookingIntent(context.Context, string, string, string) (application.BookingIntentFact, bool, error) {
@@ -52,6 +54,10 @@ func (facts semanticFacts) TrustedBookingIntent(context.Context, string, string,
 
 func (facts semanticFacts) TrustedPriceMentioned(context.Context, string, string, string) (application.PriceFact, bool, error) {
 	return facts.price, facts.priceFound, nil
+}
+
+func (facts semanticFacts) TrustedFollowUpCandidate(context.Context, string, string, string) (application.BookingIntentFact, bool, error) {
+	return facts.followUp, facts.followUpFound, nil
 }
 
 type semanticIDs struct{}
@@ -197,5 +203,51 @@ func TestAnalysisAppliedPriceAndBookingKeepStageOrder(t *testing.T) {
 	if len(repository.commands) != 2 || repository.commands[0].ToStage != domain.StagePriceSent ||
 		repository.commands[1].ToStage != domain.StageBookingIntent {
 		t.Fatalf("переходы = %#v", repository.commands)
+	}
+}
+
+// LR-BE-1903: колебание переводит сделку в WAITING_CUSTOMER; в одном анализе
+// с ценой и намерением записаться этапы проходят по порядку машины.
+func TestAnalysisAppliedFollowUpMovesToWaitingCustomerInOrder(t *testing.T) {
+	repository := &semanticRepository{opportunity: semanticOpportunity(t, domain.StageNew), found: true}
+	handler := application.AnalysisAppliedEventHandler(
+		repository, semanticFacts{followUp: application.BookingIntentFact{RunID: "run-1", Confidence: "0.920"}, followUpFound: true},
+		semanticIDs{}, time.Now,
+	)
+	if err := handler(context.Background(), appliedEvent(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.commands) != 1 || repository.commands[0].ToStage != domain.StageWaitingCustomer ||
+		repository.commands[0].Source != domain.SourceAI || repository.commands[0].Confidence.String() != "0.920" {
+		t.Fatalf("переходы = %#v", repository.commands)
+	}
+
+	ordered := &semanticRepository{opportunity: semanticOpportunity(t, domain.StageNew), found: true}
+	handler = application.AnalysisAppliedEventHandler(
+		ordered, semanticFacts{
+			price: application.PriceFact{RunID: "run-1", Confidence: "0.900", Amount: "5200", Currency: "RUB"}, priceFound: true,
+			followUp: application.BookingIntentFact{RunID: "run-1", Confidence: "0.910"}, followUpFound: true,
+			fact: application.BookingIntentFact{RunID: "run-1", Confidence: "0.950"}, found: true,
+		},
+		semanticIDs{}, time.Now,
+	)
+	if err := handler(context.Background(), appliedEvent(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered.commands) != 3 || ordered.commands[0].ToStage != domain.StagePriceSent ||
+		ordered.commands[1].ToStage != domain.StageWaitingCustomer || ordered.commands[2].ToStage != domain.StageBookingIntent {
+		t.Fatalf("переходы = %#v", ordered.commands)
+	}
+	// Сделка уже дальше WAITING_CUSTOMER — колебание её не откатывает.
+	later := &semanticRepository{opportunity: semanticOpportunity(t, domain.StageBookingIntent), found: true}
+	handler = application.AnalysisAppliedEventHandler(
+		later, semanticFacts{followUp: application.BookingIntentFact{RunID: "run-1", Confidence: "0.920"}, followUpFound: true},
+		semanticIDs{}, time.Now,
+	)
+	if err := handler(context.Background(), appliedEvent(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(later.commands) != 0 {
+		t.Fatalf("откат этапа: %#v", later.commands)
 	}
 }

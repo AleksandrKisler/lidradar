@@ -29,7 +29,7 @@ CONSTRAINT risk_policy_configs_one_per_type_and_tenant
 ```
 
 Значения по умолчанию: R1 — 45 `BUSINESS_MINUTES`; R3 — 30 `BUSINESS_MINUTES`;
-R4 — 60 `BUSINESS_MINUTES`; R2 — 1440 с эскалацией 2880; R5 — 2880.
+R4 — 60 `BUSINESS_MINUTES`; R2 — 1440 с эскалацией 2880; R5 — 1440 (§33).
 Единица для R2 и R5 — **открытый вопрос владельца продукта**: либо
 `CALENDAR_MINUTES` (ровно сутки и двое), либо бизнес-время. До решения
 поведение по умолчанию не меняется: расчёт ведётся в бизнес-времени.

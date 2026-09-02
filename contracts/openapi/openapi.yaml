@@ -1195,7 +1195,7 @@ components:
         stage: { $ref: '#/components/schemas/OpportunityStage' }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED, FALSE_POSITIVE, IGNORED, EXPIRED] }
     RiskSeverity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
-    RiskType: { type: string, enum: [NO_RESPONSE, BOOKING_NOT_CONFIRMED, PROMISE_NOT_FULFILLED, CUSTOMER_SILENT_AFTER_PRICE] }
+    RiskType: { type: string, enum: [NO_RESPONSE, BOOKING_NOT_CONFIRMED, PROMISE_NOT_FULFILLED, CUSTOMER_SILENT_AFTER_PRICE, FOLLOW_UP_CANDIDATE] }
     TelegramLinkToken:
       type: object
       additionalProperties: false

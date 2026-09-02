@@ -112,6 +112,13 @@ func run(ctx context.Context, configuration config.Config) error {
 	pricePlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, priceEvaluator, pricePolicy, generator, time.Now,
 	)
+	followUpPolicy := riskdomain.FollowUpCandidatePolicy{}
+	followUpEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, followUpPolicy, generator, time.Now,
+	).WithInvalidator(riskInvalidator)
+	followUpPlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, followUpEvaluator, followUpPolicy, generator, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	var notificationTransport notificationapplication.Transport
 	var controlTransport notificationinfrastructure.TelegramControlTransport
@@ -169,11 +176,12 @@ func run(ctx context.Context, configuration config.Config) error {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner, followUpPlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskPlanner),
 			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingPlanner),
 			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
 			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
+			riskapplication.FollowUpEvaluationJobType:   riskapplication.EvaluationJobHandler(followUpPlanner),
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)

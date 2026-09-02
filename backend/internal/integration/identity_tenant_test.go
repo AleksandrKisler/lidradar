@@ -139,6 +139,13 @@ func newAPIFixture(t *testing.T) apiFixture {
 	pricePlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, priceEvaluator, pricePolicy, ids.Generator{}, time.Now,
 	)
+	followUpPolicy := riskdomain.FollowUpCandidatePolicy{}
+	followUpEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, followUpPolicy, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents)
+	followUpPlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, followUpEvaluator, followUpPolicy, ids.Generator{}, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
@@ -170,11 +177,12 @@ func newAPIFixture(t *testing.T) apiFixture {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner, followUpPlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskPlanner),
 			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingPlanner),
 			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
 			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
+			riskapplication.FollowUpEvaluationJobType:   riskapplication.EvaluationJobHandler(followUpPlanner),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(

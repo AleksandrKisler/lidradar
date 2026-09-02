@@ -75,8 +75,14 @@ func (reader *PostgresStateReader) CurrentState(
 	var priceRunID, priceMessageID, priceAmount, priceCurrency *string
 	var priceAt *time.Time
 	var priceIncomingAfter *bool
+	var followUpConfidence *float64
+	var followUpRunID, followUpMessageID *string
+	var followUpAt *time.Time
+	var followUpIncomingAfter *bool
 	var lastOutgoingID *string
 	var lastOutgoingAt *time.Time
+	var lastIncomingID *string
+	var lastIncomingAt *time.Time
 	var latestOutcome *string
 	var activeRisks []byte
 	err := reader.pool.QueryRow(ctx, `
@@ -90,7 +96,10 @@ func (reader *PostgresStateReader) CurrentState(
 		       commitment.evidence_at, commitment.evidence_text, commitment.followed_up,
 		       price.confidence, price.ai_run_id, price.evidence_message_id, price.evidence_at,
 		       price.amount, price.currency, price.incoming_after,
-		       last_outgoing.id, last_outgoing.sent_at, latest_outcome.status,
+		       follow_up.confidence, follow_up.ai_run_id, follow_up.evidence_message_id,
+		       follow_up.evidence_at, follow_up.incoming_after,
+		       last_outgoing.id, last_outgoing.sent_at, last_incoming.id, last_incoming.sent_at,
+		       latest_outcome.status,
 		       active_risks.items
 		FROM opportunities AS o
 		JOIN conversations AS c
@@ -197,6 +206,32 @@ func (reader *PostgresStateReader) CurrentState(
 			ORDER BY evidence_message.sent_at DESC, evidence_message.id DESC
 			LIMIT 1
 		) AS price ON TRUE
+		-- Колебание клиента — входящее сообщение из последней проекции.
+		LEFT JOIN LATERAL (
+			SELECT (fact.value ->> 'confidence')::double precision AS confidence,
+			       commitment_summary.ai_run_id::text AS ai_run_id,
+			       evidence_message.id::text AS evidence_message_id,
+			       evidence_message.sent_at AS evidence_at,
+			       EXISTS (
+				SELECT 1 FROM messages AS later
+				WHERE later.tenant_id = c.tenant_id AND later.conversation_id = c.id
+				  AND later.direction = 'INCOMING' AND later.provider_deleted_at IS NULL
+				  AND (later.sent_at, later.id) > (evidence_message.sent_at, evidence_message.id)
+			       ) AS incoming_after
+			FROM jsonb_array_elements(commitment_summary.semantic_facts) AS fact(value)
+			CROSS JOIN LATERAL jsonb_array_elements_text(fact.value -> 'evidenceMessageIds') AS evidence(id)
+			JOIN messages AS evidence_message
+			  ON evidence_message.tenant_id = c.tenant_id
+			 AND evidence_message.conversation_id = c.id
+			 AND evidence_message.id::text = evidence.id
+			 AND evidence_message.direction = 'INCOMING'
+			 AND evidence_message.provider_deleted_at IS NULL
+			WHERE fact.value ->> 'type' = 'FOLLOW_UP_CANDIDATE'
+			  AND fact.value ->> 'value' = 'true'
+			  AND (fact.value ->> 'trusted')::boolean
+			ORDER BY evidence_message.sent_at DESC, evidence_message.id DESC
+			LIMIT 1
+		) AS follow_up ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT m.id::text AS id, m.sent_at
 			FROM messages AS m
@@ -205,6 +240,14 @@ func (reader *PostgresStateReader) CurrentState(
 			ORDER BY m.sent_at DESC, m.id DESC
 			LIMIT 1
 		) AS last_outgoing ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT m.id::text AS id, m.sent_at
+			FROM messages AS m
+			WHERE m.tenant_id = c.tenant_id AND m.conversation_id = c.id
+			  AND m.provider_deleted_at IS NULL AND m.direction = 'INCOMING'
+			ORDER BY m.sent_at DESC, m.id DESC
+			LIMIT 1
+		) AS last_incoming ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT outcome.status
 			FROM outcomes AS outcome
@@ -245,7 +288,8 @@ func (reader *PostgresStateReader) CurrentState(
 		&commitmentAt, &commitmentText, &commitmentFollowedUp,
 		&priceConfidence, &priceRunID, &priceMessageID, &priceAt,
 		&priceAmount, &priceCurrency, &priceIncomingAfter,
-		&lastOutgoingID, &lastOutgoingAt, &latestOutcome,
+		&followUpConfidence, &followUpRunID, &followUpMessageID, &followUpAt, &followUpIncomingAfter,
+		&lastOutgoingID, &lastOutgoingAt, &lastIncomingID, &lastIncomingAt, &latestOutcome,
 		&activeRisks,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -283,8 +327,17 @@ func (reader *PostgresStateReader) CurrentState(
 			EvidenceMessageID: *priceMessageID, EvidenceAt: priceAt.UTC(), IncomingAfter: *priceIncomingAfter,
 		}
 	}
+	if followUpConfidence != nil && followUpRunID != nil && followUpMessageID != nil && followUpAt != nil && followUpIncomingAfter != nil {
+		state.FollowUp = &domain.FollowUpSignal{
+			Value: true, Confidence: *followUpConfidence, AIRunID: *followUpRunID,
+			EvidenceMessageID: *followUpMessageID, EvidenceAt: followUpAt.UTC(), IncomingAfter: *followUpIncomingAfter,
+		}
+	}
 	if lastOutgoingID != nil && lastOutgoingAt != nil {
 		state.LastOutgoing = &domain.MessageRef{ID: *lastOutgoingID, At: lastOutgoingAt.UTC()}
+	}
+	if lastIncomingID != nil && lastIncomingAt != nil {
+		state.LastIncoming = &domain.MessageRef{ID: *lastIncomingID, At: lastIncomingAt.UTC()}
 	}
 	if latestOutcome != nil {
 		state.LatestOutcome = *latestOutcome

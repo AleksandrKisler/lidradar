@@ -17,12 +17,14 @@ const (
 	TypeBookingNotConfirmed      Type = "BOOKING_NOT_CONFIRMED"
 	TypePromiseNotFulfilled      Type = "PROMISE_NOT_FULFILLED"
 	TypeCustomerSilentAfterPrice Type = "CUSTOMER_SILENT_AFTER_PRICE"
+	TypeFollowUpCandidate        Type = "FOLLOW_UP_CANDIDATE"
 )
 
 // SupportedType сообщает, реализовано ли правило для типа риска.
 func SupportedType(riskType Type) bool {
 	switch riskType {
-	case TypeNoResponse, TypeBookingNotConfirmed, TypePromiseNotFulfilled, TypeCustomerSilentAfterPrice:
+	case TypeNoResponse, TypeBookingNotConfirmed, TypePromiseNotFulfilled,
+		TypeCustomerSilentAfterPrice, TypeFollowUpCandidate:
 		return true
 	default:
 		return false
@@ -108,6 +110,11 @@ func NewCustomerSilentAfterPrice(id string, finding Finding, now time.Time) (Ris
 	return newRisk(id, TypeCustomerSilentAfterPrice, finding, now)
 }
 
+// NewFollowUpCandidate создаёт мягкий риск-кандидат на продолжение разговора.
+func NewFollowUpCandidate(id string, finding Finding, now time.Time) (Risk, error) {
+	return newRisk(id, TypeFollowUpCandidate, finding, now)
+}
+
 func newRisk(id string, riskType Type, finding Finding, now time.Time) (Risk, error) {
 	if riskType == TypeNoResponse && finding.Source == "" {
 		finding.Source = SourceRule
@@ -191,13 +198,17 @@ func (r Risk) Validate() error {
 	if r.Type == TypeCustomerSilentAfterPrice && r.Severity != SeverityMedium && r.Severity != SeverityHigh {
 		return ErrInvalidRisk
 	}
+	if r.Type == TypeFollowUpCandidate && r.Severity != SeverityMedium {
+		return ErrInvalidRisk
+	}
 	switch r.Source {
 	case SourceRule:
 		if r.Confidence != nil || r.AIRunID != nil {
 			return ErrInvalidRisk
 		}
 	case SourceHybrid:
-		if (r.Type != TypeBookingNotConfirmed && r.Type != TypePromiseNotFulfilled && r.Type != TypeCustomerSilentAfterPrice) ||
+		if (r.Type != TypeBookingNotConfirmed && r.Type != TypePromiseNotFulfilled &&
+			r.Type != TypeCustomerSilentAfterPrice && r.Type != TypeFollowUpCandidate) ||
 			r.Confidence == nil || *r.Confidence < 0 || *r.Confidence > 1 ||
 			r.AIRunID == nil || strings.TrimSpace(*r.AIRunID) == "" {
 			return ErrInvalidRisk
@@ -303,7 +314,9 @@ type ConversationState struct {
 	BookingIntent     *BookingIntentSignal
 	Commitment        *CommitmentSignal
 	Price             *PriceSignal
+	FollowUp          *FollowUpSignal
 	LastOutgoing      *MessageRef
+	LastIncoming      *MessageRef
 	LatestOutcome     string
 	ActiveRisks       map[Type]ActiveRiskSnapshot
 }

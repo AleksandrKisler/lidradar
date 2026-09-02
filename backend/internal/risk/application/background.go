@@ -27,6 +27,8 @@ const (
 	PromiseEvaluationJobType     = "risk.evaluate-promise-not-fulfilled.v1"
 	PriceCheckType               = "CUSTOMER_SILENT_AFTER_PRICE_DUE"
 	PriceEvaluationJobType       = "risk.evaluate-customer-silent-after-price.v1"
+	FollowUpCheckType            = "FOLLOW_UP_CANDIDATE_DUE"
+	FollowUpEvaluationJobType    = "risk.evaluate-follow-up-candidate.v1"
 )
 
 type refreshPayload struct {
@@ -196,6 +198,8 @@ func workTypes(riskType domain.Type) (string, string, error) {
 		return PromiseCheckType, PromiseEvaluationJobType, nil
 	case domain.TypeCustomerSilentAfterPrice:
 		return PriceCheckType, PriceEvaluationJobType, nil
+	case domain.TypeFollowUpCandidate:
+		return FollowUpCheckType, FollowUpEvaluationJobType, nil
 	default:
 		return "", "", ErrInvalidCheck
 	}

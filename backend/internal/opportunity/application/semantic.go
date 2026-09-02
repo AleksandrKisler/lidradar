@@ -38,6 +38,9 @@ type PriceFact struct {
 type SemanticFactSource interface {
 	TrustedBookingIntent(ctx context.Context, tenantID, conversationID, runID string) (BookingIntentFact, bool, error)
 	TrustedPriceMentioned(ctx context.Context, tenantID, conversationID, runID string) (PriceFact, bool, error)
+	// TrustedFollowUpCandidate — клиент откладывает решение, но допускает
+	// продолжение; доказательство — входящее сообщение.
+	TrustedFollowUpCandidate(ctx context.Context, tenantID, conversationID, runID string) (BookingIntentFact, bool, error)
 }
 
 type analysisAppliedData struct {
@@ -76,7 +79,11 @@ func AnalysisAppliedEventHandler(
 		if err != nil {
 			return jobsdomain.Retryable("SEMANTIC_FACT_UNAVAILABLE", err)
 		}
-		if !priceFound && !bookingFound {
+		followUp, followUpFound, err := facts.TrustedFollowUpCandidate(ctx, event.TenantID, data.ConversationID, data.RunID)
+		if err != nil {
+			return jobsdomain.Retryable("SEMANTIC_FACT_UNAVAILABLE", err)
+		}
+		if !priceFound && !bookingFound && !followUpFound {
 			return nil
 		}
 		opportunity, found, err := repository.ActiveByConversation(ctx, event.TenantID, data.ConversationID)
@@ -94,6 +101,13 @@ func AnalysisAppliedEventHandler(
 				return err
 			}
 			opportunity.Stage = maxStage(opportunity.Stage, domain.StagePriceSent)
+		}
+		if followUpFound {
+			if err := transitionByFact(ctx, repository, ids, event.TenantID, opportunity, domain.StageWaitingCustomer,
+				followUp.Confidence, followUp.RunID, at); err != nil {
+				return err
+			}
+			opportunity.Stage = maxStage(opportunity.Stage, domain.StageWaitingCustomer)
 		}
 		if bookingFound {
 			if err := transitionByFact(ctx, repository, ids, event.TenantID, opportunity, domain.StageBookingIntent,
