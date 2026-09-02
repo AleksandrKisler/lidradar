@@ -145,6 +145,96 @@ func insertRadarCorrectiveFacts(
 	}
 }
 
+// Возвращённая выручка по ТЗ §39 — сумма подтверждённых событий с атрибуцией
+// RECOVERED. Риск закрывается раньше, чем деньги подтверждают, поэтому привязка
+// показателя к активным рискам обнуляла бы его в обычном рабочем сценарии.
+func TestPostgresRadarSummaryKeepsRecoveredRevenueAfterRiskResolution(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	tenants := testsupport.TwoTenants(t, ctx, pool)
+	fixture := insertRiskFixture(t, pool, tenants.A.TenantID, tenants.A.LocationID, domain.DirectionIncoming)
+	foreign := insertRiskFixture(t, pool, tenants.B.TenantID, tenants.B.LocationID, domain.DirectionIncoming)
+	setRadarOpportunity(t, pool, fixture, "NEW", "5000.00", "RUB")
+	setRadarOpportunity(t, pool, foreign, "NEW", "7000.00", "RUB")
+
+	base := time.Date(2026, 8, 24, 15, 0, 0, 0, time.UTC)
+	risk := storeRadarRisk(t, pool, fixture, domain.SeverityHigh, base.Add(-time.Hour), base)
+	foreignRisk := storeRadarRisk(t, pool, foreign, domain.SeverityHigh, base.Add(-time.Hour), base)
+	insertRecoveredRevenue(t, pool, tenants.A.TenantID, tenants.A.UserID, risk, "5000.00", base.Add(time.Hour))
+	insertRecoveredRevenue(t, pool, tenants.B.TenantID, tenants.B.UserID, foreignRisk, "7000.00", base.Add(time.Hour))
+
+	store := NewPostgresRadarStore(pool)
+	open, err := store.Summary(ctx, tenants.A.TenantID, application.Filters{})
+	if err != nil || open.ConfirmedRecoveredRevenue != "5000.00" || open.OpenRisks != 1 {
+		t.Fatalf("сводка при активном риске = %#v, ошибка = %v", open, err)
+	}
+
+	if _, err := store.Resolve(ctx, tenants.A.TenantID, risk.ID, base.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := store.Summary(ctx, tenants.A.TenantID, application.Filters{})
+	if err != nil || resolved.ConfirmedRecoveredRevenue != "5000.00" {
+		t.Fatalf("возвращённая выручка после закрытия риска = %#v, ошибка = %v", resolved, err)
+	}
+	if resolved.OpenRisks != 0 || resolved.CriticalRisks != 0 || resolved.PotentialRevenue != "0.00" {
+		t.Fatalf("закрытый риск остался в счётчиках: %#v", resolved)
+	}
+
+	// Фильтры Radar продолжают действовать и на возвращённую выручку.
+	filtered, err := store.Summary(ctx, tenants.A.TenantID, application.Filters{Severity: domain.SeverityCritical})
+	if err != nil || filtered.ConfirmedRecoveredRevenue != "0.00" {
+		t.Fatalf("сводка по CRITICAL = %#v, ошибка = %v", filtered, err)
+	}
+}
+
+func insertRecoveredRevenue(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	tenantID, userID string,
+	risk domain.Risk,
+	amount string,
+	confirmedAt time.Time,
+) {
+	t.Helper()
+	ctx := context.Background()
+	newID := func() string {
+		id, err := (ids.Generator{}).NewID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	actionID, outcomeID, eventID := newID(), newID(), newID()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO actions(id, tenant_id, risk_id, actor_user_id, type, note, created_at)
+		VALUES ($1,$2,$3,$4,'MARK_CONTACTED','',$5)`,
+		actionID, tenantID, risk.ID, userID, risk.DetectedAt.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO outcomes(id, tenant_id, opportunity_id, actor_user_id, status, note, created_at)
+		VALUES ($1,$2,$3,$4,'BOOKED','',$5)`,
+		outcomeID, tenantID, risk.OpportunityID, userID, risk.DetectedAt.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO revenue_events(
+			id, tenant_id, opportunity_id, amount, currency, status, source,
+			confirmed_by_user_id, confirmed_at, created_at
+		) VALUES ($1,$2,$3,$4,'RUB','CONFIRMED','USER_CONFIRMED',$5,$6,$6)`,
+		eventID, tenantID, risk.OpportunityID, amount, userID, confirmedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO revenue_attributions(
+			id, tenant_id, revenue_event_id, opportunity_id, type, risk_id, action_id, outcome_id, created_at
+		) VALUES ($1,$2,$3,$4,'RECOVERED',$5,$6,$7,$8)`,
+		newID(), tenantID, eventID, risk.OpportunityID,
+		risk.ID, actionID, outcomeID, confirmedAt); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPostgresRadarCommandsAreIdempotentAndTenantScoped(t *testing.T) {
 	pool := testsupport.Postgres(t)
 	ctx := context.Background()

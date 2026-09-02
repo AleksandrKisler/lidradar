@@ -1,6 +1,7 @@
-# LidRadar — Backend Technical Specification & Sequential Delivery Plan v1.0
+# LidRadar — Backend Technical Specification & Sequential Delivery Plan v1.1
 
 **Статус:** Ready for Backend Development
+**Изменение v1.0 → v1.1:** добавлен внеочередной ЭТАП R — CONSISTENCY REMEDIATION (между этапами 16 и 17), задачи `LR-BE-RM-001 … LR-BE-RM-026`; уточнён §3.5 (абсолютный потолок аренды); §77 дополнен вторым намеренным исключением и этапом A2; §78 дополнен PR #17.5. Основание — Errata v1.2.2 (сквозная сверка Tasks.md, Плана разработки MVP v1.2, GLOSSARY v1.0, README v1.0).
 **Architecture baseline:** Final System Architecture v1.1
 **Implementation baseline:** Development Specification v1.1
 **Execution baseline:** Detailed MVP Development Plan v1.0
@@ -174,6 +175,17 @@ Stale inference не считается технической ошибкой м
 * lease перестаёт продлеваться;
 * после `lease_until` job разрешается забрать другому node;
 * повторный result должен безопасно отбрасываться/обрабатываться idempotently.
+
+Скользящая аренда не покрывает случай, когда inference завис, а heartbeat-горутина жива. Поэтому поверх неё действует абсолютный потолок, который не продлевается никогда:
+
+```text
+lease_until   = now() + 120s     -- продлевается heartbeat
+max_lease_age = leased_at + 15m  -- не продлевается
+```
+
+Reclaim забирает job при `lease_until < now()` ИЛИ `leased_at + 15m < now()`.
+
+См. LR-BE-RM-016.
 
 ---
 
@@ -2885,13 +2897,25 @@ Backend task не начинается, пока не определены:
 
 Следующий этап нельзя считать начатым в production branch, пока Exit Gate предыдущего не зелёный.
 
-Единственное намеренное исключение:
+Намеренных исключений два.
+
+**Первое — параллельное:**
 
 ```text
 INT-TELEGRAM-001
 ```
 
-Он выполняется параллельно Foundation/Identity, потому что Telegram является наиболее рискованной внешней зависимостью.
+Выполняется параллельно Foundation/Identity, потому что Telegram является наиболее рискованной внешней зависимостью.
+
+Из него вырастает **INT-SHADOW-001** (этап A2) — теневой сбор реальных диалогов для golden dataset. Стартует сразу после Exit Gate этапа A и идёт параллельно этапам 13–16, потому что сбор 500 размеченных диалогов занимает 2–3 недели календарного времени и иначе оказывается на критическом пути к Milestone D. См. LR-BE-RM-025.
+
+**Второе — вне очереди:**
+
+```text
+ЭТАП R — CONSISTENCY REMEDIATION
+```
+
+Выполняется между этапами 16 и 17. Устраняет расхождения между документами и дефекты схемы, которые не проявляются на этапах 0–16, но делают невозможной корректную реализацию этапов 17–26 либо искажают Confirmed Recovered Revenue. Этап 17 не начинается, пока Exit Gate этапа R не зелёный.
 
 ---
 
@@ -3910,6 +3934,641 @@ Low confidence не изменяет domain.
 
 ---
 
+# ЭТАП R — CONSISTENCY REMEDIATION
+
+**Порядок:** вне очереди, между Этапом 16 и Этапом 17.
+**Статус:** обязательный. Этап 17 не начинается в production branch, пока Exit Gate Этапа R не зелёный.
+
+## Цель
+
+Устранить расхождения между Tasks.md, Планом разработки MVP v1.2, GLOSSARY и README, а также технические дефекты схемы, обнаруженные при сквозной сверке документов (Errata v1.2.2).
+
+Все дефекты этого этапа обладают одним общим свойством: они не проявляются на этапах 0–16, но делают невозможной корректную реализацию этапов 17–26 либо искажают Confirmed Recovered Revenue.
+
+## Зависимости
+
+Этап 16 закрыт.
+
+## Правило нумерации миграций
+
+Все schema-задачи этапа собираются в **одну** forward-only миграцию:
+
+```text
+000018_consistency_remediation.sql
+```
+
+Номер = следующий свободный после последней применённой миграции. Если на момент старта этапа применено больше миграций — занять следующий свободный номер и сдвинуть карту миграций Плана v1.2 на ту же величину. Миграция не переписывает существующие файлы: только `ALTER`, `CREATE INDEX`, `CREATE POLICY`.
+
+## Задачи
+
+---
+
+### БЛОК R1 — Целостность схемы
+
+---
+
+### LR-BE-RM-001 — Attribution chain integrity
+
+`revenue_attributions` не содержит `opportunity_id`, поэтому §39 («все entities обязаны принадлежать одной Opportunity») не проверяется на уровне БД, а одна Opportunity может получить несколько `RECOVERED`-атрибуций через разные `revenue_events`.
+
+Добавить денормализованный `opportunity_id`, composite FK на все звенья цепочки и partial unique index.
+
+```sql
+ALTER TABLE revenue_events
+    ADD CONSTRAINT revenue_events_tenant_opportunity_unique
+    UNIQUE (tenant_id, id, opportunity_id);
+
+ALTER TABLE risk_signals ADD CONSTRAINT risk_signals_tenant_opportunity_unique
+    UNIQUE (tenant_id, id, opportunity_id);
+ALTER TABLE actions ADD CONSTRAINT actions_tenant_opportunity_unique
+    UNIQUE (tenant_id, id, opportunity_id);
+ALTER TABLE outcomes ADD CONSTRAINT outcomes_tenant_opportunity_unique
+    UNIQUE (tenant_id, id, opportunity_id);
+
+ALTER TABLE revenue_attributions
+    ADD COLUMN opportunity_id UUID,
+    ADD COLUMN outcome_at TIMESTAMPTZ;
+
+UPDATE revenue_attributions a
+SET opportunity_id = e.opportunity_id
+FROM revenue_events e
+WHERE e.tenant_id = a.tenant_id AND e.id = a.revenue_event_id;
+
+ALTER TABLE revenue_attributions
+    ALTER COLUMN opportunity_id SET NOT NULL,
+    ADD CONSTRAINT revenue_attributions_event_fk2
+        FOREIGN KEY (tenant_id, revenue_event_id, opportunity_id)
+        REFERENCES revenue_events(tenant_id, id, opportunity_id),
+    ADD CONSTRAINT revenue_attributions_risk_fk2
+        FOREIGN KEY (tenant_id, risk_id, opportunity_id)
+        REFERENCES risk_signals(tenant_id, id, opportunity_id),
+    ADD CONSTRAINT revenue_attributions_action_fk2
+        FOREIGN KEY (tenant_id, action_id, opportunity_id)
+        REFERENCES actions(tenant_id, id, opportunity_id),
+    ADD CONSTRAINT revenue_attributions_outcome_fk2
+        FOREIGN KEY (tenant_id, outcome_id, opportunity_id)
+        REFERENCES outcomes(tenant_id, id, opportunity_id),
+    ADD CONSTRAINT revenue_attributions_window_respected CHECK (
+        kind <> 'RECOVERED'
+        OR (outcome_at IS NOT NULL
+            AND attributed_at <= outcome_at + make_interval(days => window_days))
+    );
+
+CREATE UNIQUE INDEX revenue_attributions_one_recovered_per_opportunity_idx
+    ON revenue_attributions(tenant_id, opportunity_id)
+    WHERE kind = 'RECOVERED';
+```
+
+Старые FK `revenue_attributions_risk_fk` / `_action_fk` / `_outcome_fk` удалить после проверки, что новые применились.
+
+Продуктовое следствие: одна Opportunity даёт максимум одну `RECOVERED`-атрибуцию. При оплате частями RECOVERED получает первое событие, остальные — `ORGANIC`.
+
+**Acceptance:**
+
+Попытка создать вторую `RECOVERED`-атрибуцию для той же Opportunity отклоняется PostgreSQL; application возвращает `409 RECOVERED_ALREADY_ATTRIBUTED`. Попытка собрать цепочку из Risk/Action/Outcome чужой Opportunity внутри своего tenant отклоняется FK.
+
+---
+
+### LR-BE-RM-002 — Platform-default uniqueness
+
+`tenant_id IS NULL` используется как «platform default», но `NULL` в обычном UNIQUE не конфликтует сам с собой — platform-строку можно вставить многократно.
+
+```sql
+ALTER TABLE risk_policy_configs
+    DROP CONSTRAINT risk_policy_configs_one_per_type_and_tenant,
+    ADD CONSTRAINT risk_policy_configs_one_per_type_and_tenant
+        UNIQUE NULLS NOT DISTINCT (tenant_id, risk_type);
+
+ALTER TABLE encrypted_secrets
+    ADD CONSTRAINT encrypted_secrets_one_active_per_kind
+        UNIQUE NULLS NOT DISTINCT (tenant_id, kind);
+```
+
+**Acceptance:**
+
+Повторный `INSERT` platform-строки с тем же `risk_type` отклоняется. Дубликаты, если они успели появиться, устраняются в той же миграции до наложения constraint.
+
+---
+
+### LR-BE-RM-003 — feature_flags scope key
+
+`key TEXT PRIMARY KEY` делает невозможным одновременное существование platform-default и tenant-override, то есть feature flag нельзя включить одному tenant'у. Это ломает LR-BE-2604 и Milestone D.
+
+Таблица создаётся на этапе 26 — задача фиксирует **финальный** DDL, а не правит существующее:
+
+```sql
+CREATE TABLE feature_flags (
+    id                 UUID PRIMARY KEY,
+    key                TEXT NOT NULL,
+    tenant_id          UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    enabled            BOOLEAN NOT NULL DEFAULT FALSE,
+    rollout_percentage SMALLINT NOT NULL DEFAULT 0 CHECK (rollout_percentage BETWEEN 0 AND 100),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by         UUID,
+    CONSTRAINT feature_flags_key_valid CHECK (key = btrim(key) AND char_length(key) BETWEEN 1 AND 100),
+    CONSTRAINT feature_flags_unique_per_scope UNIQUE NULLS NOT DISTINCT (key, tenant_id)
+);
+```
+
+Правило разрешения: строка с конкретным `tenant_id` побеждает строку с `tenant_id IS NULL`; отсутствие обеих = флаг выключен.
+
+**Acceptance:**
+
+`ai_enabled = FALSE` globally и `TRUE` для T1 сосуществуют; `IsEnabled` возвращает `true` для T1 и `false` для T2.
+
+---
+
+### LR-BE-RM-004 — ai_runs tenant_id
+
+`ai_runs` не содержит `tenant_id`, из-за чего таблица не может участвовать в RLS, а FK `conversation_summaries.latest_valid_run_id` не является tenant-aware — нарушение §13.
+
+```sql
+ALTER TABLE ai_runs ADD COLUMN tenant_id UUID;
+
+UPDATE ai_runs r SET tenant_id = j.tenant_id
+FROM ai_jobs j WHERE j.id = r.job_id;
+
+ALTER TABLE ai_runs
+    ALTER COLUMN tenant_id SET NOT NULL,
+    ADD CONSTRAINT ai_runs_tenant_fk FOREIGN KEY (tenant_id)
+        REFERENCES organizations(id) ON DELETE CASCADE,
+    ADD CONSTRAINT ai_runs_tenant_id_unique UNIQUE (tenant_id, id),
+    ADD CONSTRAINT ai_runs_job_fk2 FOREIGN KEY (tenant_id, job_id)
+        REFERENCES ai_jobs(tenant_id, id);
+```
+
+`ai_nodes` остаётся platform-level без `tenant_id` — узел обслуживает все tenant'ы.
+
+**Acceptance:**
+
+`ai_runs` включён в RLS-список; `AIRun` в Go содержит `TenantID`; все repository-методы принимают `tenantID` (§12).
+
+---
+
+### LR-BE-RM-005 — conversation_summaries optimistic lock
+
+Гонка двух AI runs с разными revision сейчас разрешается тем, кто закоммитил вторым, — возможна перезапись свежего результата устаревшим. §60 требует обратного.
+
+Привести таблицу к конвенции `id` + `UNIQUE (tenant_id, …)` и зафиксировать upsert:
+
+```sql
+INSERT INTO conversation_summaries (...)
+VALUES (...)
+ON CONFLICT (tenant_id, conversation_id) DO UPDATE
+SET latest_valid_run_id      = excluded.latest_valid_run_id,
+    derived_facts            = excluded.derived_facts,
+    confidence               = excluded.confidence,
+    conversation_revision_at = excluded.conversation_revision_at,
+    last_message_id_at       = excluded.last_message_id_at,
+    updated_at               = now()
+WHERE excluded.conversation_revision_at > conversation_summaries.conversation_revision_at;
+```
+
+**Acceptance:**
+
+Два параллельных run с revision 5 и 7 в любом порядке коммита оставляют в таблице результат revision 7. Отброшенный upsert логируется как `SUMMARY_SUPERSEDED`.
+
+---
+
+### LR-BE-RM-006 — AI queue deduplication + debounce
+
+Freshness guard делает результат STALE на каждое новое сообщение и планирует новый job. Без дедупликации активный диалог порождает по заданию на сообщение, при `max_inflight = 1` и одной RTX 4060 это прямая потеря пропускной способности.
+
+```sql
+CREATE UNIQUE INDEX ai_jobs_one_active_per_entity_idx
+    ON ai_jobs(tenant_id, entity_type, entity_id)
+    WHERE status IN ('PENDING', 'LEASED', 'RUNNING');
+```
+
+Постановка задания — идемпотентная: `INSERT … ON CONFLICT DO UPDATE SET base_conversation_revision = excluded.base_conversation_revision`.
+
+Дебаунс: повторный анализ той же Conversation планируется не раньше чем через `AI_ANALYSIS_DEBOUNCE = 60s` через существующее поле `available_at` (§53). Stale-переплан использует ту же задержку.
+
+**Acceptance:**
+
+Диалог, в который пришло 5 сообщений за 20 секунд, порождает одно задание с последней revision, а не пять.
+
+---
+
+### LR-BE-RM-007 — ai_jobs lease consistency
+
+CHECK допускает половинчатое состояние (владелец есть, срок аренды пуст).
+
+```sql
+ALTER TABLE ai_jobs
+    DROP CONSTRAINT ai_jobs_lease_consistency,
+    ADD CONSTRAINT ai_jobs_lease_consistency CHECK (
+        (status IN ('LEASED','RUNNING') AND leased_by IS NOT NULL AND lease_until IS NOT NULL)
+     OR (status NOT IN ('LEASED','RUNNING') AND leased_by IS NULL AND lease_until IS NULL)
+    );
+```
+
+**Acceptance:**
+
+`INSERT` строки с `leased_by IS NOT NULL, lease_until IS NULL` отклоняется.
+
+---
+
+### LR-BE-RM-008 — platform_admins re-grant
+
+`user_id UUID PRIMARY KEY` + `revoked_at` делает невозможной повторную выдачу прав после отзыва.
+
+```sql
+ALTER TABLE platform_admins DROP CONSTRAINT platform_admins_pkey;
+ALTER TABLE platform_admins ADD COLUMN id UUID;
+UPDATE platform_admins SET id = gen_random_uuid() WHERE id IS NULL;
+ALTER TABLE platform_admins
+    ALTER COLUMN id SET NOT NULL,
+    ADD PRIMARY KEY (id),
+    ADD COLUMN revoked_by UUID;
+
+CREATE UNIQUE INDEX platform_admins_one_active_idx
+    ON platform_admins(user_id) WHERE revoked_at IS NULL;
+```
+
+`Revoke` проставляет `revoked_at`/`revoked_by`, строку не удаляет.
+
+**Acceptance:**
+
+Grant → Revoke → Grant для одного пользователя проходит; в таблице две строки, активная одна; история выдач сохранена.
+
+---
+
+### LR-BE-RM-009 — memberships soft revoke
+
+`revenue_events` и `risk_feedback` — append-only с триггером против UPDATE/DELETE — ссылаются на `memberships(tenant_id, user_id)`. Физическое удаление membership либо блокируется, либо каскадом сносит фактические записи.
+
+```sql
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX memberships_one_active_idx
+    ON memberships(tenant_id, user_id) WHERE revoked_at IS NULL;
+```
+
+Правило в §11: членство не удаляется физически; отзыв доступа — `UPDATE … SET revoked_at = now()`. Permission service читает только `revoked_at IS NULL`.
+
+**Acceptance:**
+
+Отзыв доступа у сотрудника, подтвердившего выручку, проходит; `revenue_events` не затронуты; сотрудник теряет доступ немедленно.
+
+---
+
+### БЛОК R2 — Согласование имён и enum
+
+---
+
+### LR-BE-RM-010 — AI job lifecycle canonical naming
+
+План v1.2 использует `status IN ('PENDING','CLAIMED','SUCCEEDED','FAILED','DEAD')`, `lease_owner`, `lease_expires_at`, `conversation_id`, `last_analyzed_message_id`. Каноническим является §53 настоящего документа.
+
+Канон:
+
+```text
+status:      PENDING | LEASED | RUNNING | SUCCEEDED | RETRY | DEAD
+владение:    leased_by, lease_until
+готовность:  available_at
+сущность:    entity_type, entity_id
+свежесть:    base_conversation_revision, analysis_through_message_id
+```
+
+**Acceptance:**
+
+В коде, миграциях, OpenAPI и Плане v1.2 не остаётся идентификаторов `CLAIMED`, `lease_owner`, `lease_expires_at`, `last_analyzed_message_id`. `grep` по репозиторию пуст.
+
+---
+
+### LR-BE-RM-011 — application_status canonical value
+
+§3.4 фиксирует `PENDING | APPLIED | STALE | REJECTED`. План v1.2 использует `VALID` вместо `APPLIED`.
+
+Канон — `APPLIED`.
+
+**Acceptance:**
+
+`ai_runs.application_status` CHECK содержит `APPLIED`; `VALID` не встречается в коде и контрактах.
+
+---
+
+### LR-BE-RM-012 — Risk severity baseline
+
+План v1.2 задаёт severity, противоречащие §30, §31 и GLOSSARY:
+
+| Risk | Канон (§30–33, GLOSSARY) | Ошибочно в Плане v1.2 |
+|---|---|---|
+| `CUSTOMER_SILENT_AFTER_PRICE` | 24 ч → MEDIUM, 48 ч → HIGH | 24 ч → HIGH, 48 ч → CRITICAL |
+| `BOOKING_NOT_CONFIRMED` | CRITICAL | HIGH |
+
+**Acceptance:**
+
+Policy-код и фикстуры используют канон; Radar ordering (§34) пересчитан на исправленные severity.
+
+---
+
+### LR-BE-RM-013 — R3 eligible stages
+
+Политика `BOOKING_NOT_CONFIRMED` в Плане v1.2 разрешает стадии `QUALIFYING / PRICE_SENT / WAITING_BUSINESS`. Но §31 задаёт условие `bookingIntent >= 0.85 OR stage = BOOKING_INTENT`: при обнаружении факта Opportunity закономерно переходит в стадию `BOOKING_INTENT` и выпадает из собственной политики.
+
+Канонический список:
+
+```text
+QUALIFYING
+PRICE_SENT
+WAITING_CUSTOMER
+WAITING_BUSINESS
+BOOKING_INTENT
+```
+
+Исключающие: `NEW`, `ENGAGED`, `BOOKED`, `WON`, `LOST`, `ARCHIVED`.
+
+**Acceptance:**
+
+Тест: Opportunity в стадии `BOOKING_INTENT`, факт с confidence 0.92, прошло 35 бизнес-минут без подтверждения → Risk создан.
+
+---
+
+### LR-BE-RM-014 — Risk threshold unit
+
+`risk_policy_configs.threshold_minutes` не указывает, бизнес-минуты это или календарные. Для R1/R3/R4 канон — бизнес-время; для R2/R5 §30 и §33 задают бизнес-часы, но при 9-часовом рабочем дне «24 бизнес-часа» — это около 2,7 календарных суток, что для риска «клиент молчит» требует явного подтверждения продуктового решения.
+
+Задача — сделать единицу явной, поведение по умолчанию не менять:
+
+```sql
+ALTER TABLE risk_policy_configs
+    RENAME COLUMN threshold_minutes TO threshold_value;
+
+ALTER TABLE risk_policy_configs
+    ADD COLUMN threshold_unit TEXT
+        CHECK (threshold_unit IN ('BUSINESS_MINUTES','CALENDAR_MINUTES')),
+    ADD COLUMN escalation_value INTEGER
+        CHECK (escalation_value IS NULL OR escalation_value > threshold_value);
+
+UPDATE risk_policy_configs SET threshold_unit = 'BUSINESS_MINUTES';
+
+UPDATE risk_policy_configs
+SET escalation_value = 2880
+WHERE risk_type = 'CUSTOMER_SILENT_AFTER_PRICE';
+
+ALTER TABLE risk_policy_configs
+    ALTER COLUMN threshold_unit SET NOT NULL;
+```
+
+Открытый вопрос для владельца продукта, решается внутри этапа: перевести R2 и R5 на `CALENDAR_MINUTES` (1440 = ровно сутки) или оставить бизнес-время. Решение фиксируется ADR-033.
+
+**Acceptance:**
+
+Ни один расчёт порога не выводит единицу из типа риска; единица читается из строки конфига.
+
+---
+
+### LR-BE-RM-015 — notification_preferences full field set
+
+План v1.2 задаёт таблицу с четырьмя полями и теряет поля, обязательные по §3.7: `minimum_severity`, `in_app_enabled`, `telegram_enabled`, `quiet_hours_enabled`, `created_at`. Потеря `minimum_severity` вырезает возможность, объявленную в GLOSSARY («Notification Policy — тип риска, минимальная severity, режим, quiet hours») и в §45.
+
+Второе расхождение: §3.7 берёт timezone из Organization default, План v1.2 — из Location. Канон — **Organization default** (§3.7); Location-timezone используется только для расчёта business hours.
+
+**Acceptance:**
+
+Таблица содержит полный набор полей §3.7; настройка «уведомлять только о HIGH и выше» работает; quiet hours и digest считаются в timezone организации.
+
+---
+
+### БЛОК R3 — Корректность runtime
+
+---
+
+### LR-BE-RM-016 — Absolute lease cap
+
+§3.5 намеренно разрешает heartbeat AI Agent продлевать lease своих RUNNING jobs. Отказ, который это не покрывает: inference завис, но heartbeat-горутина жива — задание удерживается бесконечно и в очередь не возвращается.
+
+Добавить абсолютный потолок поверх скользящей аренды:
+
+```sql
+ALTER TABLE ai_jobs ADD COLUMN leased_at TIMESTAMPTZ;
+```
+
+```text
+lease_until   = now() + 120s        -- продлевается heartbeat (§3.5)
+max_lease_age = leased_at + 15m     -- не продлевается никогда
+```
+
+Reclaim-обработчик забирает задание при `lease_until < now()` **или** `leased_at + interval '15 minutes' < now()`. Во втором случае `attempts += 1` и `error_code = LEASE_CAP_EXCEEDED`.
+
+Потолок выбран как 60× p95 latency (15 с) — заведомо выше любого честного inference на 8 GB VRAM.
+
+**Acceptance:**
+
+AI Agent с искусственно зависшим Provider и живым heartbeat теряет задание через 15 минут; задание успешно выполняется другим узлом; повторный `complete` от зависшего узла отбрасывается идемпотентно.
+
+---
+
+### LR-BE-RM-017 — Confidence tiers codified
+
+§59 задаёт три уровня (`>=0.85` strong, `0.65–0.849` weak, `<0.65` untrusted), но План v1.2 упоминает только 0.65 и 0.85 в разных местах и не связывает их. Факты в диапазоне 0.65–0.849 сейчас хранятся как обычные и молча не используются.
+
+Зафиксировать:
+
+| Уровень | Диапазон | Поведение |
+|---|---|---|
+| strong | `>= confidence_min` (0.85) | открывает Risk |
+| weak | `0.65 … confidence_min` | сохраняется, помечен `trusted = false`, доступен в admin summary и метриках, Risk не открывает |
+| untrusted | `< 0.65` | не применяется к domain, только метрика |
+
+Каждый факт в `derived_facts` получает вычисляемое поле `trusted`. Downstream-модули читают только `trusted = true` и сверяются с `confidence_min` политики.
+
+**Acceptance:**
+
+Факт с confidence 0.70 виден в `/admin/ai/conversations/{id}/summary`, не создаёт Risk, попадает в метрику `ai_facts_weak_total`.
+
+---
+
+### LR-BE-RM-018 — RLS roles and fail-closed (ADR-032)
+
+§12 требует RLS до первого pilot, но policy строится на `current_setting('lidradar.tenant_id')`, а три сценария работают вне tenant-контекста: claim заданий (охватывает все tenant'ы), outbox dispatcher, admin read-models. При включении RLS на этапе 24 сломаются этапы 6, 13 и 23 — в документах это не оговорено.
+
+Ввести три роли:
+
+| Роль | Кто использует | RLS | Контекст |
+|---|---|---|---|
+| `lidradar_app` | `cmd/api` | FORCE | `SET LOCAL lidradar.tenant_id` из `X-Tenant-ID` |
+| `lidradar_worker` | `cmd/worker`, `cmd/scheduler` | FORCE | `SET LOCAL` из `jobs.tenant_id` после claim |
+| `lidradar_platform` | claim/dispatch/admin | `BYPASSRLS` | не устанавливается |
+
+```sql
+CREATE POLICY tenant_isolation ON conversations
+    USING (tenant_id = current_setting('lidradar.tenant_id', true)::uuid);
+ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
+```
+
+Аргумент `true` возвращает NULL вместо ошибки при незаданной переменной — сравнение даёт «строк нет», то есть fail-closed.
+
+Круг запросов под `lidradar_platform` держать явным списком: `jobs.claim`, `ai_jobs.claim`, `reclaim-expired-*`, `outbox.dispatch`, `admin.*`.
+
+AI Node в этот список не входит: узел не имеет доступа к PostgreSQL вообще, только к HTTP API (§48). Записать это явно.
+
+**Acceptance:**
+
+`SELECT` без `SET LOCAL` под ролью `lidradar_app` возвращает 0 строк. Worker после claim видит только свой tenant. Этапы 6, 13, 23 проходят регресс с включённым RLS.
+
+---
+
+### LR-BE-RM-019 — Precision metric per risk
+
+`risk_feedback` append-only, и §3 этапа 21 разрешает несколько записей на один Risk. Метрика precision, считающая строки, даёт лишний вес рискам с несколькими правками — а именно на неё завязан критерий перехода Milestone E.
+
+Считать последний вердикт на Risk:
+
+```sql
+WITH latest AS (
+    SELECT DISTINCT ON (risk_id) risk_id, verdict
+    FROM risk_feedback
+    WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3
+    ORDER BY risk_id, created_at DESC, id DESC
+)
+SELECT r.type,
+       count(*)                                             AS total_with_feedback,
+       count(*) FILTER (WHERE l.verdict = 'TRUE_POSITIVE')  AS tp,
+       count(*) FILTER (WHERE l.verdict = 'FALSE_POSITIVE') AS fp
+FROM latest l
+JOIN risk_signals r ON r.tenant_id = $1 AND r.id = l.risk_id
+GROUP BY r.type;
+```
+
+Добавить `coverage_rate = total_with_feedback / total_risks`. Критерий Milestone E засчитывается только при `coverage_rate >= 0.5` — иначе precision смещена выборкой.
+
+**Acceptance:**
+
+Risk с тремя feedback учитывается один раз; метрика возвращает `coverage_rate`.
+
+---
+
+### LR-BE-RM-020 — Quiet hours midnight wrap
+
+Значение по умолчанию 22:00–08:00 переходит через полночь, но семантика нигде не задана, а наивное `BETWEEN` не даст ни одного попадания. Совпадение границ схемой допускается и неоднозначно.
+
+```sql
+ALTER TABLE notification_preferences
+    ADD CONSTRAINT notification_preferences_quiet_not_degenerate CHECK (
+        quiet_hours_start IS NULL OR quiet_hours_start <> quiet_hours_end
+    );
+```
+
+Семантика: при `start > end` интервал трактуется как `[start, 24:00) ∪ [00:00, end)` в timezone организации. Уведомление, попавшее в тихие часы, доставляется в `end` одним сообщением с актуальным на момент отправки состоянием риска.
+
+**Acceptance:**
+
+Risk, открытый в 23:00 при quiet 22:00–08:00, доставляется в 08:00 одним сообщением. Risk, открытый в 12:00, доставляется немедленно.
+
+---
+
+### LR-BE-RM-021 — Deterministic clock in tests
+
+План v1.2 предлагает управлять временем через `SET LOCAL clock.time` — такой конструкции в PostgreSQL нет: `SET LOCAL` работает только с параметрами конфигурации, `now()` им не подменяется.
+
+Правило: бизнес-время управляется на стороне Go.
+
+* все application-сервисы принимают `clock.Clock`; в тестах — `clock.NewFake(t0)`;
+* семантически значимые метки (`confirmed_at`, `attributed_at`, `detected_at`, `due_at`, `lease_until`, `available_at`) передаются параметрами запроса, а не берутся из `now()`;
+* `created_at DEFAULT now()` остаётся — это техническая метка вставки;
+* истечение аренды в тесте проверяется прямым сдвигом `lease_until` в фикстуре, без ожидания.
+
+**Acceptance:**
+
+Money-loop integration test (LR-BE-1209) и все risk-тесты проходят без реальных задержек; в репозитории нет упоминаний `clock.time`.
+
+---
+
+### БЛОК R4 — Документы и данные
+
+---
+
+### LR-BE-RM-022 — Migration map canonicalization
+
+Часть I Плана v1.2 обещает `000012_ai_node.sql` и `000013_ai_analysis.sql`, Часть II занимает те же номера под revenue. Health-check LR-BE-2605 ожидает конкретный `latest`.
+
+Свести к одной карте, зафиксировать в шапке Плана, обновить ожидаемое значение `applied` в health-check с учётом миграции этого этапа.
+
+**Acceptance:**
+
+`/health/ready` возвращает `applied` и `latest`, совпадающие с картой; расхождение ломает CI.
+
+---
+
+### LR-BE-RM-023 — AI Node hardware baseline
+
+Шапка настоящего документа и GLOSSARY фиксируют RTX 4060 **8 GB**. План v1.2 в двух местах указывает 12 GB (`GPULayers: 33 for RTX 4060 12GB`, `"vram_gb": 12`). Видеокарты GeForce RTX 4060 с 12 GB не существует.
+
+Канон — 8 GB. Проверка помещаемости: `llama-3.1-8b-instruct-q4_k_m` ≈ 4,9 GB весов + KV-кэш ≈ 0,5 GB при контексте 4096 → все 33 слоя выгружаются на GPU, `GPULayers: 33` остаётся верным. Запас ~2 GB, поэтому контекст 4096 (§56) — потолок, `parallel 1` / `max_inflight 1` (§61) не повышаются.
+
+**Acceptance:**
+
+Манифест модели содержит `"vram_gb": 8`; бенчмарк фиксирует фактический пик VRAM и отсутствие OOM (§62).
+
+---
+
+### LR-BE-RM-024 — Golden dataset split
+
+LR-BE-1503 и План v1.2 задают «60% TRAIN, 20% VALIDATION, 20% GOLDEN» от 500 кейсов — это 100 golden, тогда как гейт требует прогона на 300. Сплит TRAIN бессмыслен: дообучения в проекте нет (§70, LR-BE-2107), варьируется только промпт.
+
+Канон: **400 GOLDEN + 100 DEV**. `split` принимает значения `GOLDEN | DEV`. SHA-256 считается только по GOLDEN. Промпт итерируется на DEV; прогон по GOLDEN — только перед сменой статуса манифеста.
+
+**Acceptance:**
+
+`golden_v1.jsonl` содержит 400 GOLDEN-кейсов; runner падает с `GOLDEN_DIGEST_MISMATCH` при подмене; DEV-файл не влияет на freeze.
+
+---
+
+### LR-BE-RM-025 — Shadow collection scheduling
+
+Этап 15 требует 500 реальных диалогов «из pilot-детейлинга», но пилот стартует на этапе 26 — то есть Milestone D заблокирован данными, появляющимися внутри Milestone E.
+
+Ввести параллельный этап **A2 — INT-SHADOW-001**, стартующий сразу после Exit Gate этапа A:
+
+* дружественная студия подключается через Connected Business Bot;
+* активны только этапы 4–5 (RawEvent → нормализация); `ai_enabled = FALSE`;
+* риски не создаются, уведомления не отправляются, владелец продуктом не пользуется;
+* обезличивание выполняется при экспорте для разметки;
+* обязательны письменное согласие владельца и ДПА (§70).
+
+Выход: 500 обезличенных диалогов → вход LR-BE-1502. Ожидаемая длительность при 200 сообщениях в день — 2–3 недели.
+
+**Acceptance:**
+
+Этап A2 заведён в план как параллельный трек с собственным Exit Gate; зависимость этапа 15 переписана с «pilot-детейлинг» на «этап A2».
+
+---
+
+### LR-BE-RM-026 — Documentation sync
+
+Свести документы к одному состоянию:
+
+* GLOSSARY: переписать статью `Revenue Event` (потенциальная выручка Revenue Event'ом не является — это `estimatedAmount` Opportunity); добавить `Attribution window`, `Trust threshold / untrusted fact`, `Lease renewal`, `Lease cap`, `Shadow-сбор`, `Debounce`, `Threshold unit`;
+* README: ссылки «План разработки MVP v1.0» → v1.2; «План внедрения MVP v1.0» → «Пилотный план (планируется)» со строкой в таблице статусов;
+* счётчик ADR: 31 → 34 (добавляются ADR-032 RLS-роли, ADR-033 единица порога риска, ADR-034 дебаунс AI-очереди); изменение архитектуры v1.1 проводится через процедуру Architecture Freeze единым пакетом;
+* §78 настоящего документа и «Порядок PR» Плана v1.2 привести к одному списку (25 против 28 PR).
+
+**Acceptance:**
+
+Ни один термин, встречающийся в документах, не отсутствует в GLOSSARY; перекрёстные ссылки открываются; версии и даты в шапках подняты.
+
+---
+
+## Exit Gate
+
+```text
+000018_consistency_remediation.sql применена на staging
+→ регресс этапов 0–16 зелёный
+→ Money Loop e2e зелёный на исправленной attribution-схеме
+→ grep по репозиторию не находит CLAIMED / lease_owner / VALID / clock.time
+→ карта миграций и health-check совпадают
+→ GLOSSARY, README, План v1.2 не противоречат Tasks.md
+```
+
+Проверка, закрывающая этап: попытка задвоить Confirmed Recovered Revenue по одной Opportunity отклоняется базой, а не application-слоем.
+
+Этап 17 начинается только после этого.
+
+---
+
 # ЭТАП 17 — SEMANTIC RISK: PROMISE_NOT_FULFILLED
 
 ## Цель
@@ -4380,6 +5039,8 @@ internal organization
 #16 ai-conversation-analysis
 
 #17 risk-booking-not-confirmed
+
+#17.5 consistency-remediation   ← ЭТАП R, вне очереди
 
 #18 risk-promise-not-fulfilled
 
