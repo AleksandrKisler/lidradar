@@ -47,7 +47,7 @@ type rankedDetail struct {
 
 const radarProjection = `
 	r.id AS risk_id, r.tenant_id, r.opportunity_id, r.location_id, r.type, r.severity, r.status,
-	r.source, r.risk_engine_version, r.trigger_message_id, r.reason_code,
+	r.source, r.confidence, r.ai_run_id, r.risk_engine_version, r.trigger_message_id, r.reason_code,
 	r.reason_text, r.detected_at, r.due_at, r.updated_at,
 	r.acknowledged_at, r.acted_at, r.resolved_at,
 	o.id AS radar_opportunity_id, o.stage, COALESCE(o.estimated_amount::text, '') AS potential_revenue,
@@ -426,7 +426,7 @@ func (store *PostgresRadarStore) mutate(
 			FROM current
 			WHERE risk.id = current.id
 			RETURNING risk.id, risk.tenant_id, risk.opportunity_id, risk.location_id,
-			          risk.type, risk.severity, risk.status, risk.source,
+			          risk.type, risk.severity, risk.status, risk.source, risk.confidence, risk.ai_run_id,
 			          risk.risk_engine_version, risk.trigger_message_id,
 			          risk.reason_code, risk.reason_text, risk.detected_at, risk.due_at,
 			          risk.updated_at, risk.acknowledged_at, risk.acted_at, risk.resolved_at,
@@ -468,7 +468,8 @@ func scanRankedDetail(row riskRow) (rankedDetail, error) {
 	var potentialRevenue string
 	if err := row.Scan(
 		&risk.ID, &risk.TenantID, &risk.OpportunityID, &risk.LocationID,
-		&risk.Type, &risk.Severity, &risk.Status, &risk.Source, &risk.PolicyVersion,
+		&risk.Type, &risk.Severity, &risk.Status, &risk.Source, &risk.Confidence,
+		&risk.AIRunID, &risk.PolicyVersion,
 		&risk.TriggerMessageID, &risk.ReasonCode, &risk.Reason, &risk.DetectedAt,
 		&risk.DueAt, &risk.UpdatedAt, &risk.AcknowledgedAt, &risk.ActedAt, &risk.ResolvedAt,
 		&opportunity.ID, &opportunity.Stage, &potentialRevenue, &opportunity.Currency,
@@ -496,7 +497,8 @@ func scanRadarMutation(row riskRow) (application.Mutation, error) {
 	if err := row.Scan(
 		&mutation.Risk.ID, &mutation.Risk.TenantID, &mutation.Risk.OpportunityID,
 		&mutation.Risk.LocationID, &mutation.Risk.Type, &mutation.Risk.Severity,
-		&mutation.Risk.Status, &mutation.Risk.Source, &mutation.Risk.PolicyVersion,
+		&mutation.Risk.Status, &mutation.Risk.Source, &mutation.Risk.Confidence,
+		&mutation.Risk.AIRunID, &mutation.Risk.PolicyVersion,
 		&mutation.Risk.TriggerMessageID, &mutation.Risk.ReasonCode, &mutation.Risk.Reason,
 		&mutation.Risk.DetectedAt, &mutation.Risk.DueAt, &mutation.Risk.UpdatedAt,
 		&mutation.Risk.AcknowledgedAt, &mutation.Risk.ActedAt, &mutation.Risk.ResolvedAt,

@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	aiapplication "lidradar/backend/internal/ai/application"
+	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	connectorapplication "lidradar/backend/internal/connector/application"
 	connectorinfrastructure "lidradar/backend/internal/connector/infrastructure"
@@ -70,9 +72,14 @@ func run(ctx context.Context, configuration config.Config) error {
 	)
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
 	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+	aiStore := aiinfrastructure.NewPostgresStore(pool)
+	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, configuration.AI.ModelVersion)
+	aiService := aiapplication.NewService(aiStore, generator, time.Now, aiapplication.DefaultLease).
+		WithStaleJobBuilder(aiBuilder)
 	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
 	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
 	riskPolicy := riskdomain.NoResponsePolicy{}
+	bookingPolicy := riskdomain.BookingNotConfirmedPolicy{}
 	riskInvalidator := riskinfrastructure.NewPostgresInvalidator(pool)
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
 	permissionService := tenantapplication.NewPermissionService(tenantRepository)
@@ -84,6 +91,12 @@ func run(ctx context.Context, configuration config.Config) error {
 	).WithInvalidator(riskInvalidator)
 	riskPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, generator, time.Now,
+	)
+	bookingEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, bookingPolicy, generator, time.Now,
+	).WithInvalidator(riskInvalidator)
+	bookingPlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, bookingEvaluator, bookingPolicy, generator, time.Now,
 	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	var notificationTransport notificationapplication.Transport
@@ -120,8 +133,10 @@ func run(ctx context.Context, configuration config.Config) error {
 			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, generator),
 			opportunityapplication.ConversationChangedEventType: eventsapplication.ChainHandlers(
 				opportunityapplication.CandidateEventHandler(jobStore, generator),
+				aiapplication.ConversationChangedEventHandler(aiService, aiBuilder),
 				riskapplication.ConversationChangedEventHandler(jobStore, generator),
 			),
+			aiapplication.AnalysisAppliedEventType:      riskapplication.AIAnalysisAppliedEventHandler(jobStore, generator),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, generator),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, generator),
 			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(
@@ -135,8 +150,9 @@ func run(ctx context.Context, configuration config.Config) error {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshJobHandler(riskPlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
+			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingEvaluator),
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)

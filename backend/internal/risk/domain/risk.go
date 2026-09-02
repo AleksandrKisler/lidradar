@@ -12,7 +12,10 @@ import (
 
 type Type string
 
-const TypeNoResponse Type = "NO_RESPONSE"
+const (
+	TypeNoResponse          Type = "NO_RESPONSE"
+	TypeBookingNotConfirmed Type = "BOOKING_NOT_CONFIRMED"
+)
 
 type Severity string
 
@@ -56,6 +59,8 @@ type Risk struct {
 	Severity         Severity   `json:"severity"`
 	Status           Status     `json:"status"`
 	Source           Source     `json:"source"`
+	Confidence       *float64   `json:"confidence,omitempty"`
+	AIRunID          *string    `json:"aiRunId,omitempty"`
 	PolicyVersion    string     `json:"policyVersion"`
 	TriggerMessageID string     `json:"triggerMessageId"`
 	ReasonCode       string     `json:"reasonCode"`
@@ -70,11 +75,23 @@ type Risk struct {
 
 // NewNoResponse создаёт детерминированный агрегат NO_RESPONSE.
 func NewNoResponse(id string, finding Finding, now time.Time) (Risk, error) {
+	return newRisk(id, TypeNoResponse, finding, now)
+}
+
+// NewBookingNotConfirmed создаёт риск неподтверждённой записи. Сильный
+// смысловой факт сохраняет ссылку на AI-run, а путь по этапу остаётся RULE.
+func NewBookingNotConfirmed(id string, finding Finding, now time.Time) (Risk, error) {
+	return newRisk(id, TypeBookingNotConfirmed, finding, now)
+}
+
+func newRisk(id string, riskType Type, finding Finding, now time.Time) (Risk, error) {
+	if riskType == TypeNoResponse && finding.Source == "" {
+		finding.Source = SourceRule
+	}
 	if id == "" || finding.TenantID == "" || finding.OpportunityID == "" ||
 		finding.LocationID == "" || finding.TriggerMessageID == "" ||
 		finding.PolicyVersion == "" || finding.ReasonCode == "" || finding.Reason == "" ||
-		finding.DueAt.IsZero() || now.IsZero() || finding.DueAt.After(now) ||
-		(finding.Severity != SeverityHigh && finding.Severity != SeverityCritical) {
+		finding.DueAt.IsZero() || now.IsZero() || finding.DueAt.After(now) {
 		return Risk{}, ErrInvalidRisk
 	}
 	risk := Risk{
@@ -82,10 +99,12 @@ func NewNoResponse(id string, finding Finding, now time.Time) (Risk, error) {
 		TenantID:         finding.TenantID,
 		OpportunityID:    finding.OpportunityID,
 		LocationID:       finding.LocationID,
-		Type:             TypeNoResponse,
+		Type:             riskType,
 		Severity:         finding.Severity,
 		Status:           StatusOpen,
-		Source:           SourceRule,
+		Source:           finding.Source,
+		Confidence:       finding.Confidence,
+		AIRunID:          finding.AIRunID,
 		PolicyVersion:    finding.PolicyVersion,
 		TriggerMessageID: finding.TriggerMessageID,
 		ReasonCode:       finding.ReasonCode,
@@ -111,6 +130,9 @@ func (r *Risk) Refresh(finding Finding, now time.Time) error {
 	r.Reason = finding.Reason
 	r.PolicyVersion = finding.PolicyVersion
 	r.TriggerMessageID = finding.TriggerMessageID
+	r.Source = finding.Source
+	r.Confidence = finding.Confidence
+	r.AIRunID = finding.AIRunID
 	r.DetectedAt = now.UTC()
 	r.DueAt = finding.DueAt.UTC()
 	r.UpdatedAt = now.UTC()
@@ -126,11 +148,30 @@ var reasonCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,99}$`)
 // Validate защищает агрегат и при создании, и при чтении из PostgreSQL.
 func (r Risk) Validate() error {
 	if r.ID == "" || r.TenantID == "" || r.OpportunityID == "" || r.LocationID == "" ||
-		r.Type != TypeNoResponse || (r.Severity != SeverityHigh && r.Severity != SeverityCritical) ||
-		(r.Source != SourceRule) || r.PolicyVersion == "" || r.PolicyVersion != strings.TrimSpace(r.PolicyVersion) ||
+		(r.Type != TypeNoResponse && r.Type != TypeBookingNotConfirmed) ||
+		r.PolicyVersion == "" || r.PolicyVersion != strings.TrimSpace(r.PolicyVersion) ||
 		r.TriggerMessageID == "" || !reasonCodePattern.MatchString(r.ReasonCode) || r.Reason == "" ||
 		r.Reason != strings.TrimSpace(r.Reason) || r.DetectedAt.IsZero() || r.DueAt.IsZero() ||
 		r.DueAt.After(r.DetectedAt) || r.UpdatedAt.IsZero() {
+		return ErrInvalidRisk
+	}
+	if r.Type == TypeNoResponse && (r.Severity != SeverityHigh && r.Severity != SeverityCritical) {
+		return ErrInvalidRisk
+	}
+	if r.Type == TypeBookingNotConfirmed && r.Severity != SeverityCritical {
+		return ErrInvalidRisk
+	}
+	switch r.Source {
+	case SourceRule:
+		if r.Confidence != nil || r.AIRunID != nil {
+			return ErrInvalidRisk
+		}
+	case SourceHybrid:
+		if r.Type != TypeBookingNotConfirmed || r.Confidence == nil || *r.Confidence < 0 || *r.Confidence > 1 ||
+			r.AIRunID == nil || strings.TrimSpace(*r.AIRunID) == "" {
+			return ErrInvalidRisk
+		}
+	default:
 		return ErrInvalidRisk
 	}
 	switch r.Status {
@@ -218,6 +259,18 @@ type ConversationState struct {
 	OutgoingAfterTrigger bool
 	ResponseThreshold    time.Duration
 	BusinessHours        BusinessHours
+	OpportunityStage     string
+	BookingIntent        *BookingIntentSignal
+}
+
+// BookingIntentSignal — только проверенная производная семантика. Она не
+// является решением о риске и всегда трассируется до сообщения и AI-run.
+type BookingIntentSignal struct {
+	Value             bool
+	Confidence        float64
+	AIRunID           string
+	EvidenceMessageID string
+	EvidenceAt        time.Time
 }
 
 type Finding struct {
@@ -228,6 +281,9 @@ type Finding struct {
 	ReasonCode                          string
 	Reason                              string
 	DueAt                               time.Time
+	Source                              Source
+	Confidence                          *float64
+	AIRunID                             *string
 }
 
 type Decision struct {

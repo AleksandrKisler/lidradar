@@ -95,6 +95,7 @@ type ConversationSummary struct {
 	BaseConversationRevision               int64
 	AnalysisThroughMessageID, ModelVersion string
 	PromptVersion, SchemaVersion, RunID    string
+	Facts                                  []SemanticFact
 	UpdatedAt                              time.Time
 }
 

@@ -328,11 +328,6 @@ func conversationFingerprint(c Case) string {
 	return b.String()
 }
 
-func compare(actual, expected []domain.SemanticFact) (tp, fp, fn int) {
-	tp, fp, fn, _ = compareDetailed(actual, expected, nil)
-	return tp, fp, fn
-}
-
 func compareDetailed(actual, expected []domain.SemanticFact, byFactType map[string]FactMetrics) (tp, fp, fn, exactEvidence int) {
 	remaining := append([]domain.SemanticFact(nil), expected...)
 	for _, a := range actual {

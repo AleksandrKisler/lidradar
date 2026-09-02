@@ -83,7 +83,7 @@ func TestPostgresAIQueuePersistsLifecycleAndSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Клиент хочет записаться завтра.","facts":[]}`
+	output := `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Клиент хочет записаться завтра.","facts":[{"type":"BOOKING_INTENT","value":true,"confidence":0.95,"evidenceMessageIds":["` + messageID + `"]}]}`
 	completed, err := service.Complete(ctx, node.ID, "secret-with-at-least-32-characters", job.ID, run.ID, output)
 	if err != nil || completed.ApplicationStatus != domain.ApplicationApplied {
 		t.Fatalf("complete = %#v, %v", completed, err)
@@ -92,6 +92,7 @@ func TestPostgresAIQueuePersistsLifecycleAndSummary(t *testing.T) {
 	var runStatus domain.RunStatus
 	var summary string
 	var storedDigest []byte
+	var bookingFact, appliedEvent bool
 	if err := pool.QueryRow(ctx, `SELECT status FROM ai_jobs WHERE id = $1`, job.ID).Scan(&jobStatus); err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +105,26 @@ func TestPostgresAIQueuePersistsLifecycleAndSummary(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT secret_digest FROM ai_nodes WHERE id = $1`, node.ID).Scan(&storedDigest); err != nil {
 		t.Fatal(err)
 	}
+	if err := pool.QueryRow(ctx, `
+		SELECT semantic_facts @> $3::jsonb,
+		       EXISTS(
+			SELECT 1 FROM outbox_events
+			WHERE tenant_id = $1 AND aggregate_id = $2
+			  AND event_type = 'ai.analysis.applied' AND event_version = 1
+		)
+		FROM conversation_summaries
+		WHERE tenant_id = $1 AND conversation_id = $4`,
+		tenants.A.TenantID, run.ID,
+		`[{"type":"BOOKING_INTENT","value":true,"confidence":0.95}]`, conversationID,
+	).Scan(&bookingFact, &appliedEvent); err != nil {
+		t.Fatal(err)
+	}
 	digest := sha256.Sum256([]byte("secret-with-at-least-32-characters"))
 	if jobStatus != domain.JobSucceeded || runStatus != domain.RunSucceeded ||
-		summary != "Клиент хочет записаться завтра." || string(storedDigest) != string(digest[:]) {
-		t.Fatalf("durable state = job %s, run %s, summary %q", jobStatus, runStatus, summary)
+		summary != "Клиент хочет записаться завтра." || string(storedDigest) != string(digest[:]) ||
+		!bookingFact || !appliedEvent {
+		t.Fatalf("durable state = job %s, run %s, summary %q, fact=%v, event=%v",
+			jobStatus, runStatus, summary, bookingFact, appliedEvent)
 	}
 }
 

@@ -41,6 +41,7 @@ func (p NoResponsePolicy) Evaluate(state ConversationState, at time.Time) (Decis
 		TriggerMessageID: state.LastMeaningfulID, Severity: severity, PolicyVersion: p.Version(),
 		ReasonCode: "NO_RESPONSE_THRESHOLD_EXCEEDED", DueAt: due,
 		Reason: fmt.Sprintf("Бизнес не ответил клиенту в течение %d рабочих минут", int(elapsed/time.Minute)),
+		Source: SourceRule,
 	}
 	return decision, nil
 }

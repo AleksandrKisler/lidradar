@@ -159,9 +159,8 @@ type riskOpenedData struct {
 	Severity      riskdomain.Severity `json:"severity"`
 }
 
-// RiskOpenedEventHandler создаёт немедленное Telegram-уведомление для
-// NO_RESPONSE согласно политике ТЗ. Это включает HIGH при достижении обычного
-// порога и CRITICAL при существенно просроченном ответе.
+// RiskOpenedEventHandler создаёт немедленное Telegram-уведомление для рисков,
+// которым ТЗ назначает немедленную доставку.
 func RiskOpenedEventHandler(service Service, recipients RecipientStore) eventsapplication.Handler {
 	return func(ctx context.Context, event eventsdomain.Event) error {
 		if recipients == nil {
@@ -170,7 +169,7 @@ func RiskOpenedEventHandler(service Service, recipients RecipientStore) eventsap
 		var data riskOpenedData
 		if json.Unmarshal(event.Data, &data) != nil || event.AggregateType != "risk" ||
 			event.AggregateID == "" || data.RiskID != event.AggregateID || data.OpportunityID == "" || data.LocationID == "" ||
-			data.Type != riskdomain.TypeNoResponse ||
+			(data.Type != riskdomain.TypeNoResponse && data.Type != riskdomain.TypeBookingNotConfirmed) ||
 			(data.Severity != riskdomain.SeverityHigh && data.Severity != riskdomain.SeverityCritical) {
 			return jobsdomain.Permanent("INVALID_RISK_OPENED_EVENT", errors.New("некорректное событие открытия риска"))
 		}
@@ -182,13 +181,19 @@ func RiskOpenedEventHandler(service Service, recipients RecipientStore) eventsap
 			return jobsdomain.Permanent("TELEGRAM_OWNER_NOT_LINKED", ErrNotFound)
 		}
 		title := "Риск: клиент ждёт ответа"
-		if data.Severity == riskdomain.SeverityCritical {
+		body := "Ответьте клиенту как можно скорее. Откройте Radar для подробностей."
+		if data.Type == riskdomain.TypeBookingNotConfirmed {
+			if data.Severity != riskdomain.SeverityCritical {
+				return jobsdomain.Permanent("INVALID_RISK_OPENED_EVENT", errors.New("неверная важность риска записи"))
+			}
+			title = "Критический риск: запись не подтверждена"
+			body = "Предложите клиенту конкретный свободный слот. Откройте Radar для подробностей."
+		} else if data.Severity == riskdomain.SeverityCritical {
 			title = "Критический риск: клиент ждёт ответа"
 		}
 		_, _, err = service.NotifyRisk(
 			ctx, event.TenantID, userID, data.RiskID,
-			title,
-			"Ответьте клиенту как можно скорее. Откройте Radar для подробностей.",
+			title, body,
 		)
 		if err == nil {
 			return nil

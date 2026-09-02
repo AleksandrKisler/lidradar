@@ -80,7 +80,15 @@ func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID stri
 	if err != nil {
 		return domain.Risk{}, false, err
 	}
-	risk, err := domain.NewNoResponse(riskID, *decision.Finding, now)
+	var risk domain.Risk
+	switch e.policy.Type() {
+	case domain.TypeNoResponse:
+		risk, err = domain.NewNoResponse(riskID, *decision.Finding, now)
+	case domain.TypeBookingNotConfirmed:
+		risk, err = domain.NewBookingNotConfirmed(riskID, *decision.Finding, now)
+	default:
+		return domain.Risk{}, false, ErrInvalidCheck
+	}
 	if err != nil {
 		return domain.Risk{}, false, err
 	}

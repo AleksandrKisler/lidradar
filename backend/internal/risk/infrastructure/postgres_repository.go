@@ -45,20 +45,20 @@ func (repository *PostgresRepository) UpsertActive(
 		stored, err := scanRisk(tx.QueryRow(ctx, `
 			INSERT INTO risk_signals(
 				id, tenant_id, opportunity_id, location_id, type, severity, status,
-				reason_code, reason_text, source, risk_engine_version,
-				trigger_message_id, detected_at, due_at, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, 'OPEN', $7, $8, $9, $10, $11, $12, $13, $12, $14)
+				reason_code, reason_text, confidence, source, risk_engine_version,
+				ai_run_id, trigger_message_id, detected_at, due_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, 'OPEN', $7, $8, $9, $10, $11, $12, $13, $14, $15, $14, $16)
 			ON CONFLICT (tenant_id, opportunity_id, type)
 			WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ACTED')
 			DO NOTHING
 			RETURNING id, tenant_id, opportunity_id, location_id, type, severity, status,
-			          source, risk_engine_version, trigger_message_id, reason_code,
+			          source, confidence, ai_run_id, risk_engine_version, trigger_message_id, reason_code,
 			          reason_text, detected_at, due_at, updated_at,
 			          acknowledged_at, acted_at, resolved_at`,
 			candidate.ID, candidate.TenantID, candidate.OpportunityID, candidate.LocationID,
 			candidate.Type, candidate.Severity, candidate.ReasonCode, candidate.Reason,
-			candidate.Source, candidate.PolicyVersion, candidate.TriggerMessageID,
-			candidate.DetectedAt, candidate.DueAt, candidate.UpdatedAt,
+			candidate.Confidence, candidate.Source, candidate.PolicyVersion, candidate.AIRunID,
+			candidate.TriggerMessageID, candidate.DetectedAt, candidate.DueAt, candidate.UpdatedAt,
 		))
 		if err == nil {
 			if appendErr := repository.appendOpenedEvent(ctx, tx, stored); appendErr != nil {
@@ -81,18 +81,19 @@ func (repository *PostgresRepository) UpsertActive(
 		stored, err = scanRisk(repository.pool.QueryRow(ctx, `
 			UPDATE risk_signals
 			SET location_id = $4, severity = $5, reason_code = $6, reason_text = $7,
-			    source = $8, risk_engine_version = $9, trigger_message_id = $10,
-			    detected_at = $11, due_at = $12, updated_at = $13
+			    confidence = $8, source = $9, risk_engine_version = $10,
+			    ai_run_id = $11, trigger_message_id = $12,
+			    detected_at = $13, due_at = $14, updated_at = $15
 			WHERE tenant_id = $1 AND opportunity_id = $2 AND type = $3
 			  AND status IN ('OPEN', 'ACKNOWLEDGED', 'ACTED')
 			RETURNING id, tenant_id, opportunity_id, location_id, type, severity, status,
-			          source, risk_engine_version, trigger_message_id, reason_code,
+			          source, confidence, ai_run_id, risk_engine_version, trigger_message_id, reason_code,
 			          reason_text, detected_at, due_at, updated_at,
 			          acknowledged_at, acted_at, resolved_at`,
 			candidate.TenantID, candidate.OpportunityID, candidate.Type, candidate.LocationID,
-			candidate.Severity, candidate.ReasonCode, candidate.Reason, candidate.Source,
-			candidate.PolicyVersion, candidate.TriggerMessageID, candidate.DetectedAt,
-			candidate.DueAt, candidate.UpdatedAt,
+			candidate.Severity, candidate.ReasonCode, candidate.Reason, candidate.Confidence,
+			candidate.Source, candidate.PolicyVersion, candidate.AIRunID,
+			candidate.TriggerMessageID, candidate.DetectedAt, candidate.DueAt, candidate.UpdatedAt,
 		))
 		if err == nil {
 			return stored, false, nil
@@ -140,12 +141,12 @@ func (repository *PostgresRepository) FindActive(
 	tenantID, opportunityID string,
 	riskType domain.Type,
 ) (domain.Risk, bool, error) {
-	if repository == nil || repository.pool == nil || tenantID == "" || opportunityID == "" || riskType != domain.TypeNoResponse {
+	if repository == nil || repository.pool == nil || tenantID == "" || opportunityID == "" || !supportedRiskType(riskType) {
 		return domain.Risk{}, false, domain.ErrInvalidRisk
 	}
 	risk, err := scanRisk(repository.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, opportunity_id, location_id, type, severity, status,
-		       source, risk_engine_version, trigger_message_id, reason_code,
+		       source, confidence, ai_run_id, risk_engine_version, trigger_message_id, reason_code,
 		       reason_text, detected_at, due_at, updated_at,
 		       acknowledged_at, acted_at, resolved_at
 		FROM risk_signals
@@ -167,7 +168,7 @@ func (repository *PostgresRepository) ResolveActive(
 	at time.Time,
 ) (bool, error) {
 	if repository == nil || repository.pool == nil || tenantID == "" || opportunityID == "" ||
-		riskType != domain.TypeNoResponse || at.IsZero() {
+		!supportedRiskType(riskType) || at.IsZero() {
 		return false, domain.ErrInvalidRisk
 	}
 	result, err := repository.pool.Exec(ctx, `
@@ -187,7 +188,8 @@ func scanRisk(row riskRow) (domain.Risk, error) {
 	var risk domain.Risk
 	if err := row.Scan(
 		&risk.ID, &risk.TenantID, &risk.OpportunityID, &risk.LocationID,
-		&risk.Type, &risk.Severity, &risk.Status, &risk.Source, &risk.PolicyVersion,
+		&risk.Type, &risk.Severity, &risk.Status, &risk.Source, &risk.Confidence,
+		&risk.AIRunID, &risk.PolicyVersion,
 		&risk.TriggerMessageID, &risk.ReasonCode, &risk.Reason, &risk.DetectedAt,
 		&risk.DueAt, &risk.UpdatedAt, &risk.AcknowledgedAt, &risk.ActedAt, &risk.ResolvedAt,
 	); err != nil {
@@ -197,6 +199,10 @@ func scanRisk(row riskRow) (domain.Risk, error) {
 		return domain.Risk{}, domain.ErrInvalidRisk
 	}
 	return risk, nil
+}
+
+func supportedRiskType(riskType domain.Type) bool {
+	return riskType == domain.TypeNoResponse || riskType == domain.TypeBookingNotConfirmed
 }
 
 func mapRiskError(operation string, err error) error {

@@ -14,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	aiapplication "lidradar/backend/internal/ai/application"
+	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
 	catalogapplication "lidradar/backend/internal/catalog/application"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	catalogtransport "lidradar/backend/internal/catalog/transport"
@@ -93,9 +95,14 @@ func newAPIFixture(t *testing.T) apiFixture {
 	)
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
 	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+	aiStore := aiinfrastructure.NewPostgresStore(pool)
+	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, aiapplication.DefaultModelVersion)
+	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).
+		WithStaleJobBuilder(aiBuilder)
 	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
 	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
 	riskPolicy := riskdomain.NoResponsePolicy{}
+	bookingPolicy := riskdomain.BookingNotConfirmedPolicy{}
 	riskEvents := risktransport.NewHub()
 	riskRadar := riskapplication.NewRadar(
 		riskinfrastructure.NewPostgresRadarStore(pool), permissions, riskEvents, time.Now,
@@ -112,6 +119,12 @@ func newAPIFixture(t *testing.T) apiFixture {
 	riskPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, riskEvaluator, riskPolicy, ids.Generator{}, time.Now,
 	)
+	bookingEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, bookingPolicy, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents)
+	bookingPlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, bookingEvaluator, bookingPolicy, ids.Generator{}, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
@@ -122,8 +135,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 			connectorapplication.NormalizationEventType: connectorapplication.NormalizationEventHandler(jobStore, ids.Generator{}),
 			opportunityapplication.ConversationChangedEventType: eventsapplication.ChainHandlers(
 				opportunityapplication.CandidateEventHandler(jobStore, ids.Generator{}),
+				aiapplication.ConversationChangedEventHandler(aiService, aiBuilder),
 				riskapplication.ConversationChangedEventHandler(jobStore, ids.Generator{}),
 			),
+			aiapplication.AnalysisAppliedEventType:      riskapplication.AIAnalysisAppliedEventHandler(jobStore, ids.Generator{}),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
 			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(
@@ -136,8 +151,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshJobHandler(riskPlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
+			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingEvaluator),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(

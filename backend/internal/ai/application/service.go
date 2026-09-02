@@ -27,16 +27,17 @@ var (
 )
 
 const (
-	DefaultLease           = 120 * time.Second
-	DefaultSignatureWindow = 60 * time.Second
-	NodeUnavailableAfter   = 60 * time.Second
-	DefaultMaxAttempts     = 5
-	JobTypeAnalyze         = "ANALYZE_CONVERSATION"
-	EntityTypeConversation = "CONVERSATION"
-	NodeIDHeader           = "X-LidRadar-Node-ID"
-	TimestampHeader        = "X-LidRadar-Timestamp"
-	RequestIDHeader        = "X-LidRadar-Request-ID"
-	SignatureHeader        = "X-LidRadar-Signature"
+	DefaultLease             = 120 * time.Second
+	DefaultSignatureWindow   = 60 * time.Second
+	NodeUnavailableAfter     = 60 * time.Second
+	DefaultMaxAttempts       = 5
+	JobTypeAnalyze           = "ANALYZE_CONVERSATION"
+	EntityTypeConversation   = "CONVERSATION"
+	NodeIDHeader             = "X-LidRadar-Node-ID"
+	TimestampHeader          = "X-LidRadar-Timestamp"
+	RequestIDHeader          = "X-LidRadar-Request-ID"
+	SignatureHeader          = "X-LidRadar-Signature"
+	AnalysisAppliedEventType = "ai.analysis.applied.v1"
 )
 
 var errorCodePattern = regexp.MustCompile(`^[A-Z0-9_]{1,100}$`)
@@ -347,7 +348,7 @@ func (s Service) Complete(ctx context.Context, id, secret, jobID, runID, output 
 				Text: strings.TrimSpace(result.Summary), BaseConversationRevision: snapshot.Revision,
 				AnalysisThroughMessageID: snapshot.LastMessageID, ModelVersion: run.ModelVersion,
 				PromptVersion: run.PromptVersion, SchemaVersion: run.SchemaVersion,
-				RunID: run.ID, UpdatedAt: now,
+				RunID: run.ID, Facts: TrustedFacts(result), UpdatedAt: now,
 			}
 		}
 	}

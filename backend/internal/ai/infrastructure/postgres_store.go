@@ -14,11 +14,18 @@ import (
 
 	"lidradar/backend/internal/ai/application"
 	"lidradar/backend/internal/ai/domain"
+	eventsdomain "lidradar/backend/internal/events/domain"
+	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 )
 
-type PostgresStore struct{ pool *pgxpool.Pool }
+type PostgresStore struct {
+	pool   *pgxpool.Pool
+	events *eventsinfrastructure.PostgresStore
+}
 
-func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore { return &PostgresStore{pool: pool} }
+func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore {
+	return &PostgresStore{pool: pool, events: eventsinfrastructure.NewPostgresStore(pool)}
+}
 
 func (store *PostgresStore) RegisterNode(ctx context.Context, node domain.Node) error {
 	if store == nil || store.pool == nil || node.ID == "" || node.Name == "" || node.Status != domain.NodeOffline {
@@ -580,12 +587,16 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 	}
 	if final.Summary != nil {
 		summary := final.Summary
+		facts, marshalErr := json.Marshal(summary.Facts)
+		if marshalErr != nil {
+			return domain.Run{}, fmt.Errorf("кодирование смысловых фактов AI: %w", marshalErr)
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO conversation_summaries(
 				tenant_id, conversation_id, summary_text, base_conversation_revision,
 				analysis_through_message_id, model_version, prompt_version,
-				schema_version, ai_run_id, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				schema_version, ai_run_id, semantic_facts, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
 			ON CONFLICT (tenant_id, conversation_id) DO UPDATE
 			SET summary_text = EXCLUDED.summary_text,
 			    base_conversation_revision = EXCLUDED.base_conversation_revision,
@@ -594,13 +605,17 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 			    prompt_version = EXCLUDED.prompt_version,
 			    schema_version = EXCLUDED.schema_version,
 			    ai_run_id = EXCLUDED.ai_run_id,
+			    semantic_facts = EXCLUDED.semantic_facts,
 			    updated_at = EXCLUDED.updated_at
 			WHERE conversation_summaries.base_conversation_revision <= EXCLUDED.base_conversation_revision`,
 			summary.TenantID, summary.ConversationID, summary.Text,
 			summary.BaseConversationRevision, summary.AnalysisThroughMessageID,
 			summary.ModelVersion, summary.PromptVersion, summary.SchemaVersion,
-			summary.RunID, summary.UpdatedAt.UTC()); err != nil {
+			summary.RunID, facts, summary.UpdatedAt.UTC()); err != nil {
 			return domain.Run{}, mapAIStoreError("сохранение производного резюме", err)
+		}
+		if err := store.appendAnalysisAppliedEvent(ctx, tx, *summary, final.CompletedAt); err != nil {
+			return domain.Run{}, err
 		}
 	}
 	if final.Replacement != nil {
@@ -634,6 +649,43 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 	run.Status, run.ApplicationStatus, run.CompletedAt = final.RunStatus, final.ApplicationStatus, final.CompletedAt.UTC()
 	run.Output, run.ErrorCode, run.ValidationError = final.Output, final.ErrorCode, final.ValidationError
 	return run, nil
+}
+
+type analysisAppliedEventData struct {
+	ConversationID           string `json:"conversationId"`
+	RunID                    string `json:"runId"`
+	BaseConversationRevision int64  `json:"baseConversationRevision"`
+	AnalysisThroughMessageID string `json:"analysisThroughMessageId"`
+}
+
+func (store *PostgresStore) appendAnalysisAppliedEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	summary domain.ConversationSummary,
+	at time.Time,
+) error {
+	if store.events == nil {
+		return errors.New("исходящий журнал AI не настроен")
+	}
+	data, err := json.Marshal(analysisAppliedEventData{
+		ConversationID: summary.ConversationID, RunID: summary.RunID,
+		BaseConversationRevision: summary.BaseConversationRevision,
+		AnalysisThroughMessageID: summary.AnalysisThroughMessageID,
+	})
+	if err != nil {
+		return fmt.Errorf("подготовка события применённого анализа: %w", err)
+	}
+	event, err := eventsdomain.NewEvent(
+		summary.RunID, "ai.analysis.applied", 1, summary.TenantID,
+		"ai_run", summary.RunID, summary.RunID, data, at.UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("проверка события применённого анализа: %w", err)
+	}
+	if _, _, err := store.events.AppendTx(ctx, tx, event); err != nil {
+		return fmt.Errorf("добавление события применённого анализа: %w", err)
+	}
+	return nil
 }
 
 type scanner interface{ Scan(...any) error }

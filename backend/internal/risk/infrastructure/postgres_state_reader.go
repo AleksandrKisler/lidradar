@@ -34,7 +34,7 @@ func (reader *PostgresStateReader) ActiveOpportunityByConversation(
 	err := reader.pool.QueryRow(ctx, `
 		SELECT id FROM opportunities
 		WHERE tenant_id = $1 AND conversation_id = $2
-		  AND stage NOT IN ('WON', 'LOST', 'ARCHIVED')`, tenantID, conversationID).Scan(&opportunityID)
+		  AND stage NOT IN ('BOOKED', 'WON', 'LOST', 'ARCHIVED')`, tenantID, conversationID).Scan(&opportunityID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -56,11 +56,16 @@ func (reader *PostgresStateReader) CurrentState(
 	var sentAt *time.Time
 	var timezone *string
 	var threshold *int
+	var bookingConfidence *float64
+	var bookingRunID, bookingMessageID *string
+	var bookingAt *time.Time
 	err := reader.pool.QueryRow(ctx, `
-		SELECT o.tenant_id, o.id,
-		       o.stage NOT IN ('WON', 'LOST', 'ARCHIVED'),
+		SELECT o.tenant_id, o.id, o.stage,
+		       o.stage NOT IN ('BOOKED', 'WON', 'LOST', 'ARCHIVED'),
 		       c.location_id, l.timezone, l.response_threshold_minutes,
-		       message.id, message.sent_at, message.direction
+		       message.id, message.sent_at, message.direction,
+		       booking.confidence, booking.ai_run_id,
+		       booking.evidence_message_id, booking.evidence_at
 		FROM opportunities AS o
 		JOIN conversations AS c
 		  ON c.tenant_id = o.tenant_id AND c.id = o.conversation_id
@@ -75,9 +80,43 @@ func (reader *PostgresStateReader) CurrentState(
 			ORDER BY m.sent_at DESC, m.id DESC
 			LIMIT 1
 		) AS message ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT m.id
+			FROM messages AS m
+			WHERE m.tenant_id = c.tenant_id AND m.conversation_id = c.id
+			  AND m.provider_deleted_at IS NULL
+			  AND m.direction IN ('INCOMING', 'OUTGOING')
+			  AND m.text IS NOT NULL AND btrim(m.text) <> ''
+			ORDER BY m.sent_at DESC, m.id DESC
+			LIMIT 1
+		) AS analysis_message ON TRUE
+		LEFT JOIN conversation_summaries AS summary
+		  ON summary.tenant_id = c.tenant_id AND summary.conversation_id = c.id
+		 AND summary.base_conversation_revision = c.revision
+		 AND summary.analysis_through_message_id = analysis_message.id
+		LEFT JOIN LATERAL (
+			SELECT (fact.value ->> 'confidence')::double precision AS confidence,
+			       summary.ai_run_id::text AS ai_run_id,
+			       evidence_message.id::text AS evidence_message_id,
+			       evidence_message.sent_at AS evidence_at
+			FROM jsonb_array_elements(summary.semantic_facts) AS fact(value)
+			CROSS JOIN LATERAL jsonb_array_elements_text(fact.value -> 'evidenceMessageIds') AS evidence(id)
+			JOIN messages AS evidence_message
+			  ON evidence_message.tenant_id = c.tenant_id
+			 AND evidence_message.conversation_id = c.id
+			 AND evidence_message.id::text = evidence.id
+			 AND evidence_message.direction = 'INCOMING'
+			 AND evidence_message.provider_deleted_at IS NULL
+			WHERE fact.value ->> 'type' = 'BOOKING_INTENT'
+			  AND fact.value ->> 'value' = 'true'
+			ORDER BY evidence_message.sent_at DESC, evidence_message.id DESC
+			LIMIT 1
+		) AS booking ON TRUE
 		WHERE o.tenant_id = $1 AND o.id = $2`, tenantID, opportunityID).Scan(
-		&state.TenantID, &state.OpportunityID, &state.ActiveOpportunity,
-		&locationID, &timezone, &threshold, &messageID, &sentAt, &direction,
+		&state.TenantID, &state.OpportunityID, &state.OpportunityStage,
+		&state.ActiveOpportunity, &locationID, &timezone, &threshold,
+		&messageID, &sentAt, &direction, &bookingConfidence, &bookingRunID,
+		&bookingMessageID, &bookingAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ConversationState{}, application.ErrStateNotFound
@@ -92,6 +131,12 @@ func (reader *PostgresStateReader) CurrentState(
 	state.LastMeaningfulID = *messageID
 	state.LastMeaningfulAt = sentAt.UTC()
 	state.LastMeaningful = domain.Direction(*direction)
+	if bookingConfidence != nil && bookingRunID != nil && bookingMessageID != nil && bookingAt != nil {
+		state.BookingIntent = &domain.BookingIntentSignal{
+			Value: true, Confidence: *bookingConfidence, AIRunID: *bookingRunID,
+			EvidenceMessageID: *bookingMessageID, EvidenceAt: bookingAt.UTC(),
+		}
+	}
 	state.ResponseThreshold = time.Duration(*threshold) * time.Minute
 	state.BusinessHours = domain.BusinessHours{Timezone: *timezone, Weekly: make(map[time.Weekday][]domain.BusinessPeriod)}
 

@@ -21,6 +21,8 @@ const (
 	RefreshJobType               = "risk.refresh-no-response-plan.v1"
 	NoResponseCheckType          = "NO_RESPONSE_DUE"
 	NoResponseEvaluationJobType  = "risk.evaluate-no-response.v1"
+	BookingCheckType             = "BOOKING_NOT_CONFIRMED_DUE"
+	BookingEvaluationJobType     = "risk.evaluate-booking-not-confirmed.v1"
 )
 
 type refreshPayload struct {
@@ -32,6 +34,13 @@ type conversationEventData struct {
 	ConversationID string `json:"conversationId"`
 	MessageID      string `json:"messageId"`
 	Revision       int64  `json:"revision"`
+}
+
+type analysisAppliedEventData struct {
+	ConversationID           string `json:"conversationId"`
+	RunID                    string `json:"runId"`
+	BaseConversationRevision int64  `json:"baseConversationRevision"`
+	AnalysisThroughMessageID string `json:"analysisThroughMessageId"`
 }
 
 type CheckScheduler interface {
@@ -97,7 +106,7 @@ func (planner Planner) RefreshOpportunity(ctx context.Context, tenantID, opportu
 		_, _, err := planner.evaluator.EvaluateDue(ctx, tenantID, opportunityID)
 		return err
 	}
-	if state.LastMeaningful != domain.DirectionIncoming {
+	if decision.DueAt.IsZero() || state.LastMeaningful != domain.DirectionIncoming {
 		return nil
 	}
 	checkID, err := planner.ids.NewID()
@@ -105,16 +114,38 @@ func (planner Planner) RefreshOpportunity(ctx context.Context, tenantID, opportu
 		return err
 	}
 	payload, _ := json.Marshal(refreshPayload{OpportunityID: opportunityID})
-	dedupKey := fmt.Sprintf("opportunity:%s:message:%s:policy:%s", opportunityID, state.LastMeaningfulID, planner.policy.Version())
+	triggerID := state.LastMeaningfulID
+	if decision.Finding != nil {
+		triggerID = decision.Finding.TriggerMessageID
+	} else if state.BookingIntent != nil && state.BookingIntent.Value &&
+		state.BookingIntent.Confidence >= domain.StrongBookingIntentConfidence {
+		triggerID = state.BookingIntent.EvidenceMessageID
+	}
+	dedupKey := fmt.Sprintf("opportunity:%s:message:%s:policy:%s", opportunityID, triggerID, planner.policy.Version())
+	checkType, jobType, err := workTypes(planner.policy.Type())
+	if err != nil {
+		return err
+	}
 	check, err := jobsdomain.NewScheduledCheck(
-		checkID, tenantID, NoResponseCheckType, "opportunity", opportunityID,
-		NoResponseEvaluationJobType, dedupKey, payload, decision.DueAt, planner.now().UTC(),
+		checkID, tenantID, checkType, "opportunity", opportunityID,
+		jobType, dedupKey, payload, decision.DueAt, planner.now().UTC(),
 	)
 	if err != nil {
 		return err
 	}
 	_, _, err = planner.scheduler.Schedule(ctx, check)
 	return err
+}
+
+func workTypes(riskType domain.Type) (string, string, error) {
+	switch riskType {
+	case domain.TypeNoResponse:
+		return NoResponseCheckType, NoResponseEvaluationJobType, nil
+	case domain.TypeBookingNotConfirmed:
+		return BookingCheckType, BookingEvaluationJobType, nil
+	default:
+		return "", "", ErrInvalidCheck
+	}
 }
 
 type JobQueue interface {
@@ -152,6 +183,26 @@ func OpportunityEventHandler(queue JobQueue, ids IDs) eventsapplication.Handler 
 	}
 }
 
+// AIAnalysisAppliedEventHandler запускает R3 только после атомарно применённого
+// свежего результата. Отклонённые и устаревшие AI-run такого события не имеют.
+func AIAnalysisAppliedEventHandler(queue JobQueue, ids IDs) eventsapplication.Handler {
+	return func(ctx context.Context, event eventsdomain.Event) error {
+		if queue == nil || ids == nil {
+			return jobsdomain.Permanent("BACKGROUND_CONFIGURATION_INVALID", errors.New("обработчик риска не настроен"))
+		}
+		var data analysisAppliedEventData
+		if json.Unmarshal(event.Data, &data) != nil || event.AggregateType != "ai_run" ||
+			event.AggregateID == "" || data.RunID != event.AggregateID || data.ConversationID == "" ||
+			data.BaseConversationRevision < 1 || data.AnalysisThroughMessageID == "" {
+			return jobsdomain.Permanent("INVALID_OUTBOX_PAYLOAD", errors.New("некорректное событие применённого анализа"))
+		}
+		return enqueueRefresh(
+			ctx, queue, ids, event, refreshPayload{ConversationID: data.ConversationID},
+			"ai-run:"+data.RunID,
+		)
+	}
+}
+
 func enqueueRefresh(
 	ctx context.Context,
 	queue JobQueue,
@@ -180,18 +231,30 @@ func enqueueRefresh(
 }
 
 func RefreshJobHandler(planner Planner) jobsapplication.Handler {
+	return RefreshPlansJobHandler(planner)
+}
+
+// RefreshPlansJobHandler перечитывает один и тот же авторитетный снимок через
+// независимые политики. Одна очередь планирования не размножает задания на
+// каждое правило и сохраняет совместимость с уже записанными событиями.
+func RefreshPlansJobHandler(planners ...Planner) jobsapplication.Handler {
 	return func(ctx context.Context, job jobsdomain.Job) error {
 		var payload refreshPayload
 		if json.Unmarshal(job.Payload, &payload) != nil || (payload.ConversationID == "") == (payload.OpportunityID == "") {
 			return jobsdomain.Permanent("INVALID_JOB_PAYLOAD", errors.New("некорректное задание планирования риска"))
 		}
-		var err error
-		if payload.ConversationID != "" {
-			err = planner.RefreshConversation(ctx, job.TenantID, payload.ConversationID)
-		} else {
-			err = planner.RefreshOpportunity(ctx, job.TenantID, payload.OpportunityID)
+		for _, planner := range planners {
+			var err error
+			if payload.ConversationID != "" {
+				err = planner.RefreshConversation(ctx, job.TenantID, payload.ConversationID)
+			} else {
+				err = planner.RefreshOpportunity(ctx, job.TenantID, payload.OpportunityID)
+			}
+			if classified := classifyRiskWork(err, "RISK_PLAN"); classified != nil {
+				return classified
+			}
 		}
-		return classifyRiskWork(err, "RISK_PLAN")
+		return nil
 	}
 }
 
