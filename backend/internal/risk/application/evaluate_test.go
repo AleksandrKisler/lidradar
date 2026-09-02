@@ -44,7 +44,7 @@ func TestEvaluateDueRereadsStateAndAutoResolves(t *testing.T) {
 	if err != nil || !created || risk.Status != domain.StatusOpen {
 		t.Fatalf("risk = %#v, created = %v, err = %v", risk, created, err)
 	}
-	reader.state.OutgoingAfterTrigger = true // canonical state changed after scheduling
+	reader.state.LastMeaningful = domain.DirectionOutgoing // canonical state changed after scheduling
 	now = now.Add(time.Minute)
 	_, created, err = evaluator.EvaluateDue(context.Background(), "tenant", "opportunity")
 	if err != nil || created {

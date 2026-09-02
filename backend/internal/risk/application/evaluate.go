@@ -86,6 +86,8 @@ func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID stri
 		risk, err = domain.NewNoResponse(riskID, *decision.Finding, now)
 	case domain.TypeBookingNotConfirmed:
 		risk, err = domain.NewBookingNotConfirmed(riskID, *decision.Finding, now)
+	case domain.TypePromiseNotFulfilled:
+		risk, err = domain.NewPromiseNotFulfilled(riskID, *decision.Finding, now)
 	default:
 		return domain.Risk{}, false, ErrInvalidCheck
 	}

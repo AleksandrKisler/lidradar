@@ -125,6 +125,13 @@ func newAPIFixture(t *testing.T) apiFixture {
 	bookingPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, bookingEvaluator, bookingPolicy, ids.Generator{}, time.Now,
 	)
+	promisePolicy := riskdomain.PromiseNotFulfilledPolicy{}
+	promiseEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, promisePolicy, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents)
+	promisePlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, promiseEvaluator, promisePolicy, ids.Generator{}, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
@@ -156,9 +163,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
 			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingEvaluator),
+			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promiseEvaluator),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(

@@ -169,7 +169,7 @@ func RiskOpenedEventHandler(service Service, recipients RecipientStore) eventsap
 		var data riskOpenedData
 		if json.Unmarshal(event.Data, &data) != nil || event.AggregateType != "risk" ||
 			event.AggregateID == "" || data.RiskID != event.AggregateID || data.OpportunityID == "" || data.LocationID == "" ||
-			(data.Type != riskdomain.TypeNoResponse && data.Type != riskdomain.TypeBookingNotConfirmed) ||
+			!immediateRiskType(data.Type) ||
 			(data.Severity != riskdomain.SeverityHigh && data.Severity != riskdomain.SeverityCritical) {
 			return jobsdomain.Permanent("INVALID_RISK_OPENED_EVENT", errors.New("некорректное событие открытия риска"))
 		}
@@ -182,7 +182,13 @@ func RiskOpenedEventHandler(service Service, recipients RecipientStore) eventsap
 		}
 		title := "Риск: клиент ждёт ответа"
 		body := "Ответьте клиенту как можно скорее. Откройте Radar для подробностей."
-		if data.Type == riskdomain.TypeBookingNotConfirmed {
+		if data.Type == riskdomain.TypePromiseNotFulfilled {
+			if data.Severity != riskdomain.SeverityHigh {
+				return jobsdomain.Permanent("INVALID_RISK_OPENED_EVENT", errors.New("неверная важность риска обещания"))
+			}
+			title = "Риск: обещание клиенту не выполнено"
+			body = "Выполните обещанное клиенту или сообщите новый точный срок. Откройте Radar для подробностей."
+		} else if data.Type == riskdomain.TypeBookingNotConfirmed {
 			if data.Severity != riskdomain.SeverityCritical {
 				return jobsdomain.Permanent("INVALID_RISK_OPENED_EVENT", errors.New("неверная важность риска записи"))
 			}
@@ -202,6 +208,17 @@ func RiskOpenedEventHandler(service Service, recipients RecipientStore) eventsap
 			return jobsdomain.Permanent("NOTIFICATION_INTENT_INVALID", err)
 		}
 		return jobsdomain.Retryable("NOTIFICATION_INTENT_UNAVAILABLE", err)
+	}
+}
+
+// immediateRiskType перечисляет типы с немедленной Telegram-доставкой по
+// умолчанию (ТЗ §46); остальные типы получают digest на этапе 20.
+func immediateRiskType(riskType riskdomain.Type) bool {
+	switch riskType {
+	case riskdomain.TypeNoResponse, riskdomain.TypeBookingNotConfirmed, riskdomain.TypePromiseNotFulfilled:
+		return true
+	default:
+		return false
 	}
 }
 

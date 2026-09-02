@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -66,13 +67,21 @@ func (reader *PostgresStateReader) CurrentState(
 	var bookingConfidence *float64
 	var bookingRunID, bookingMessageID *string
 	var bookingAt *time.Time
+	var commitmentConfidence *float64
+	var commitmentRunID, commitmentMessageID, commitmentText *string
+	var commitmentAt *time.Time
+	var commitmentFollowedUp *bool
+	var activeRisks []byte
 	err := reader.pool.QueryRow(ctx, `
 		SELECT o.tenant_id, o.id, o.stage,
 		       o.`+activeOpportunityStages+`,
 		       c.location_id, l.timezone, l.response_threshold_minutes,
 		       message.id, message.sent_at, message.direction,
 		       booking.confidence, booking.ai_run_id,
-		       booking.evidence_message_id, booking.evidence_at
+		       booking.evidence_message_id, booking.evidence_at,
+		       commitment.confidence, commitment.ai_run_id, commitment.evidence_message_id,
+		       commitment.evidence_at, commitment.evidence_text, commitment.followed_up,
+		       active_risks.items
 		FROM opportunities AS o
 		JOIN conversations AS c
 		  ON c.tenant_id = o.tenant_id AND c.id = o.conversation_id
@@ -120,11 +129,62 @@ func (reader *PostgresStateReader) CurrentState(
 			ORDER BY evidence_message.sent_at DESC, evidence_message.id DESC
 			LIMIT 1
 		) AS booking ON TRUE
+		-- Обещание компании — исторический факт: оно остаётся в силе после новых
+		-- сообщений, поэтому читается из последней проекции без условия ревизии.
+		LEFT JOIN conversation_summaries AS commitment_summary
+		  ON commitment_summary.tenant_id = c.tenant_id AND commitment_summary.conversation_id = c.id
+		LEFT JOIN LATERAL (
+			SELECT (fact.value ->> 'confidence')::double precision AS confidence,
+			       commitment_summary.ai_run_id::text AS ai_run_id,
+			       evidence_message.id::text AS evidence_message_id,
+			       evidence_message.sent_at AS evidence_at,
+			       COALESCE(evidence_message.text, '') AS evidence_text,
+			       EXISTS (
+				SELECT 1 FROM messages AS later
+				WHERE later.tenant_id = c.tenant_id AND later.conversation_id = c.id
+				  AND later.direction = 'OUTGOING' AND later.provider_deleted_at IS NULL
+				  AND (later.sent_at, later.id) > (evidence_message.sent_at, evidence_message.id)
+			       ) AS followed_up
+			FROM jsonb_array_elements(commitment_summary.semantic_facts) AS fact(value)
+			CROSS JOIN LATERAL jsonb_array_elements_text(fact.value -> 'evidenceMessageIds') AS evidence(id)
+			JOIN messages AS evidence_message
+			  ON evidence_message.tenant_id = c.tenant_id
+			 AND evidence_message.conversation_id = c.id
+			 AND evidence_message.id::text = evidence.id
+			 AND evidence_message.direction = 'OUTGOING'
+			 AND evidence_message.provider_deleted_at IS NULL
+			WHERE fact.value ->> 'type' = 'BUSINESS_COMMITMENT'
+			  AND fact.value ->> 'value' = 'true'
+			  AND (fact.value ->> 'trusted')::boolean
+			ORDER BY evidence_message.sent_at DESC, evidence_message.id DESC
+			LIMIT 1
+		) AS commitment ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT jsonb_agg(jsonb_build_object(
+				'type', risk.type,
+				'triggerMessageId', risk.trigger_message_id::text,
+				'triggerAt', trigger_message.sent_at,
+				'outgoingAfterTrigger', EXISTS (
+					SELECT 1 FROM messages AS later
+					WHERE later.tenant_id = c.tenant_id AND later.conversation_id = c.id
+					  AND later.direction = 'OUTGOING' AND later.provider_deleted_at IS NULL
+					  AND (later.sent_at, later.id) > (trigger_message.sent_at, trigger_message.id)
+				)
+			)) AS items
+			FROM risk_signals AS risk
+			JOIN messages AS trigger_message
+			  ON trigger_message.tenant_id = risk.tenant_id AND trigger_message.id = risk.trigger_message_id
+			WHERE risk.tenant_id = o.tenant_id AND risk.opportunity_id = o.id
+			  AND risk.status IN ('OPEN', 'ACKNOWLEDGED', 'ACTED')
+		) AS active_risks ON TRUE
 		WHERE o.tenant_id = $1 AND o.id = $2`, tenantID, opportunityID).Scan(
 		&state.TenantID, &state.OpportunityID, &state.OpportunityStage,
 		&state.ActiveOpportunity, &locationID, &timezone, &threshold,
 		&messageID, &sentAt, &direction, &bookingConfidence, &bookingRunID,
 		&bookingMessageID, &bookingAt,
+		&commitmentConfidence, &commitmentRunID, &commitmentMessageID,
+		&commitmentAt, &commitmentText, &commitmentFollowedUp,
+		&activeRisks,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ConversationState{}, application.ErrStateNotFound
@@ -143,6 +203,32 @@ func (reader *PostgresStateReader) CurrentState(
 		state.BookingIntent = &domain.BookingIntentSignal{
 			Value: true, Confidence: *bookingConfidence, AIRunID: *bookingRunID,
 			EvidenceMessageID: *bookingMessageID, EvidenceAt: bookingAt.UTC(),
+		}
+	}
+	if commitmentConfidence != nil && commitmentRunID != nil && commitmentMessageID != nil &&
+		commitmentAt != nil && commitmentText != nil && commitmentFollowedUp != nil {
+		state.Commitment = &domain.CommitmentSignal{
+			Value: true, Confidence: *commitmentConfidence, AIRunID: *commitmentRunID,
+			EvidenceMessageID: *commitmentMessageID, EvidenceAt: commitmentAt.UTC(),
+			EvidenceText: *commitmentText, FollowedUp: *commitmentFollowedUp,
+		}
+	}
+	state.ActiveRisks = make(map[domain.Type]domain.ActiveRiskSnapshot)
+	if len(activeRisks) > 0 {
+		var items []struct {
+			Type                 domain.Type `json:"type"`
+			TriggerMessageID     string      `json:"triggerMessageId"`
+			TriggerAt            time.Time   `json:"triggerAt"`
+			OutgoingAfterTrigger bool        `json:"outgoingAfterTrigger"`
+		}
+		if err := json.Unmarshal(activeRisks, &items); err != nil {
+			return domain.ConversationState{}, fmt.Errorf("разбор активных рисков: %w", err)
+		}
+		for _, item := range items {
+			state.ActiveRisks[item.Type] = domain.ActiveRiskSnapshot{
+				TriggerMessageID: item.TriggerMessageID, TriggerAt: item.TriggerAt.UTC(),
+				OutgoingAfterTrigger: item.OutgoingAfterTrigger,
+			}
 		}
 	}
 	state.ResponseThreshold = time.Duration(*threshold) * time.Minute

@@ -15,7 +15,18 @@ type Type string
 const (
 	TypeNoResponse          Type = "NO_RESPONSE"
 	TypeBookingNotConfirmed Type = "BOOKING_NOT_CONFIRMED"
+	TypePromiseNotFulfilled Type = "PROMISE_NOT_FULFILLED"
 )
+
+// SupportedType сообщает, реализовано ли правило для типа риска.
+func SupportedType(riskType Type) bool {
+	switch riskType {
+	case TypeNoResponse, TypeBookingNotConfirmed, TypePromiseNotFulfilled:
+		return true
+	default:
+		return false
+	}
+}
 
 type Severity string
 
@@ -84,6 +95,12 @@ func NewBookingNotConfirmed(id string, finding Finding, now time.Time) (Risk, er
 	return newRisk(id, TypeBookingNotConfirmed, finding, now)
 }
 
+// NewPromiseNotFulfilled создаёт риск невыполненного обещания компании. Факт
+// обязательства приходит от AI, поэтому источник всегда HYBRID.
+func NewPromiseNotFulfilled(id string, finding Finding, now time.Time) (Risk, error) {
+	return newRisk(id, TypePromiseNotFulfilled, finding, now)
+}
+
 func newRisk(id string, riskType Type, finding Finding, now time.Time) (Risk, error) {
 	if riskType == TypeNoResponse && finding.Source == "" {
 		finding.Source = SourceRule
@@ -148,7 +165,7 @@ var reasonCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,99}$`)
 // Validate защищает агрегат и при создании, и при чтении из PostgreSQL.
 func (r Risk) Validate() error {
 	if r.ID == "" || r.TenantID == "" || r.OpportunityID == "" || r.LocationID == "" ||
-		(r.Type != TypeNoResponse && r.Type != TypeBookingNotConfirmed) ||
+		!SupportedType(r.Type) ||
 		r.PolicyVersion == "" || r.PolicyVersion != strings.TrimSpace(r.PolicyVersion) ||
 		r.TriggerMessageID == "" || !reasonCodePattern.MatchString(r.ReasonCode) || r.Reason == "" ||
 		r.Reason != strings.TrimSpace(r.Reason) || r.DetectedAt.IsZero() || r.DueAt.IsZero() ||
@@ -161,13 +178,17 @@ func (r Risk) Validate() error {
 	if r.Type == TypeBookingNotConfirmed && r.Severity != SeverityCritical {
 		return ErrInvalidRisk
 	}
+	if r.Type == TypePromiseNotFulfilled && (r.Severity != SeverityHigh || r.Source != SourceHybrid) {
+		return ErrInvalidRisk
+	}
 	switch r.Source {
 	case SourceRule:
 		if r.Confidence != nil || r.AIRunID != nil {
 			return ErrInvalidRisk
 		}
 	case SourceHybrid:
-		if r.Type != TypeBookingNotConfirmed || r.Confidence == nil || *r.Confidence < 0 || *r.Confidence > 1 ||
+		if (r.Type != TypeBookingNotConfirmed && r.Type != TypePromiseNotFulfilled) ||
+			r.Confidence == nil || *r.Confidence < 0 || *r.Confidence > 1 ||
 			r.AIRunID == nil || strings.TrimSpace(*r.AIRunID) == "" {
 			return ErrInvalidRisk
 		}
@@ -246,21 +267,31 @@ const (
 	DirectionOutgoing Direction = "OUTGOING"
 )
 
+// ActiveRiskSnapshot — сообщение-основание уже открытого риска и признак
+// того, что компания писала клиенту после него. Позволяет закрыть риск, даже
+// если проекция AI уже не содержит исходного факта.
+type ActiveRiskSnapshot struct {
+	TriggerMessageID     string
+	TriggerAt            time.Time
+	OutgoingAfterTrigger bool
+}
+
 // ConversationState — свежая авторитетная проекция, читаемая при выполнении
 // проверки по расписанию. В полезной нагрузке хранятся только идентификаторы.
 type ConversationState struct {
-	TenantID             string
-	OpportunityID        string
-	LocationID           string
-	ActiveOpportunity    bool
-	LastMeaningfulID     string
-	LastMeaningfulAt     time.Time
-	LastMeaningful       Direction
-	OutgoingAfterTrigger bool
-	ResponseThreshold    time.Duration
-	BusinessHours        BusinessHours
-	OpportunityStage     string
-	BookingIntent        *BookingIntentSignal
+	TenantID          string
+	OpportunityID     string
+	LocationID        string
+	ActiveOpportunity bool
+	LastMeaningfulID  string
+	LastMeaningfulAt  time.Time
+	LastMeaningful    Direction
+	ResponseThreshold time.Duration
+	BusinessHours     BusinessHours
+	OpportunityStage  string
+	BookingIntent     *BookingIntentSignal
+	Commitment        *CommitmentSignal
+	ActiveRisks       map[Type]ActiveRiskSnapshot
 }
 
 // BookingIntentSignal — только проверенная производная семантика. Она не
@@ -286,10 +317,14 @@ type Finding struct {
 	AIRunID                             *string
 }
 
+// Decision — итог применения правила. Resolve закрывает уже активный риск
+// типа; DueAt планирует проверку, привязанную к TriggerMessageID; Finding
+// означает, что срок уже наступил.
 type Decision struct {
-	Finding *Finding
-	DueAt   time.Time
-	Resolve bool
+	Finding          *Finding
+	DueAt            time.Time
+	TriggerMessageID string
+	Resolve          bool
 }
 
 // Policy версионируется, чтобы основание сохранённого риска оставалось объяснимым.

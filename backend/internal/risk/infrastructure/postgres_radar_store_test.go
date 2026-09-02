@@ -126,11 +126,11 @@ func insertRadarCorrectiveFacts(
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(context.Background(), `
-		INSERT INTO actions(id, tenant_id, risk_id, actor_user_id, type, note, created_at)
+		INSERT INTO actions(id, tenant_id, risk_id, opportunity_id, actor_user_id, type, note, created_at)
 		VALUES
-			($1,$2,$3,$4,'OPEN_CONVERSATION','',$5),
-			($6,$2,$3,$4,'MARK_CONTACTED','Готово',$7)`,
-		newID(), tenantID, riskID, userID, at, newID(), at.Add(time.Minute),
+			($1,$2,$3,$8,$4,'OPEN_CONVERSATION','',$5),
+			($6,$2,$3,$8,$4,'MARK_CONTACTED','Готово',$7)`,
+		newID(), tenantID, riskID, userID, at, newID(), at.Add(time.Minute), opportunityID,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -206,9 +206,9 @@ func insertRecoveredRevenue(
 	}
 	actionID, outcomeID, eventID := newID(), newID(), newID()
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO actions(id, tenant_id, risk_id, actor_user_id, type, note, created_at)
-		VALUES ($1,$2,$3,$4,'MARK_CONTACTED','',$5)`,
-		actionID, tenantID, risk.ID, userID, risk.DetectedAt.Add(time.Minute)); err != nil {
+		INSERT INTO actions(id, tenant_id, risk_id, opportunity_id, actor_user_id, type, note, created_at)
+		VALUES ($1,$2,$3,$4,$5,'MARK_CONTACTED','',$6)`,
+		actionID, tenantID, risk.ID, risk.OpportunityID, userID, risk.DetectedAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `

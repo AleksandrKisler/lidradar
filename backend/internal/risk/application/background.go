@@ -23,6 +23,8 @@ const (
 	NoResponseEvaluationJobType  = "risk.evaluate-no-response.v1"
 	BookingCheckType             = "BOOKING_NOT_CONFIRMED_DUE"
 	BookingEvaluationJobType     = "risk.evaluate-booking-not-confirmed.v1"
+	PromiseCheckType             = "PROMISE_NOT_FULFILLED_DUE"
+	PromiseEvaluationJobType     = "risk.evaluate-promise-not-fulfilled.v1"
 )
 
 type refreshPayload struct {
@@ -102,11 +104,15 @@ func (planner Planner) RefreshOpportunity(ctx context.Context, tenantID, opportu
 	if err != nil {
 		return err
 	}
+	// Закрытие уже активного риска и планирование новой проверки не исключают
+	// друг друга: новое обещание после выполненного старого закрывает прежний
+	// риск и получает собственный срок.
 	if decision.Resolve {
-		_, _, err := planner.evaluator.EvaluateDue(ctx, tenantID, opportunityID)
-		return err
+		if _, _, err := planner.evaluator.EvaluateDue(ctx, tenantID, opportunityID); err != nil {
+			return err
+		}
 	}
-	if decision.DueAt.IsZero() || state.LastMeaningful != domain.DirectionIncoming {
+	if decision.DueAt.IsZero() {
 		return nil
 	}
 	checkID, err := planner.ids.NewID()
@@ -114,12 +120,12 @@ func (planner Planner) RefreshOpportunity(ctx context.Context, tenantID, opportu
 		return err
 	}
 	payload, _ := json.Marshal(refreshPayload{OpportunityID: opportunityID})
-	triggerID := state.LastMeaningfulID
+	triggerID := decision.TriggerMessageID
 	if decision.Finding != nil {
 		triggerID = decision.Finding.TriggerMessageID
-	} else if state.BookingIntent != nil && state.BookingIntent.Value &&
-		state.BookingIntent.Confidence >= domain.StrongBookingIntentConfidence {
-		triggerID = state.BookingIntent.EvidenceMessageID
+	}
+	if triggerID == "" {
+		triggerID = state.LastMeaningfulID
 	}
 	dedupKey := fmt.Sprintf("opportunity:%s:message:%s:policy:%s", opportunityID, triggerID, planner.policy.Version())
 	checkType, jobType, err := workTypes(planner.policy.Type())
@@ -143,6 +149,8 @@ func workTypes(riskType domain.Type) (string, string, error) {
 		return NoResponseCheckType, NoResponseEvaluationJobType, nil
 	case domain.TypeBookingNotConfirmed:
 		return BookingCheckType, BookingEvaluationJobType, nil
+	case domain.TypePromiseNotFulfilled:
+		return PromiseCheckType, PromiseEvaluationJobType, nil
 	default:
 		return "", "", ErrInvalidCheck
 	}

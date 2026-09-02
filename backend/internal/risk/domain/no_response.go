@@ -20,10 +20,9 @@ func (p NoResponsePolicy) Evaluate(state ConversationState, at time.Time) (Decis
 	if err != nil {
 		return Decision{}, err
 	}
-	decision := Decision{DueAt: due}
-	if state.LastMeaningful != DirectionIncoming || !state.ActiveOpportunity || state.OutgoingAfterTrigger {
-		decision.Resolve = true
-		return decision, nil
+	decision := Decision{DueAt: due, TriggerMessageID: state.LastMeaningfulID}
+	if state.LastMeaningful != DirectionIncoming || !state.ActiveOpportunity {
+		return Decision{Resolve: true}, nil
 	}
 	if at.Before(due) {
 		return decision, nil

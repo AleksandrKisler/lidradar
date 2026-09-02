@@ -225,8 +225,7 @@ func validFilters(filters Filters) bool {
 		filters.Severity != domain.SeverityHigh && filters.Severity != domain.SeverityCritical {
 		return false
 	}
-	return filters.RiskType == "" || filters.RiskType == domain.TypeNoResponse ||
-		filters.RiskType == domain.TypeBookingNotConfirmed
+	return filters.RiskType == "" || domain.SupportedType(filters.RiskType)
 }
 
 func validStatus(status domain.Status) bool {

@@ -64,7 +64,6 @@ func TestNoResponseRequiresCurrentUnansweredIncomingAndActiveOpportunity(t *test
 		name   string
 		mutate func(*ConversationState)
 	}{
-		{"response before threshold", func(s *ConversationState) { s.OutgoingAfterTrigger = true }},
 		{"latest message outgoing", func(s *ConversationState) { s.LastMeaningful = DirectionOutgoing }},
 		{"inactive opportunity", func(s *ConversationState) { s.ActiveOpportunity = false }},
 	}

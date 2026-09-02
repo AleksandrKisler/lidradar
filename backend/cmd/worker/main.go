@@ -98,6 +98,13 @@ func run(ctx context.Context, configuration config.Config) error {
 	bookingPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, bookingEvaluator, bookingPolicy, generator, time.Now,
 	)
+	promisePolicy := riskdomain.PromiseNotFulfilledPolicy{}
+	promiseEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, promisePolicy, generator, time.Now,
+	).WithInvalidator(riskInvalidator)
+	promisePlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, promiseEvaluator, promisePolicy, generator, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	var notificationTransport notificationapplication.Transport
 	var controlTransport notificationinfrastructure.TelegramControlTransport
@@ -155,9 +162,10 @@ func run(ctx context.Context, configuration config.Config) error {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
 			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingEvaluator),
+			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promiseEvaluator),
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)

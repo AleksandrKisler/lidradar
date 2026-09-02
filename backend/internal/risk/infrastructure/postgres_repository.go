@@ -201,9 +201,7 @@ func scanRisk(row riskRow) (domain.Risk, error) {
 	return risk, nil
 }
 
-func supportedRiskType(riskType domain.Type) bool {
-	return riskType == domain.TypeNoResponse || riskType == domain.TypeBookingNotConfirmed
-}
+func supportedRiskType(riskType domain.Type) bool { return domain.SupportedType(riskType) }
 
 func mapRiskError(operation string, err error) error {
 	var postgresError *pgconn.PgError

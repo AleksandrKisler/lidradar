@@ -81,7 +81,7 @@ func (policy BookingNotConfirmedPolicy) Evaluate(state ConversationState, at tim
 	if err != nil {
 		return Decision{}, err
 	}
-	decision := Decision{DueAt: due}
+	decision := Decision{DueAt: due, TriggerMessageID: triggerID}
 	if at.Before(due) {
 		return decision, nil
 	}
