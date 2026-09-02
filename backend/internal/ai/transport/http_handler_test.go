@@ -20,7 +20,7 @@ import (
 func TestClaimAPIAuthenticatesSignedNode(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
-	service := application.NewService(infrastructure.NewTestMemoryStore(), ids.Generator{}, func() time.Time { return now }, 0)
+	service := application.NewService(infrastructure.NewTestMemoryStore(), ids.Generator{}, func() time.Time { return now }, 0).WithAnalysisDebounce(0)
 	node, err := service.RegisterNode(ctx, "t", "home", "secret-with-at-least-32-characters")
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestClaimAPIAuthenticatesSignedNode(t *testing.T) {
 func TestHandlerWorksWhenMountedAtInternalPrefix(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
-	service := application.NewService(infrastructure.NewTestMemoryStore(), ids.Generator{}, func() time.Time { return now }, 0)
+	service := application.NewService(infrastructure.NewTestMemoryStore(), ids.Generator{}, func() time.Time { return now }, 0).WithAnalysisDebounce(0)
 	secret := "secret-with-at-least-32-characters"
 	node, err := service.RegisterNode(ctx, "tenant", "home", secret)
 	if err != nil {
@@ -77,7 +77,7 @@ func TestHandlerWorksWhenMountedAtInternalPrefix(t *testing.T) {
 func TestSignedRequestCannotBeReplayedOrMutated(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
-	service := application.NewService(infrastructure.NewTestMemoryStore(), ids.Generator{}, func() time.Time { return now }, 0)
+	service := application.NewService(infrastructure.NewTestMemoryStore(), ids.Generator{}, func() time.Time { return now }, 0).WithAnalysisDebounce(0)
 	node, err := service.RegisterNode(ctx, "tenant", "home", "secret-with-at-least-32-characters")
 	if err != nil {
 		t.Fatal(err)

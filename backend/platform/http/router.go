@@ -63,6 +63,9 @@ func NewRouter(service string, logger *slog.Logger, readiness health.Checker, op
 				"version": build.Version, "revision": build.Revision, "modified": build.Modified,
 			},
 			"databaseMigration": status.DatabaseMigration,
+			"migrations": map[string]string{
+				"applied": status.Applied, "latest": status.Latest,
+			},
 		})
 	})
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {

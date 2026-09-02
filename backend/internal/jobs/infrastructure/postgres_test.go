@@ -215,7 +215,7 @@ func TestWorkerProcessCanBeKilledAfterClaim(t *testing.T) {
 	scanner := bufio.NewScanner(stdout)
 	claimed := false
 	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), "JOB_CLAIMED") {
+		if strings.Contains(scanner.Text(), "JOB_LEASED") {
 			claimed = true
 			break
 		}
@@ -265,7 +265,7 @@ func TestJobClaimHelper(t *testing.T) {
 	if err != nil || len(jobs) != 1 || jobs[0].ID != os.Getenv("LIDRADAR_JOB_HELPER_ID") {
 		t.Fatalf("helper Claim() = %#v, %v", jobs, err)
 	}
-	fmt.Fprintln(os.Stdout, "JOB_CLAIMED")
+	fmt.Fprintln(os.Stdout, "JOB_LEASED")
 	select {}
 }
 

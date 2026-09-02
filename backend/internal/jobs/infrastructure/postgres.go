@@ -30,7 +30,7 @@ func (store *PostgresStore) Enqueue(ctx context.Context, job domain.Job) (domain
 		) VALUES ($1, $2, $3, $4, $5::jsonb, 'PENDING', $6, $7, 0, $8, $9, $9)
 		ON CONFLICT (tenant_id, job_type, dedup_key) DO NOTHING
 		RETURNING id, tenant_id, job_type, dedup_key, payload, status, priority,
-		          available_at, attempt_count, max_attempts, lease_owner, lease_until,
+		          available_at, attempt_count, max_attempts, leased_by, lease_until,
 		          last_error_code, completed_at, created_at, updated_at`,
 		job.ID, job.TenantID, job.Type, job.DedupKey, string(job.Payload), job.Priority,
 		job.AvailableAt, job.MaxAttempts, job.CreatedAt,
@@ -44,7 +44,7 @@ func (store *PostgresStore) Enqueue(ctx context.Context, job domain.Job) (domain
 	var samePayload bool
 	persisted, err = scanJob(store.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, job_type, dedup_key, payload, status, priority,
-		       available_at, attempt_count, max_attempts, lease_owner, lease_until,
+		       available_at, attempt_count, max_attempts, leased_by, lease_until,
 		       last_error_code, completed_at, created_at, updated_at,
 		       payload = $4::jsonb
 		FROM jobs
@@ -81,7 +81,7 @@ func (store *PostgresStore) Claim(
 	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, `
 		UPDATE jobs
-		SET status = 'DEAD', lease_owner = NULL, lease_until = NULL,
+		SET status = 'DEAD', leased_by = NULL, lease_until = NULL,
 		    last_error_code = 'LEASE_EXPIRED_MAX_ATTEMPTS', completed_at = $1, updated_at = $1
 		WHERE status = 'PROCESSING' AND lease_until <= $1 AND attempt_count >= max_attempts`, now.UTC()); err != nil {
 		return nil, mapError("завершение заданий с исчерпанной арендой", err)
@@ -101,12 +101,12 @@ func (store *PostgresStore) Claim(
 		)
 		UPDATE jobs AS job
 		SET status = 'PROCESSING', attempt_count = job.attempt_count + 1,
-		    lease_owner = $2, lease_until = $3, updated_at = $1
+		    leased_by = $2, lease_until = $3, updated_at = $1
 		FROM candidates
 		WHERE job.id = candidates.id
 		RETURNING job.id, job.tenant_id, job.job_type, job.dedup_key, job.payload,
 		          job.status, job.priority, job.available_at, job.attempt_count,
-		          job.max_attempts, job.lease_owner, job.lease_until,
+		          job.max_attempts, job.leased_by, job.lease_until,
 		          job.last_error_code, job.completed_at, job.created_at, job.updated_at`,
 		now.UTC(), owner, leaseUntil.UTC(), limit)
 	if err != nil {
@@ -147,9 +147,9 @@ func (store *PostgresStore) Succeed(ctx context.Context, jobID, owner string, at
 	}
 	result, err := store.pool.Exec(ctx, `
 		UPDATE jobs
-		SET status = 'SUCCEEDED', lease_owner = NULL, lease_until = NULL,
+		SET status = 'SUCCEEDED', leased_by = NULL, lease_until = NULL,
 		    completed_at = $3, updated_at = $3
-		WHERE id = $1 AND status = 'PROCESSING' AND lease_owner = $2 AND lease_until > $3`,
+		WHERE id = $1 AND status = 'PROCESSING' AND leased_by = $2 AND lease_until > $3`,
 		jobID, owner, at.UTC())
 	if err != nil {
 		return mapError("успешное завершение задания", err)
@@ -175,12 +175,12 @@ func (store *PostgresStore) Fail(
 		UPDATE jobs
 		SET status = CASE WHEN $4 AND attempt_count < max_attempts THEN 'RETRY' ELSE 'DEAD' END,
 		    available_at = CASE WHEN $4 AND attempt_count < max_attempts THEN $5 ELSE available_at END,
-		    lease_owner = NULL,
+		    leased_by = NULL,
 		    lease_until = NULL,
 		    last_error_code = $3,
 		    completed_at = CASE WHEN $4 AND attempt_count < max_attempts THEN NULL ELSE $6 END,
 		    updated_at = $6
-		WHERE id = $1 AND status = 'PROCESSING' AND lease_owner = $2 AND lease_until > $6
+		WHERE id = $1 AND status = 'PROCESSING' AND leased_by = $2 AND lease_until > $6
 		RETURNING status`, jobID, owner, code, retryable, next.UTC(), at.UTC()).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domain.ErrLeaseLost
@@ -305,7 +305,7 @@ func scanJob(row rowScanner, extra ...any) (domain.Job, error) {
 	values := []any{
 		&job.ID, &job.TenantID, &job.Type, &job.DedupKey, &job.Payload, &job.Status,
 		&job.Priority, &job.AvailableAt, &job.AttemptCount, &job.MaxAttempts,
-		&job.LeaseOwner, &job.LeaseUntil, &job.LastErrorCode, &job.CompletedAt,
+		&job.LeasedBy, &job.LeaseUntil, &job.LastErrorCode, &job.CompletedAt,
 		&job.CreatedAt, &job.UpdatedAt,
 	}
 	values = append(values, extra...)

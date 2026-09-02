@@ -17,7 +17,7 @@ import (
 type readinessStub struct{ err error }
 
 func (s readinessStub) Check(context.Context) (health.Status, error) {
-	return health.Status{DatabaseMigration: "000008_opportunity_domain"}, s.err
+	return health.Status{DatabaseMigration: "000008_opportunity_domain", Applied: "000008_opportunity_domain", Latest: "000008_opportunity_domain"}, s.err
 }
 
 func TestHealthEndpoints(t *testing.T) {
@@ -44,7 +44,11 @@ func TestHealthEndpoints(t *testing.T) {
 			if test.path == "/health/ready" && test.status == http.StatusOK {
 				var body struct {
 					DatabaseMigration string `json:"databaseMigration"`
-					Build             struct {
+					Migrations        struct {
+						Applied string `json:"applied"`
+						Latest  string `json:"latest"`
+					} `json:"migrations"`
+					Build struct {
 						Version  string `json:"version"`
 						Revision string `json:"revision"`
 					} `json:"build"`
@@ -52,7 +56,8 @@ func TestHealthEndpoints(t *testing.T) {
 				if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
 				}
-				if body.DatabaseMigration == "" || body.Build.Version == "" || body.Build.Revision == "" {
+				if body.DatabaseMigration == "" || body.Build.Version == "" || body.Build.Revision == "" ||
+					body.Migrations.Applied != body.Migrations.Latest || body.Migrations.Latest != body.DatabaseMigration {
 					t.Fatalf("readiness metadata = %#v", body)
 				}
 			}

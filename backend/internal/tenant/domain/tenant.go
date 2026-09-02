@@ -76,12 +76,16 @@ const (
 	MembershipDisabled MembershipStatus = "DISABLED"
 )
 
+// Membership не удаляется физически: на него ссылаются неизменяемые факты
+// (выручка, действия, исходы, аудит). Отзыв доступа — статус DISABLED и
+// RevokedAt; членство с любым другим статусом RevokedAt не имеет.
 type Membership struct {
 	ID        string           `json:"id"`
 	TenantID  string           `json:"tenantId"`
 	UserID    string           `json:"userId"`
 	Role      Role             `json:"role"`
 	Status    MembershipStatus `json:"status"`
+	RevokedAt *time.Time       `json:"revokedAt,omitempty"`
 	CreatedAt time.Time        `json:"createdAt"`
 	UpdatedAt time.Time        `json:"updatedAt"`
 }
@@ -179,6 +183,9 @@ type Repository interface {
 	Membership(context.Context, string, string) (Membership, bool, error)
 	MembershipsForUser(context.Context, string) ([]AccountMembership, error)
 	CreateMembership(context.Context, string, Membership) error
+	// RevokeMembership отзывает доступ, не удаляя строку. Повтор для уже
+	// отозванного членства возвращает false без ошибки.
+	RevokeMembership(context.Context, string, string, time.Time) (bool, error)
 	ListLocations(context.Context, string) ([]Location, error)
 	Location(context.Context, string, string) (Location, bool, error)
 	CreateLocation(context.Context, string, Location) error

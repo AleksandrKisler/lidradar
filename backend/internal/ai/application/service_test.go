@@ -50,7 +50,7 @@ func setup(t *testing.T) (application.Service, *infrastructure.MemoryStore, *tim
 	t.Helper()
 	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
 	store := infrastructure.NewTestMemoryStore()
-	svc := application.NewService(store, &ids{}, func() time.Time { return now }, application.DefaultLease).
+	svc := application.NewService(store, &ids{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(staleBuilder{})
 	if _, err := svc.RegisterNode(context.Background(), "tenant", "home", nodeSecret); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestFreshnessIsRecheckedInsideFinalization(t *testing.T) {
 	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
 	memory := infrastructure.NewTestMemoryStore()
 	store := &freshnessChangingStore{Store: memory, memory: memory}
-	s := application.NewService(store, &ids{}, func() time.Time { return now }, application.DefaultLease).
+	s := application.NewService(store, &ids{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(staleBuilder{})
 	ctx := context.Background()
 	if _, err := s.RegisterNode(ctx, "tenant", "home", nodeSecret); err != nil {

@@ -231,11 +231,30 @@ func appendUnique(values []string, additional ...string) []string {
 	return values
 }
 
+// AppliedFacts применяет уровни уверенности §59 к проверенному результату.
+// Сильный факт (>= 0.85) получает trusted = true и может открывать Risk;
+// слабый (0.65–0.849) сохраняется с trusted = false для наблюдения и
+// метрик; ненадёжный (< 0.65) в домен не попадает вовсе.
+func AppliedFacts(result domain.AnalysisResultV1) []domain.AppliedFact {
+	applied := make([]domain.AppliedFact, 0, len(result.Facts))
+	for _, fact := range result.Facts {
+		band := confidenceBand(fact.Confidence)
+		if band == domain.ConfidenceUntrusted {
+			continue
+		}
+		applied = append(applied, domain.AppliedFact{SemanticFact: fact, Trusted: band == domain.ConfidenceStrong})
+	}
+	return applied
+}
+
+// TrustedFacts возвращает только факты, которым разрешено менять предметную
+// область. Именно их сравнивает с разметкой benchmark: слабый факт не открывает
+// Risk и потому не считается обнаруженным.
 func TrustedFacts(result domain.AnalysisResultV1) []domain.SemanticFact {
 	trusted := make([]domain.SemanticFact, 0, len(result.Facts))
-	for _, fact := range result.Facts {
-		if confidenceBand(fact.Confidence) != domain.ConfidenceUntrusted {
-			trusted = append(trusted, fact)
+	for _, fact := range AppliedFacts(result) {
+		if fact.Trusted {
+			trusted = append(trusted, fact.SemanticFact)
 		}
 	}
 	return trusted

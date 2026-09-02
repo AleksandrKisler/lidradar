@@ -97,7 +97,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	eventStore := eventsinfrastructure.NewPostgresStore(pool)
 	aiStore := aiinfrastructure.NewPostgresStore(pool)
 	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, aiapplication.DefaultModelVersion)
-	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).
+	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(aiBuilder)
 	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
 	riskStates := riskinfrastructure.NewPostgresStateReader(pool)
@@ -138,7 +138,12 @@ func newAPIFixture(t *testing.T) apiFixture {
 				aiapplication.ConversationChangedEventHandler(aiService, aiBuilder),
 				riskapplication.ConversationChangedEventHandler(jobStore, ids.Generator{}),
 			),
-			aiapplication.AnalysisAppliedEventType:      riskapplication.AIAnalysisAppliedEventHandler(jobStore, ids.Generator{}),
+			aiapplication.AnalysisAppliedEventType: eventsapplication.ChainHandlers(
+				opportunityapplication.AnalysisAppliedEventHandler(
+					opportunityRepository, opportunityinfrastructure.NewPostgresSemanticFacts(pool), ids.Generator{}, time.Now,
+				),
+				riskapplication.AIAnalysisAppliedEventHandler(jobStore, ids.Generator{}),
+			),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
 			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(

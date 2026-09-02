@@ -35,18 +35,26 @@ func (readiness SchemaReadiness) Check(ctx context.Context) (health.Status, erro
 	}
 	defer rows.Close()
 	applied := make(map[string]string, len(migrations))
+	latestApplied := ""
 	for rows.Next() {
 		var version, checksum string
 		if err := rows.Scan(&version, &checksum); err != nil {
 			return health.Status{}, fmt.Errorf("scan migration ledger: %w", err)
 		}
 		applied[version] = checksum
+		if version > latestApplied {
+			latestApplied = version
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return health.Status{}, fmt.Errorf("iterate migration ledger: %w", err)
 	}
-	if len(applied) != len(migrations) {
-		return health.Status{}, fmt.Errorf("database migration count is %d, build expects %d", len(applied), len(migrations))
+	latest := migrations[len(migrations)-1].version
+	if len(applied) != len(migrations) || latestApplied != latest {
+		return health.Status{}, fmt.Errorf(
+			"database migration ledger has %d entries with latest %q, build expects %d with latest %q",
+			len(applied), latestApplied, len(migrations), latest,
+		)
 	}
 	for _, item := range migrations {
 		checksum, ok := applied[item.version]
@@ -54,7 +62,7 @@ func (readiness SchemaReadiness) Check(ctx context.Context) (health.Status, erro
 			return health.Status{}, fmt.Errorf("database migration %s does not match build", item.version)
 		}
 	}
-	return health.Status{DatabaseMigration: migrations[len(migrations)-1].version}, nil
+	return health.Status{DatabaseMigration: latest, Applied: latestApplied, Latest: latest}, nil
 }
 
 var _ health.Checker = SchemaReadiness{}

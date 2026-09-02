@@ -115,7 +115,7 @@ func (repository *PostgresRepository) ClaimDue(
 	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, `
 		UPDATE notification_deliveries
-		SET status = 'DEAD', lease_owner = NULL, lease_until = NULL,
+		SET status = 'DEAD', leased_by = NULL, lease_until = NULL,
 		    attempted_at = $1, failure_code = 'LEASE_EXPIRED_MAX_ATTEMPTS', updated_at = $1
 		WHERE status = 'PROCESSING' AND lease_until <= $1 AND attempt >= 5`, now.UTC()); err != nil {
 		return nil, mapNotificationError("завершение исчерпанных аренд доставок", err)
@@ -130,11 +130,11 @@ func (repository *PostgresRepository) ClaimDue(
 			LIMIT $4
 		)
 		UPDATE notification_deliveries AS delivery
-		SET status = 'PROCESSING', lease_owner = $2, lease_until = $3, updated_at = $1
+		SET status = 'PROCESSING', leased_by = $2, lease_until = $3, updated_at = $1
 		FROM candidates WHERE delivery.id = candidates.id
 		RETURNING delivery.id, delivery.notification_id, delivery.tenant_id, delivery.destination,
 		          delivery.title, delivery.body, delivery.channel, delivery.attempt, delivery.status,
-		          delivery.available_at, delivery.lease_owner, delivery.lease_until,
+		          delivery.available_at, delivery.leased_by, delivery.lease_until,
 		          delivery.attempted_at, COALESCE(delivery.provider_message_id, ''),
 		          COALESCE(delivery.failure_code, ''), delivery.created_at, delivery.updated_at`,
 		now.UTC(), owner, leaseUntil.UTC(), limit)
@@ -183,10 +183,10 @@ func (repository *PostgresRepository) Complete(
 	defer func() { _ = tx.Rollback(ctx) }()
 	result, err := tx.Exec(ctx, `
 		UPDATE notification_deliveries
-		SET status = $4, lease_owner = NULL, lease_until = NULL, attempted_at = $5,
+		SET status = $4, leased_by = NULL, lease_until = NULL, attempted_at = $5,
 		    provider_message_id = NULLIF($6, ''), failure_code = NULLIF($7, ''), updated_at = $8
 		WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'
-		  AND lease_owner = $3 AND lease_until > $8`,
+		  AND leased_by = $3 AND lease_until > $8`,
 		delivery.ID, delivery.TenantID, owner, delivery.Status, delivery.AttemptedAt,
 		delivery.ProviderMessageID, delivery.FailureCode, delivery.UpdatedAt)
 	if err != nil {
@@ -495,7 +495,7 @@ func scanDelivery(row rowScanner) (domain.Delivery, error) {
 	if err := row.Scan(
 		&delivery.ID, &delivery.NotificationID, &delivery.TenantID, &delivery.Destination,
 		&delivery.Title, &delivery.Body, &delivery.Channel, &delivery.Attempt, &delivery.Status,
-		&delivery.AvailableAt, &delivery.LeaseOwner, &delivery.LeaseUntil, &delivery.AttemptedAt,
+		&delivery.AvailableAt, &delivery.LeasedBy, &delivery.LeaseUntil, &delivery.AttemptedAt,
 		&delivery.ProviderMessageID, &delivery.FailureCode, &delivery.CreatedAt, &delivery.UpdatedAt,
 	); err != nil {
 		return domain.Delivery{}, err

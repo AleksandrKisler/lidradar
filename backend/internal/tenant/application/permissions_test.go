@@ -31,6 +31,9 @@ func (*permissionRepository) MembershipsForUser(context.Context, string) ([]doma
 func (*permissionRepository) CreateMembership(context.Context, string, domain.Membership) error {
 	return nil
 }
+func (*permissionRepository) RevokeMembership(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
+}
 func (*permissionRepository) ListLocations(context.Context, string) ([]domain.Location, error) {
 	return nil, nil
 }

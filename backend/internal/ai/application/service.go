@@ -27,7 +27,15 @@ var (
 )
 
 const (
-	DefaultLease             = 120 * time.Second
+	DefaultLease = 120 * time.Second
+	// LeaseCap — абсолютный потолок аренды (§3.5, LR-BE-RM-016): heartbeat
+	// продлевает lease_until, но не leased_at, поэтому зависший inference с живым
+	// heartbeat теряет задание не позже чем через 15 минут.
+	LeaseCap = 15 * time.Minute
+	// AnalysisDebounce — минимальная пауза перед анализом переписки
+	// (LR-BE-RM-006): всплеск сообщений порождает одно задание с последним
+	// снимком, а не задание на каждое сообщение.
+	AnalysisDebounce         = 60 * time.Second
 	DefaultSignatureWindow   = 60 * time.Second
 	NodeUnavailableAfter     = 60 * time.Second
 	DefaultMaxAttempts       = 5
@@ -85,6 +93,7 @@ type Service struct {
 	now             func() time.Time
 	lease           time.Duration
 	signatureWindow time.Duration
+	debounce        time.Duration
 	staleBuilder    StaleJobBuilder
 }
 
@@ -94,13 +103,22 @@ func NewService(store Store, ids IDs, now func() time.Time, lease time.Duration)
 	}
 	return Service{
 		store: store, ids: ids, now: now, lease: lease,
-		signatureWindow: DefaultSignatureWindow,
+		signatureWindow: DefaultSignatureWindow, debounce: AnalysisDebounce,
 	}
 }
 
 func (s Service) WithSignatureWindow(window time.Duration) Service {
 	if window > 0 {
 		s.signatureWindow = window
+	}
+	return s
+}
+
+// WithAnalysisDebounce задаёт паузу перед анализом. Ноль допустим только в
+// испытаниях, где задание должно быть доступно для захвата сразу.
+func (s Service) WithAnalysisDebounce(debounce time.Duration) Service {
+	if debounce >= 0 {
+		s.debounce = debounce
 	}
 	return s
 }
@@ -360,7 +378,7 @@ func (s Service) Complete(ctx context.Context, id, secret, jobID, runID, output 
 				Text: strings.TrimSpace(result.Summary), BaseConversationRevision: snapshot.Revision,
 				AnalysisThroughMessageID: snapshot.LastMessageID, ModelVersion: run.ModelVersion,
 				PromptVersion: run.PromptVersion, SchemaVersion: run.SchemaVersion,
-				RunID: run.ID, Facts: TrustedFacts(result), UpdatedAt: now,
+				RunID: run.ID, Facts: AppliedFacts(result), UpdatedAt: now,
 			}
 		}
 	}
@@ -424,7 +442,7 @@ func (s Service) newJob(command EnqueueCommand) (domain.Job, error) {
 		ModelVersion:             command.ModelVersion, PromptVersion: command.PromptVersion,
 		SchemaVersion: command.SchemaVersion, Priority: command.Priority,
 		Status: domain.JobPending, MaxAttempts: DefaultMaxAttempts,
-		AvailableAt: now, CreatedAt: now, UpdatedAt: now,
+		AvailableAt: now.Add(s.debounce), CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 

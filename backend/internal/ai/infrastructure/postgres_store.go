@@ -211,45 +211,17 @@ func (store *PostgresStore) Enqueue(ctx context.Context, job domain.Job) (domain
 		job.ConversationID == "" || job.Prompt == "" || job.Status != domain.JobPending {
 		return domain.Job{}, application.ErrInvalid
 	}
-	payload, err := json.Marshal(map[string]string{"prompt": job.Prompt})
-	if err != nil {
-		return domain.Job{}, fmt.Errorf("кодирование AI-задания: %w", err)
-	}
-	persisted, err := scanJob(store.pool.QueryRow(ctx, `
-		INSERT INTO ai_jobs(
-			id, tenant_id, job_type, entity_type, entity_id, priority, payload,
-			model_requirement, schema_version, prompt_version,
-			base_conversation_revision, analysis_through_message_id,
-			status, attempts, max_attempts, available_at, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7::jsonb,
-			$8, $9, $10, $11, $12,
-			'PENDING', 0, $13, $14, $15, $15
-		) ON CONFLICT (
-			tenant_id, job_type, entity_type, entity_id,
-			base_conversation_revision, model_requirement, schema_version, prompt_version
-		) DO NOTHING
-		RETURNING id, tenant_id, job_type, entity_type, entity_id, priority, payload,
-		          model_requirement, schema_version, prompt_version,
-		          base_conversation_revision, analysis_through_message_id,
-		          status, attempts, max_attempts, available_at, leased_by, lease_until,
-		          last_error_code, completed_at, created_at, updated_at`,
-		job.ID, job.TenantID, job.JobType, job.EntityType, job.ConversationID,
-		job.Priority, payload, job.ModelVersion, job.SchemaVersion, job.PromptVersion,
-		job.BaseConversationRevision, job.AnalysisThroughMessageID, job.MaxAttempts,
-		job.AvailableAt.UTC(), job.CreatedAt.UTC()))
+	persisted, err := upsertQueuedJob(ctx, store.pool, job)
 	if err == nil {
 		return persisted, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return domain.Job{}, mapAIStoreError("добавление AI-задания", err)
+	if !errors.Is(err, errSnapshotAlreadyQueued) {
+		return domain.Job{}, err
 	}
+	// Точно такой снимок уже анализировался или анализируется: повтор события
+	// безопасен, а расхождение инструкции при одинаковом снимке — конфликт.
 	persisted, err = scanJob(store.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, job_type, entity_type, entity_id, priority, payload,
-		       model_requirement, schema_version, prompt_version,
-		       base_conversation_revision, analysis_through_message_id,
-		       status, attempts, max_attempts, available_at, leased_by, lease_until,
-		       last_error_code, completed_at, created_at, updated_at
+		SELECT `+queuedJobColumns+`
 		FROM ai_jobs
 		WHERE tenant_id = $1 AND job_type = $2 AND entity_type = $3 AND entity_id = $4
 		  AND base_conversation_revision = $5 AND model_requirement = $6
@@ -261,6 +233,82 @@ func (store *PostgresStore) Enqueue(ctx context.Context, job domain.Job) (domain
 	}
 	if persisted.Prompt != job.Prompt || persisted.AnalysisThroughMessageID != job.AnalysisThroughMessageID {
 		return domain.Job{}, application.ErrConflict
+	}
+	return persisted, nil
+}
+
+const queuedJobColumns = `id, tenant_id, job_type, entity_type, entity_id, priority, payload,
+		       model_requirement, schema_version, prompt_version,
+		       base_conversation_revision, analysis_through_message_id,
+		       status, attempts, max_attempts, available_at, leased_by, lease_until, leased_at,
+		       last_error_code, completed_at, created_at, updated_at`
+
+// errSnapshotAlreadyQueued означает, что задание с тем же снимком переписки и
+// теми же версиями уже существует в любом состоянии (ai_jobs_snapshot_unique).
+var errSnapshotAlreadyQueued = errors.New("снимок переписки уже поставлен в очередь")
+
+type rowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+// upsertQueuedJob держит не более одного ожидающего задания на сущность
+// (ai_jobs_one_queued_per_entity_idx). Более свежий снимок заменяет инструкцию
+// уже ожидающего задания, сохраняя его идентификатор и более ранний
+// available_at; более старый снимок ничего не меняет. Захваченное или
+// выполняющееся задание не трогается: его инструкция уже у узла, а снимок
+// запуска копируется из строки при старте.
+func upsertQueuedJob(ctx context.Context, querier rowQuerier, job domain.Job) (domain.Job, error) {
+	payload, err := json.Marshal(map[string]string{"prompt": job.Prompt})
+	if err != nil {
+		return domain.Job{}, fmt.Errorf("кодирование AI-задания: %w", err)
+	}
+	persisted, err := scanJob(querier.QueryRow(ctx, `
+		INSERT INTO ai_jobs(
+			id, tenant_id, job_type, entity_type, entity_id, priority, payload,
+			model_requirement, schema_version, prompt_version,
+			base_conversation_revision, analysis_through_message_id,
+			status, attempts, max_attempts, available_at, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7::jsonb,
+			$8, $9, $10, $11, $12,
+			'PENDING', 0, $13, $14, $15, $15
+		) ON CONFLICT (tenant_id, entity_type, entity_id) WHERE status IN ('PENDING', 'RETRY')
+		DO UPDATE SET
+			payload = EXCLUDED.payload,
+			priority = GREATEST(ai_jobs.priority, EXCLUDED.priority),
+			model_requirement = EXCLUDED.model_requirement,
+			schema_version = EXCLUDED.schema_version,
+			prompt_version = EXCLUDED.prompt_version,
+			base_conversation_revision = EXCLUDED.base_conversation_revision,
+			analysis_through_message_id = EXCLUDED.analysis_through_message_id,
+			available_at = LEAST(ai_jobs.available_at, EXCLUDED.available_at),
+			updated_at = EXCLUDED.updated_at
+		WHERE ai_jobs.base_conversation_revision <= EXCLUDED.base_conversation_revision
+		RETURNING `+queuedJobColumns,
+		job.ID, job.TenantID, job.JobType, job.EntityType, job.ConversationID,
+		job.Priority, payload, job.ModelVersion, job.SchemaVersion, job.PromptVersion,
+		job.BaseConversationRevision, job.AnalysisThroughMessageID, job.MaxAttempts,
+		job.AvailableAt.UTC(), job.CreatedAt.UTC()))
+	if err == nil {
+		return persisted, nil
+	}
+	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) && postgresError.Code == "23505" &&
+		postgresError.ConstraintName == "ai_jobs_snapshot_unique" {
+		return domain.Job{}, errSnapshotAlreadyQueued
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return domain.Job{}, mapAIStoreError("добавление AI-задания", err)
+	}
+	// Ожидающее задание уже несёт более свежий снимок: возвращаем его.
+	persisted, err = scanJob(querier.QueryRow(ctx, `
+		SELECT `+queuedJobColumns+`
+		FROM ai_jobs
+		WHERE tenant_id = $1 AND entity_type = $2 AND entity_id = $3
+		  AND status IN ('PENDING', 'RETRY')`,
+		job.TenantID, job.EntityType, job.ConversationID))
+	if err != nil {
+		return domain.Job{}, mapAIStoreError("чтение ожидающего AI-задания", err)
 	}
 	return persisted, nil
 }
@@ -312,10 +360,15 @@ func (store *PostgresStore) Claim(
 	if inflight >= maxInflight {
 		return domain.Job{}, false, nil
 	}
+	// Аренда теряется по скользящему сроку (lease_until, продлевается heartbeat)
+	// либо по абсолютному потолку от момента захвата (leased_at + LeaseCap),
+	// который не продлевается никогда (§3.5, LR-BE-RM-016).
+	capBefore := now.Add(-application.LeaseCap).UTC()
 	if _, err := tx.Exec(ctx, `
 		UPDATE ai_runs AS run
 		SET status = 'FAILED', application_status = 'REJECTED',
-		    error_code = 'LEASE_EXPIRED_MAX_ATTEMPTS', completed_at = $1
+		    error_code = CASE WHEN job.lease_until <= $1 THEN 'LEASE_EXPIRED_MAX_ATTEMPTS' ELSE 'LEASE_CAP_EXCEEDED' END,
+		    completed_at = $1
 		FROM ai_jobs AS job
 		WHERE run.job_id = job.id AND run.status = 'RUNNING'
 		  AND EXISTS (
@@ -323,25 +376,28 @@ func (store *PostgresStore) Claim(
 			WHERE allowed.node_id = $2 AND allowed.tenant_id = job.tenant_id
 		  )
 		  AND job.status IN ('LEASED', 'RUNNING')
-		  AND job.lease_until <= $1 AND job.attempts >= job.max_attempts`, now.UTC(), nodeID); err != nil {
+		  AND (job.lease_until <= $1 OR job.leased_at <= $3)
+		  AND job.attempts >= job.max_attempts`, now.UTC(), nodeID, capBefore); err != nil {
 		return domain.Job{}, false, mapAIStoreError("завершение попыток AI с исчерпанной арендой", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE ai_jobs AS job
-		SET status = 'DEAD', leased_by = NULL, lease_until = NULL,
-		    last_error_code = 'LEASE_EXPIRED_MAX_ATTEMPTS', completed_at = $1, updated_at = $1
-		WHERE status IN ('LEASED', 'RUNNING') AND lease_until <= $1 AND attempts >= max_attempts
+		SET status = 'DEAD', leased_by = NULL, lease_until = NULL, leased_at = NULL,
+		    last_error_code = CASE WHEN lease_until <= $1 THEN 'LEASE_EXPIRED_MAX_ATTEMPTS' ELSE 'LEASE_CAP_EXCEEDED' END,
+		    completed_at = $1, updated_at = $1
+		WHERE status IN ('LEASED', 'RUNNING') AND (lease_until <= $1 OR leased_at <= $3)
+		  AND attempts >= max_attempts
 		  AND EXISTS (
 			SELECT 1 FROM ai_node_tenants AS allowed
 			WHERE allowed.node_id = $2 AND allowed.tenant_id = job.tenant_id
-		  )`, now.UTC(), nodeID); err != nil {
+		  )`, now.UTC(), nodeID, capBefore); err != nil {
 		return domain.Job{}, false, mapAIStoreError("завершение AI-заданий с исчерпанными попытками", err)
 	}
 	job, err := scanJob(tx.QueryRow(ctx, `
 		SELECT id, tenant_id, job_type, entity_type, entity_id, priority, payload,
 		       model_requirement, schema_version, prompt_version,
 		       base_conversation_revision, analysis_through_message_id,
-		       status, attempts, max_attempts, available_at, leased_by, lease_until,
+		       status, attempts, max_attempts, available_at, leased_by, lease_until, leased_at,
 		       last_error_code, completed_at, created_at, updated_at
 		FROM ai_jobs AS job
 		WHERE model_requirement = $2
@@ -351,11 +407,11 @@ func (store *PostgresStore) Claim(
 		  )
 		  AND attempts < max_attempts AND (
 			(status IN ('PENDING', 'RETRY') AND available_at <= $1)
-			OR (status IN ('LEASED', 'RUNNING') AND lease_until <= $1)
+			OR (status IN ('LEASED', 'RUNNING') AND (lease_until <= $1 OR leased_at <= $4))
 		)
 		ORDER BY priority DESC, available_at, created_at, id
 		FOR UPDATE SKIP LOCKED
-		LIMIT 1`, now.UTC(), *modelVersion, nodeID))
+		LIMIT 1`, now.UTC(), *modelVersion, nodeID, capBefore))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Job{}, false, nil
 	}
@@ -363,21 +419,25 @@ func (store *PostgresStore) Claim(
 		return domain.Job{}, false, mapAIStoreError("поиск AI-задания", err)
 	}
 	if job.Status == domain.JobLeased || job.Status == domain.JobRunning {
+		lostCode := "LEASE_EXPIRED"
+		if job.LeaseUntil.After(now) {
+			lostCode = "LEASE_CAP_EXCEEDED"
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE ai_runs
 			SET status = 'FAILED', application_status = 'REJECTED',
-			    error_code = 'LEASE_EXPIRED', completed_at = $2
-			WHERE job_id = $1 AND status = 'RUNNING'`, job.ID, now.UTC()); err != nil {
+			    error_code = $3, completed_at = $2
+			WHERE job_id = $1 AND status = 'RUNNING'`, job.ID, now.UTC(), lostCode); err != nil {
 			return domain.Job{}, false, mapAIStoreError("завершение потерянной попытки AI", err)
 		}
 	}
-	job.Status, job.ClaimedBy, job.LeaseUntil = domain.JobLeased, nodeID, leaseUntil.UTC()
+	job.Status, job.LeasedBy, job.LeaseUntil, job.LeasedAt = domain.JobLeased, nodeID, leaseUntil.UTC(), now.UTC()
 	job.Attempts++
 	job.UpdatedAt = now.UTC()
 	if _, err := tx.Exec(ctx, `
 		UPDATE ai_jobs
 		SET status = 'LEASED', attempts = attempts + 1, leased_by = $2,
-		    lease_until = $3, last_error_code = NULL, completed_at = NULL, updated_at = $4
+		    lease_until = $3, leased_at = $4, last_error_code = NULL, completed_at = NULL, updated_at = $4
 		WHERE id = $1`, job.ID, nodeID, leaseUntil.UTC(), now.UTC()); err != nil {
 		return domain.Job{}, false, mapAIStoreError("захват AI-задания", err)
 	}
@@ -404,7 +464,7 @@ func (store *PostgresStore) Start(ctx context.Context, run domain.Run, now time.
 		SELECT id, tenant_id, job_type, entity_type, entity_id, priority, payload,
 		       model_requirement, schema_version, prompt_version,
 		       base_conversation_revision, analysis_through_message_id,
-		       status, attempts, max_attempts, available_at, leased_by, lease_until,
+		       status, attempts, max_attempts, available_at, leased_by, lease_until, leased_at,
 		       last_error_code, completed_at, created_at, updated_at
 		FROM ai_jobs WHERE id = $1 FOR UPDATE`, run.JobID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -413,7 +473,7 @@ func (store *PostgresStore) Start(ctx context.Context, run domain.Run, now time.
 	if err != nil {
 		return domain.Run{}, mapAIStoreError("чтение AI-задания", err)
 	}
-	if job.ClaimedBy != run.NodeID || (job.Status != domain.JobLeased && job.Status != domain.JobRunning) || !job.LeaseUntil.After(now) {
+	if job.LeasedBy != run.NodeID || (job.Status != domain.JobLeased && job.Status != domain.JobRunning) || !job.LeaseUntil.After(now) {
 		return domain.Run{}, application.ErrLeaseLost
 	}
 	existing, err := scanRun(tx.QueryRow(ctx, `
@@ -520,7 +580,7 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 		SELECT id, tenant_id, job_type, entity_type, entity_id, priority, payload,
 		       model_requirement, schema_version, prompt_version,
 		       base_conversation_revision, analysis_through_message_id,
-		       status, attempts, max_attempts, available_at, leased_by, lease_until,
+		       status, attempts, max_attempts, available_at, leased_by, lease_until, leased_at,
 		       last_error_code, completed_at, created_at, updated_at
 		FROM ai_jobs WHERE id = $1 FOR UPDATE`, final.JobID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -548,7 +608,7 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 		}
 		return domain.Run{}, application.ErrLeaseLost
 	}
-	if job.ClaimedBy != final.NodeID || run.NodeID != final.NodeID ||
+	if job.LeasedBy != final.NodeID || run.NodeID != final.NodeID ||
 		job.Status != domain.JobRunning || !job.LeaseUntil.After(final.CompletedAt) {
 		return domain.Run{}, application.ErrLeaseLost
 	}
@@ -598,7 +658,7 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 		job.Status, job.CompletedAt = domain.JobSucceeded, final.CompletedAt.UTC()
 		if _, err := tx.Exec(ctx, `
 			UPDATE ai_jobs
-			SET status = 'SUCCEEDED', leased_by = NULL, lease_until = NULL,
+			SET status = 'SUCCEEDED', leased_by = NULL, lease_until = NULL, leased_at = NULL,
 			    completed_at = $2, updated_at = $2
 			WHERE id = $1`, job.ID, final.CompletedAt.UTC()); err != nil {
 			return domain.Run{}, mapAIStoreError("успешное завершение AI-задания", err)
@@ -607,7 +667,7 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 		job.Status, job.AvailableAt = domain.JobRetry, final.CompletedAt.Add(5*time.Second)
 		if _, err := tx.Exec(ctx, `
 			UPDATE ai_jobs
-			SET status = 'RETRY', leased_by = NULL, lease_until = NULL,
+			SET status = 'RETRY', leased_by = NULL, lease_until = NULL, leased_at = NULL,
 			    last_error_code = $2, available_at = $3, updated_at = $4
 			WHERE id = $1`, job.ID, final.ErrorCode, job.AvailableAt.UTC(), final.CompletedAt.UTC()); err != nil {
 			return domain.Run{}, mapAIStoreError("повтор AI-задания", err)
@@ -616,7 +676,7 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 		job.Status, job.CompletedAt = domain.JobDead, final.CompletedAt.UTC()
 		if _, err := tx.Exec(ctx, `
 			UPDATE ai_jobs
-			SET status = 'DEAD', leased_by = NULL, lease_until = NULL,
+			SET status = 'DEAD', leased_by = NULL, lease_until = NULL, leased_at = NULL,
 			    last_error_code = $2, completed_at = $3, updated_at = $3
 			WHERE id = $1`, job.ID, final.ErrorCode, final.CompletedAt.UTC()); err != nil {
 			return domain.Run{}, mapAIStoreError("окончательное завершение AI-задания", err)
@@ -656,28 +716,19 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 		}
 	}
 	if final.Replacement != nil {
-		payload, marshalErr := json.Marshal(map[string]string{"prompt": final.Replacement.Prompt})
-		if marshalErr != nil {
-			return domain.Run{}, fmt.Errorf("кодирование повторного AI-задания: %w", marshalErr)
+		// Точка сохранения изолирует конфликт снимка: если задание с тем же
+		// снимком уже существует, замена не нужна, а завершение run не откатывается.
+		savepoint, err := tx.Begin(ctx)
+		if err != nil {
+			return domain.Run{}, fmt.Errorf("точка сохранения повторного AI-задания: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO ai_jobs(
-				id, tenant_id, job_type, entity_type, entity_id, priority, payload,
-				model_requirement, schema_version, prompt_version,
-				base_conversation_revision, analysis_through_message_id,
-				status, attempts, max_attempts, available_at, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, 'PENDING', 0, $13, $14, $14, $14)
-			ON CONFLICT (
-				tenant_id, job_type, entity_type, entity_id,
-				base_conversation_revision, model_requirement, schema_version, prompt_version
-			) DO NOTHING`,
-			final.Replacement.ID, final.Replacement.TenantID, final.Replacement.JobType,
-			final.Replacement.EntityType, final.Replacement.ConversationID,
-			final.Replacement.Priority, payload, final.Replacement.ModelVersion,
-			final.Replacement.SchemaVersion, final.Replacement.PromptVersion,
-			final.Replacement.BaseConversationRevision, final.Replacement.AnalysisThroughMessageID,
-			final.Replacement.MaxAttempts, final.Replacement.AvailableAt.UTC()); err != nil {
-			return domain.Run{}, mapAIStoreError("создание повторного AI-задания", err)
+		if _, err := upsertQueuedJob(ctx, savepoint, *final.Replacement); err != nil {
+			_ = savepoint.Rollback(ctx)
+			if !errors.Is(err, errSnapshotAlreadyQueued) {
+				return domain.Run{}, err
+			}
+		} else if err := savepoint.Commit(ctx); err != nil {
+			return domain.Run{}, fmt.Errorf("фиксация повторного AI-задания: %w", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -759,14 +810,14 @@ const sha256Size = 32
 func scanJob(row scanner) (domain.Job, error) {
 	var job domain.Job
 	var payload []byte
-	var claimedBy, lastError *string
-	var leaseUntil, completedAt *time.Time
+	var leasedBy, lastError *string
+	var leaseUntil, leasedAt, completedAt *time.Time
 	if err := row.Scan(
 		&job.ID, &job.TenantID, &job.JobType, &job.EntityType, &job.ConversationID,
 		&job.Priority, &payload, &job.ModelVersion, &job.SchemaVersion, &job.PromptVersion,
 		&job.BaseConversationRevision, &job.AnalysisThroughMessageID,
 		&job.Status, &job.Attempts, &job.MaxAttempts, &job.AvailableAt,
-		&claimedBy, &leaseUntil, &lastError, &completedAt, &job.CreatedAt, &job.UpdatedAt,
+		&leasedBy, &leaseUntil, &leasedAt, &lastError, &completedAt, &job.CreatedAt, &job.UpdatedAt,
 	); err != nil {
 		return domain.Job{}, err
 	}
@@ -777,11 +828,14 @@ func scanJob(row scanner) (domain.Job, error) {
 		return domain.Job{}, fmt.Errorf("AI job payload is invalid")
 	}
 	job.Prompt = body.Prompt
-	if claimedBy != nil {
-		job.ClaimedBy = *claimedBy
+	if leasedBy != nil {
+		job.LeasedBy = *leasedBy
 	}
 	if leaseUntil != nil {
 		job.LeaseUntil = leaseUntil.UTC()
+	}
+	if leasedAt != nil {
+		job.LeasedAt = leasedAt.UTC()
 	}
 	if lastError != nil {
 		job.LastErrorCode = *lastError

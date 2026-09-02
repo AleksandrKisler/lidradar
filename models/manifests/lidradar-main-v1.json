@@ -5,14 +5,23 @@
   "promptVersion": "analyze-conversation.prompt.v5",
   "datasetVersion": "lidradar-ai-benchmark.v1",
   "dataset": {
-    "cases": 300,
-    "trainCases": 180,
-    "validationCases": 60,
-    "goldenCases": 60,
-    "goldenSHA256": "c85cd54d3c6f43134c509381247a278c4f8ec05975acf1f6a3f54aa90e55e4f2"
+    "cases": 500,
+    "goldenCases": 400,
+    "devCases": 100,
+    "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34",
+    "measuredOn": {
+      "note": "Результаты ниже получены до LR-BE-RM-024 на golden_v1 из 60 случаев (сплит 180/60/60). Повторный прогон на 400 случаях обязателен перед сменой статуса манифеста.",
+      "goldenCases": 60,
+      "goldenSHA256": "c85cd54d3c6f43134c509381247a278c4f8ec05975acf1f6a3f54aa90e55e4f2"
+    }
   },
   "runtime": "llama.cpp",
   "targetHardware": "NVIDIA GeForce RTX 4060 8 GB",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4060",
+    "vram_gb": 8,
+    "fit": "Qwen3-8B Q4_K_M ≈ 4.9 GB весов + KV-кэш ≈ 0.5 GB при контексте 4096; наблюдаемый пик 5360 MiB; контекст 4096 и parallel 1 — потолок"
+  },
   "generation": {
     "temperature": 0.7,
     "topP": 0.8,

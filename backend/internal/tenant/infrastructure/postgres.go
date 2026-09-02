@@ -74,10 +74,25 @@ func (r *PostgresRepository) Membership(ctx context.Context, tenantID, userID st
 		return domain.Membership{}, false, domain.ErrInvalid
 	}
 	return scanMembership(r.pool.QueryRow(ctx, `
-		SELECT m.id, m.tenant_id, m.user_id, m.role, m.status, m.created_at, m.updated_at
+		SELECT m.id, m.tenant_id, m.user_id, m.role, m.status, m.revoked_at, m.created_at, m.updated_at
 		FROM memberships m
 		JOIN organizations o ON o.id = m.tenant_id
 		WHERE m.tenant_id = $1 AND m.user_id = $2 AND o.status = 'ACTIVE'`, tenantID, userID))
+}
+
+func (r *PostgresRepository) RevokeMembership(ctx context.Context, tenantID, userID string, at time.Time) (bool, error) {
+	if r == nil || r.pool == nil || tenantID == "" || userID == "" || at.IsZero() {
+		return false, domain.ErrInvalid
+	}
+	result, err := r.pool.Exec(ctx, `
+		UPDATE memberships
+		SET status = $3, revoked_at = $4, updated_at = $4
+		WHERE tenant_id = $1 AND user_id = $2 AND status <> $3`,
+		tenantID, userID, domain.MembershipDisabled, at.UTC())
+	if err != nil {
+		return false, mapPostgresError("revoke membership", err)
+	}
+	return result.RowsAffected() == 1, nil
 }
 
 func (r *PostgresRepository) MembershipsForUser(ctx context.Context, userID string) ([]domain.AccountMembership, error) {
@@ -85,7 +100,7 @@ func (r *PostgresRepository) MembershipsForUser(ctx context.Context, userID stri
 		return nil, domain.ErrInvalid
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT m.id, m.tenant_id, m.user_id, m.role, m.status, m.created_at, m.updated_at,
+		SELECT m.id, m.tenant_id, m.user_id, m.role, m.status, m.revoked_at, m.created_at, m.updated_at,
 		       o.id, o.name, o.default_timezone, o.default_currency, o.status, o.created_at, o.updated_at
 		FROM memberships m
 		JOIN organizations o ON o.id = m.tenant_id
@@ -100,7 +115,7 @@ func (r *PostgresRepository) MembershipsForUser(ctx context.Context, userID stri
 		var item domain.AccountMembership
 		if err := rows.Scan(
 			&item.Membership.ID, &item.Membership.TenantID, &item.Membership.UserID, &item.Membership.Role,
-			&item.Membership.Status, &item.Membership.CreatedAt, &item.Membership.UpdatedAt,
+			&item.Membership.Status, &item.Membership.RevokedAt, &item.Membership.CreatedAt, &item.Membership.UpdatedAt,
 			&item.Organization.ID, &item.Organization.Name, &item.Organization.DefaultTimezone,
 			&item.Organization.DefaultCurrency, &item.Organization.Status, &item.Organization.CreatedAt, &item.Organization.UpdatedAt,
 		); err != nil {
@@ -295,7 +310,7 @@ func scanOrganization(row rowScanner) (domain.Organization, bool, error) {
 
 func scanMembership(row rowScanner) (domain.Membership, bool, error) {
 	var membership domain.Membership
-	err := row.Scan(&membership.ID, &membership.TenantID, &membership.UserID, &membership.Role, &membership.Status, &membership.CreatedAt, &membership.UpdatedAt)
+	err := row.Scan(&membership.ID, &membership.TenantID, &membership.UserID, &membership.Role, &membership.Status, &membership.RevokedAt, &membership.CreatedAt, &membership.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Membership{}, false, nil
 	}

@@ -54,7 +54,14 @@ jobs:
           api_pid=$!
           trap 'kill "$api_pid"' EXIT
           for attempt in $(seq 1 30); do
-            curl --fail --silent http://127.0.0.1:8080/health/ready && exit 0
+            if body="$(curl --fail --silent http://127.0.0.1:8080/health/ready)"; then
+              # Карта миграций и health-check обязаны совпадать (LR-BE-RM-022):
+              # новая миграция без обновления ожидаемого значения ломает CI.
+              echo "$body" | grep --quiet '"latest":"000016_consistency_remediation"' && exit 0
+              echo "$body"
+              echo "health/ready reports an unexpected latest migration" >&2
+              exit 1
+            fi
             sleep 1
           done
           cat api.log

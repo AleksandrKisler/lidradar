@@ -28,6 +28,10 @@ func (*candidateRepository) Transition(context.Context, domain.TransitionCommand
 	return domain.Opportunity{}, false, nil
 }
 
+func (*candidateRepository) ActiveByConversation(context.Context, string, string) (domain.Opportunity, bool, error) {
+	return domain.Opportunity{}, false, nil
+}
+
 type candidateConversations struct {
 	snapshot conversationdomain.CandidateSnapshot
 }

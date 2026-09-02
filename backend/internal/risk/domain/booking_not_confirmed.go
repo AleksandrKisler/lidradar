@@ -11,6 +11,21 @@ const (
 	StrongBookingIntentConfidence    = 0.85
 )
 
+// bookingEligibleStages — канонический список стадий R3 (LR-BE-RM-013).
+// NEW и ENGAGED исключены: сильный факт намерения сначала переводит сделку в
+// BOOKING_INTENT (источник AI), после чего правило работает по стадии.
+// BOOKED, WON, LOST и ARCHIVED закрывают риск.
+var bookingEligibleStages = map[string]struct{}{
+	"QUALIFYING": {}, "PRICE_SENT": {}, "WAITING_CUSTOMER": {},
+	"WAITING_BUSINESS": {}, "BOOKING_INTENT": {},
+}
+
+// BookingRiskEligible сообщает, может ли правило R3 открыть риск на стадии.
+func BookingRiskEligible(stage string) bool {
+	_, eligible := bookingEligibleStages[stage]
+	return eligible
+}
+
 type BookingNotConfirmedPolicy struct{}
 
 func (BookingNotConfirmedPolicy) Type() Type { return TypeBookingNotConfirmed }
@@ -29,6 +44,9 @@ func (policy BookingNotConfirmedPolicy) Evaluate(state ConversationState, at tim
 		state.OpportunityStage == "WON" || state.OpportunityStage == "LOST" ||
 		state.OpportunityStage == "ARCHIVED" {
 		return Decision{Resolve: true}, nil
+	}
+	if !BookingRiskEligible(state.OpportunityStage) {
+		return Decision{}, nil
 	}
 
 	// waitingFor = BUSINESS выводится из последнего канонического направления.

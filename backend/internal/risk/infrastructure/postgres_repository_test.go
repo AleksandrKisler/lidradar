@@ -134,6 +134,56 @@ func TestPostgresStateReaderUsesLatestCanonicalMessageAndBusinessHours(t *testin
 	}
 }
 
+// Подтверждённая запись не является терминальным этапом: частичный уникальный
+// индекс продолжает считать её активной и не даёт создать вторую Opportunity.
+// Проекция обязана видеть такую сделку, иначе следующее обращение клиента не
+// порождает ни одного сигнала. Исключение BOOKED принадлежит правилу R3.
+func TestPostgresStateReaderKeepsBookedOpportunityUnderObservation(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	pair := testsupport.TwoTenants(t, ctx, pool)
+	fixture := insertRiskFixture(t, pool, pair.A.TenantID, pair.A.LocationID, domain.DirectionIncoming)
+	reader := NewPostgresStateReader(pool)
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE opportunities SET stage = 'BOOKED', updated_at = $3
+		WHERE tenant_id = $1 AND id = $2`,
+		fixture.tenantID, fixture.opportunityID, fixture.messageAt); err != nil {
+		t.Fatal(err)
+	}
+
+	opportunityID, found, err := reader.ActiveOpportunityByConversation(ctx, fixture.tenantID, fixture.conversationID)
+	if err != nil || !found || opportunityID != fixture.opportunityID {
+		t.Fatalf("BOOKED выпала из наблюдения: id = %q, found = %v, ошибка = %v", opportunityID, found, err)
+	}
+	state, err := reader.CurrentState(ctx, fixture.tenantID, fixture.opportunityID)
+	if err != nil || !state.ActiveOpportunity || state.OpportunityStage != "BOOKED" {
+		t.Fatalf("состояние BOOKED = %#v, ошибка = %v", state, err)
+	}
+
+	// R3 закрывает риск сам, читая этап, а не активность сделки.
+	decision, err := (domain.BookingNotConfirmedPolicy{}).Evaluate(state, fixture.messageAt.Add(time.Hour))
+	if err != nil || !decision.Resolve || decision.Finding != nil {
+		t.Fatalf("R3 при BOOKED = %#v, ошибка = %v", decision, err)
+	}
+
+	for _, terminal := range []string{"WON", "LOST", "ARCHIVED"} {
+		if _, err := pool.Exec(ctx, `
+			UPDATE opportunities SET stage = $3, closed_at = $4, updated_at = $4
+			WHERE tenant_id = $1 AND id = $2`,
+			fixture.tenantID, fixture.opportunityID, terminal, fixture.messageAt); err != nil {
+			t.Fatal(err)
+		}
+		if _, found, err := reader.ActiveOpportunityByConversation(ctx, fixture.tenantID, fixture.conversationID); err != nil || found {
+			t.Fatalf("этап %s остался активным: found = %v, ошибка = %v", terminal, found, err)
+		}
+		state, err := reader.CurrentState(ctx, fixture.tenantID, fixture.opportunityID)
+		if err != nil || state.ActiveOpportunity {
+			t.Fatalf("состояние %s = %#v, ошибка = %v", terminal, state, err)
+		}
+	}
+}
+
 type riskFixture struct {
 	conversationID, connectionID, opportunityID, messageID, locationID, tenantID string
 	messageAt                                                                    time.Time

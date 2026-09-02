@@ -65,7 +65,7 @@ func TestAuditRejectsConversationLeakage(t *testing.T) {
 	}
 	copyCase := cases[0]
 	copyCase.ID = "booking-validation-001"
-	copyCase.Split = SplitValidation
+	copyCase.Split = SplitDev
 	if _, err := AuditCases(append(cases, copyCase)); err == nil {
 		t.Fatal("expected duplicate conversation rejection")
 	}

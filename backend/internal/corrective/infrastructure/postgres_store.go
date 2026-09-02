@@ -149,12 +149,14 @@ func (store *PostgresStore) AppendAction(
 		return stored, false, nil
 	}
 	inserted, err := tx.Exec(ctx, `
-		INSERT INTO actions(id, tenant_id, risk_id, actor_user_id, type, note, created_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7
-		WHERE EXISTS (
+		INSERT INTO actions(id, tenant_id, risk_id, opportunity_id, actor_user_id, type, note, created_at)
+		SELECT $1, $2, $3, risk.opportunity_id, $4, $5, $6, $7
+		FROM risk_signals AS risk
+		WHERE risk.tenant_id = $2 AND risk.id = $3
+		  AND EXISTS (
 			SELECT 1 FROM memberships
 			WHERE tenant_id = $2 AND user_id = $4 AND status = 'ACTIVE'
-		)`,
+		  )`,
 		action.ID, action.TenantID, action.RiskID, action.ActorID,
 		action.Type, action.Note, action.CreatedAt,
 	)

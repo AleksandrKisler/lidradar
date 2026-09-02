@@ -1,4 +1,4 @@
-.PHONY: ai-benchmark-golden ai-benchmark-validation ai-dataset ai-dataset-audit build check clean fmt test test-db vet
+.PHONY: ai-benchmark-dev ai-benchmark-golden ai-dataset ai-dataset-audit build check clean fmt test test-db vet
 
 BIN_DIR ?= bin
 COMMANDS := api worker scheduler ai-agent ai-node-register ai-node-manage migrate
@@ -34,17 +34,17 @@ test-db:
 	go test $(GO_TEST_FLAGS) ./...
 
 # Набор создаётся воспроизводимо только из синтетических шаблонов. Команда
-# перезаписывает три выборки и контрольную сумму golden-файла.
+# перезаписывает выборки GOLDEN (400) и DEV (100) и контрольную сумму golden-файла.
 ai-dataset:
 	go run ./backend/cmd/ai-dataset-generate
 
 ai-dataset-audit:
 	go run ./backend/cmd/ai-dataset-audit
 
-# Проверочную выборку можно запускать многократно при настройке инструкции.
-ai-benchmark-validation:
+# Выборку DEV можно запускать многократно при настройке инструкции.
+ai-benchmark-dev:
 	go run ./backend/cmd/ai-benchmark \
-		-dataset models/datasets/validation_v1.jsonl \
+		-dataset models/datasets/dev_v1.jsonl \
 		-checksum '' \
 		-endpoint $(AI_BENCHMARK_ENDPOINT) \
 		$(AI_BENCHMARK_GATES)

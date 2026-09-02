@@ -4,6 +4,7 @@ package infrastructure
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"sync"
 	"time"
 
@@ -133,7 +134,7 @@ func (store *MemoryStore) Heartbeat(
 	store.nodes[id] = node
 	for jobID, job := range store.jobs {
 		if (job.Status == domain.JobLeased || job.Status == domain.JobRunning) &&
-			job.ClaimedBy == id && job.LeaseUntil.After(now) {
+			job.LeasedBy == id && job.LeaseUntil.After(now) {
 			job.LeaseUntil, job.UpdatedAt = leaseUntil, now
 			store.jobs[jobID] = job
 		}
@@ -144,17 +145,50 @@ func (store *MemoryStore) Heartbeat(
 func (store *MemoryStore) Enqueue(_ context.Context, job domain.Job) (domain.Job, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	return store.upsertQueued(job)
+}
+
+// upsertQueued повторяет семантику PostgreSQL-адаптера: одно ожидающее задание
+// на сущность, более свежий снимок заменяет ожидающее задание, точный повтор
+// снимка безопасен, расхождение инструкции при том же снимке — конфликт.
+func (store *MemoryStore) upsertQueued(job domain.Job) (domain.Job, error) {
 	for _, existing := range store.jobs {
 		if existing.TenantID == job.TenantID && existing.JobType == job.JobType &&
 			existing.EntityType == job.EntityType && existing.ConversationID == job.ConversationID &&
 			existing.BaseConversationRevision == job.BaseConversationRevision &&
 			existing.ModelVersion == job.ModelVersion && existing.SchemaVersion == job.SchemaVersion &&
 			existing.PromptVersion == job.PromptVersion {
-			if existing.Prompt != job.Prompt {
+			if existing.Prompt != job.Prompt || existing.AnalysisThroughMessageID != job.AnalysisThroughMessageID {
 				return domain.Job{}, application.ErrConflict
 			}
 			return existing, nil
 		}
+	}
+	for id, existing := range store.jobs {
+		if existing.TenantID != job.TenantID || existing.EntityType != job.EntityType ||
+			existing.ConversationID != job.ConversationID ||
+			(existing.Status != domain.JobPending && existing.Status != domain.JobRetry) {
+			continue
+		}
+		if existing.BaseConversationRevision > job.BaseConversationRevision {
+			return existing, nil
+		}
+		existing.Prompt = job.Prompt
+		existing.BaseConversationRevision = job.BaseConversationRevision
+		existing.AnalysisThroughMessageID = job.AnalysisThroughMessageID
+		existing.ModelVersion, existing.SchemaVersion, existing.PromptVersion = job.ModelVersion, job.SchemaVersion, job.PromptVersion
+		if job.Priority > existing.Priority {
+			existing.Priority = job.Priority
+		}
+		if job.AvailableAt.Before(existing.AvailableAt) {
+			existing.AvailableAt = job.AvailableAt
+		}
+		existing.UpdatedAt = job.UpdatedAt
+		store.jobs[id] = existing
+		store.snapshots[snapshotKey(job.TenantID, job.ConversationID)] = domain.ConversationSnapshot{
+			Revision: job.BaseConversationRevision, LastMessageID: job.AnalysisThroughMessageID,
+		}
+		return existing, nil
 	}
 	store.jobs[job.ID] = job
 	store.order = append(store.order, job.ID)
@@ -184,26 +218,35 @@ func (store *MemoryStore) Claim(_ context.Context, nodeID string, now, leaseUnti
 			continue
 		}
 		available := (job.Status == domain.JobPending || job.Status == domain.JobRetry) && !job.AvailableAt.After(now)
-		expired := (job.Status == domain.JobLeased || job.Status == domain.JobRunning) && !job.LeaseUntil.After(now)
-		if !available && !expired {
+		leased := job.Status == domain.JobLeased || job.Status == domain.JobRunning
+		slidingExpired := leased && !job.LeaseUntil.After(now)
+		capExceeded := leased && !job.LeasedAt.Add(application.LeaseCap).After(now)
+		if !available && !slidingExpired && !capExceeded {
 			continue
+		}
+		lostCode := "LEASE_EXPIRED"
+		if !slidingExpired {
+			lostCode = "LEASE_CAP_EXCEEDED"
 		}
 		if job.Attempts >= job.MaxAttempts {
 			job.Status, job.LastErrorCode = domain.JobDead, "LEASE_EXPIRED_MAX_ATTEMPTS"
-			job.ClaimedBy, job.LeaseUntil, job.CompletedAt, job.UpdatedAt = "", time.Time{}, now, now
+			if !slidingExpired {
+				job.LastErrorCode = "LEASE_CAP_EXCEEDED"
+			}
+			job.LeasedBy, job.LeaseUntil, job.LeasedAt, job.CompletedAt, job.UpdatedAt = "", time.Time{}, time.Time{}, now, now
 			store.jobs[jobID] = job
 			continue
 		}
-		if expired {
+		if leased {
 			for runID, run := range store.runs {
 				if run.JobID == job.ID && run.Status == domain.RunRunning {
 					run.Status, run.ApplicationStatus = domain.RunFailed, domain.ApplicationRejected
-					run.ErrorCode, run.CompletedAt = "LEASE_EXPIRED", now
+					run.ErrorCode, run.CompletedAt = lostCode, now
 					store.runs[runID] = run
 				}
 			}
 		}
-		job.Status, job.ClaimedBy, job.LeaseUntil = domain.JobLeased, nodeID, leaseUntil
+		job.Status, job.LeasedBy, job.LeaseUntil, job.LeasedAt = domain.JobLeased, nodeID, leaseUntil, now
 		job.Attempts++
 		job.UpdatedAt = now
 		store.jobs[jobID] = job
@@ -219,7 +262,7 @@ func (store *MemoryStore) Start(_ context.Context, run domain.Run, now time.Time
 	if !ok {
 		return domain.Run{}, application.ErrNotFound
 	}
-	if job.ClaimedBy != run.NodeID || (job.Status != domain.JobLeased && job.Status != domain.JobRunning) || !job.LeaseUntil.After(now) {
+	if job.LeasedBy != run.NodeID || (job.Status != domain.JobLeased && job.Status != domain.JobRunning) || !job.LeaseUntil.After(now) {
 		return domain.Run{}, application.ErrLeaseLost
 	}
 	for _, existing := range store.runs {
@@ -271,7 +314,7 @@ func (store *MemoryStore) Finalize(_ context.Context, final application.Finaliza
 	if !ok {
 		return domain.Run{}, application.ErrNotFound
 	}
-	if job.ClaimedBy != final.NodeID || run.NodeID != final.NodeID || job.Status != domain.JobRunning || !job.LeaseUntil.After(final.CompletedAt) {
+	if job.LeasedBy != final.NodeID || run.NodeID != final.NodeID || job.Status != domain.JobRunning || !job.LeaseUntil.After(final.CompletedAt) {
 		return domain.Run{}, application.ErrLeaseLost
 	}
 	if final.Summary != nil {
@@ -291,15 +334,14 @@ func (store *MemoryStore) Finalize(_ context.Context, final application.Finaliza
 	} else {
 		job.Status, job.CompletedAt, job.LastErrorCode = domain.JobDead, final.CompletedAt, final.ErrorCode
 	}
-	job.ClaimedBy, job.LeaseUntil, job.UpdatedAt = "", time.Time{}, final.CompletedAt
+	job.LeasedBy, job.LeaseUntil, job.LeasedAt, job.UpdatedAt = "", time.Time{}, time.Time{}, final.CompletedAt
 	store.jobs[job.ID] = job
 	if final.Summary != nil {
 		store.summaries[snapshotKey(final.Summary.TenantID, final.Summary.ConversationID)] = *final.Summary
 	}
 	if final.Replacement != nil {
-		if _, exists := store.jobs[final.Replacement.ID]; !exists {
-			store.jobs[final.Replacement.ID] = *final.Replacement
-			store.order = append(store.order, final.Replacement.ID)
+		if _, err := store.upsertQueued(*final.Replacement); err != nil && !errors.Is(err, application.ErrConflict) {
+			return domain.Run{}, err
 		}
 	}
 	return run, nil

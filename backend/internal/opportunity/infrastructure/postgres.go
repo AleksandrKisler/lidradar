@@ -90,6 +90,26 @@ func (repository *PostgresRepository) Detail(
 	return domain.Detail{Opportunity: opportunity, History: history}, true, nil
 }
 
+func (repository *PostgresRepository) ActiveByConversation(
+	ctx context.Context,
+	tenantID, conversationID string,
+) (domain.Opportunity, bool, error) {
+	if repository == nil || repository.pool == nil || tenantID == "" || conversationID == "" {
+		return domain.Opportunity{}, false, domain.ErrInvalid
+	}
+	opportunity, found, err := scanOpportunityFound(repository.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, conversation_id, service_id, stage,
+		       COALESCE(estimated_amount::text, ''), COALESCE(estimated_amount_confidence::text, ''),
+		       currency, opened_at, closed_at, created_at, updated_at
+		FROM opportunities
+		WHERE tenant_id = $1 AND conversation_id = $2
+		  AND stage NOT IN ('WON', 'LOST', 'ARCHIVED')`, tenantID, conversationID))
+	if err != nil {
+		return domain.Opportunity{}, false, mapReadError("чтение активной возможности переписки", err)
+	}
+	return opportunity, found, nil
+}
+
 // Transition блокирует агрегат, проверяет переход по актуальному этапу и в
 // одной транзакции обновляет возможность вместе с добавлением истории.
 func (repository *PostgresRepository) Transition(

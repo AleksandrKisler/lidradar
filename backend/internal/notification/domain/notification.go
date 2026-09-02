@@ -67,7 +67,7 @@ type Delivery struct {
 	Attempt                                   int
 	Status                                    DeliveryStatus
 	AvailableAt                               time.Time
-	LeaseOwner                                *string
+	LeasedBy                                  *string
 	LeaseUntil                                *time.Time
 	AttemptedAt                               *time.Time
 	ProviderMessageID                         string
@@ -99,27 +99,27 @@ func (delivery Delivery) Validate() error {
 	}
 	switch delivery.Status {
 	case DeliveryPending:
-		if delivery.LeaseOwner != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt != nil ||
+		if delivery.LeasedBy != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt != nil ||
 			delivery.ProviderMessageID != "" || delivery.FailureCode != "" {
 			return ErrInvalid
 		}
 	case DeliveryRetry:
-		if delivery.LeaseOwner != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt == nil ||
+		if delivery.LeasedBy != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt == nil ||
 			delivery.ProviderMessageID != "" || delivery.FailureCode == "" {
 			return ErrInvalid
 		}
 	case DeliveryProcessing:
-		if delivery.LeaseOwner == nil || strings.TrimSpace(*delivery.LeaseOwner) == "" || delivery.LeaseUntil == nil ||
+		if delivery.LeasedBy == nil || strings.TrimSpace(*delivery.LeasedBy) == "" || delivery.LeaseUntil == nil ||
 			delivery.AttemptedAt != nil || delivery.ProviderMessageID != "" || delivery.FailureCode != "" {
 			return ErrInvalid
 		}
 	case DeliverySucceeded:
-		if delivery.LeaseOwner != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt == nil ||
+		if delivery.LeasedBy != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt == nil ||
 			delivery.ProviderMessageID == "" || delivery.FailureCode != "" {
 			return ErrInvalid
 		}
 	case DeliveryDead:
-		if delivery.LeaseOwner != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt == nil ||
+		if delivery.LeasedBy != nil || delivery.LeaseUntil != nil || delivery.AttemptedAt == nil ||
 			delivery.ProviderMessageID != "" || delivery.FailureCode == "" {
 			return ErrInvalid
 		}

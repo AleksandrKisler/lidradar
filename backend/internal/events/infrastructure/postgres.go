@@ -50,7 +50,7 @@ func appendEvent(ctx context.Context, queryer queryRower, event domain.Event) (d
 		ON CONFLICT (id) DO NOTHING
 		RETURNING id, tenant_id, event_type, event_version, aggregate_type, aggregate_id,
 		          trace_id, data, status, available_at, attempt_count, max_attempts,
-		          lease_owner, lease_until, last_error_code, occurred_at, completed_at,
+		          leased_by, lease_until, last_error_code, occurred_at, completed_at,
 		          created_at, updated_at`,
 		event.ID, event.TenantID, event.Type, event.Version, event.AggregateType,
 		event.AggregateID, event.TraceID, string(event.Data), event.AvailableAt,
@@ -66,7 +66,7 @@ func appendEvent(ctx context.Context, queryer queryRower, event domain.Event) (d
 	persisted, err = scanEvent(queryer.QueryRow(ctx, `
 		SELECT id, tenant_id, event_type, event_version, aggregate_type, aggregate_id,
 		       trace_id, data, status, available_at, attempt_count, max_attempts,
-		       lease_owner, lease_until, last_error_code, occurred_at, completed_at,
+		       leased_by, lease_until, last_error_code, occurred_at, completed_at,
 		       created_at, updated_at,
 		       tenant_id = $2 AND event_type = $3 AND event_version = $4
 		       AND aggregate_type = $5 AND aggregate_id = $6 AND trace_id = $7
@@ -100,7 +100,7 @@ func (store *PostgresStore) Claim(
 	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, `
 		UPDATE outbox_events
-		SET status = 'DEAD', lease_owner = NULL, lease_until = NULL,
+		SET status = 'DEAD', leased_by = NULL, lease_until = NULL,
 		    last_error_code = 'LEASE_EXPIRED_MAX_ATTEMPTS', completed_at = $1, updated_at = $1
 		WHERE status = 'PROCESSING' AND lease_until <= $1 AND attempt_count >= max_attempts`, now.UTC()); err != nil {
 		return nil, mapError("завершение событий с исчерпанной арендой", err)
@@ -120,13 +120,13 @@ func (store *PostgresStore) Claim(
 		)
 		UPDATE outbox_events AS event
 		SET status = 'PROCESSING', attempt_count = event.attempt_count + 1,
-		    lease_owner = $2, lease_until = $3, updated_at = $1
+		    leased_by = $2, lease_until = $3, updated_at = $1
 		FROM candidates
 		WHERE event.id = candidates.id
 		RETURNING event.id, event.tenant_id, event.event_type, event.event_version,
 		          event.aggregate_type, event.aggregate_id, event.trace_id, event.data,
 		          event.status, event.available_at, event.attempt_count, event.max_attempts,
-		          event.lease_owner, event.lease_until, event.last_error_code,
+		          event.leased_by, event.lease_until, event.last_error_code,
 		          event.occurred_at, event.completed_at, event.created_at, event.updated_at`,
 		now.UTC(), owner, leaseUntil.UTC(), limit)
 	if err != nil {
@@ -164,9 +164,9 @@ func (store *PostgresStore) Publish(ctx context.Context, eventID, owner string, 
 	}
 	result, err := store.pool.Exec(ctx, `
 		UPDATE outbox_events
-		SET status = 'PUBLISHED', lease_owner = NULL, lease_until = NULL,
+		SET status = 'PUBLISHED', leased_by = NULL, lease_until = NULL,
 		    completed_at = $3, updated_at = $3
-		WHERE id = $1 AND status = 'PROCESSING' AND lease_owner = $2 AND lease_until > $3`,
+		WHERE id = $1 AND status = 'PROCESSING' AND leased_by = $2 AND lease_until > $3`,
 		eventID, owner, at.UTC())
 	if err != nil {
 		return mapError("публикация события", err)
@@ -192,12 +192,12 @@ func (store *PostgresStore) Fail(
 		UPDATE outbox_events
 		SET status = CASE WHEN $4 AND attempt_count < max_attempts THEN 'RETRY' ELSE 'DEAD' END,
 		    available_at = CASE WHEN $4 AND attempt_count < max_attempts THEN $5 ELSE available_at END,
-		    lease_owner = NULL,
+		    leased_by = NULL,
 		    lease_until = NULL,
 		    last_error_code = $3,
 		    completed_at = CASE WHEN $4 AND attempt_count < max_attempts THEN NULL ELSE $6 END,
 		    updated_at = $6
-		WHERE id = $1 AND status = 'PROCESSING' AND lease_owner = $2 AND lease_until > $6
+		WHERE id = $1 AND status = 'PROCESSING' AND leased_by = $2 AND lease_until > $6
 		RETURNING status`, eventID, owner, code, retryable, next.UTC(), at.UTC()).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domain.ErrLeaseLost
@@ -215,7 +215,7 @@ func scanEvent(row rowScanner, extra ...any) (domain.Event, error) {
 	values := []any{
 		&event.ID, &event.TenantID, &event.Type, &event.Version, &event.AggregateType,
 		&event.AggregateID, &event.TraceID, &event.Data, &event.Status, &event.AvailableAt,
-		&event.AttemptCount, &event.MaxAttempts, &event.LeaseOwner, &event.LeaseUntil,
+		&event.AttemptCount, &event.MaxAttempts, &event.LeasedBy, &event.LeaseUntil,
 		&event.LastErrorCode, &event.OccurredAt, &event.CompletedAt, &event.CreatedAt, &event.UpdatedAt,
 	}
 	values = append(values, extra...)

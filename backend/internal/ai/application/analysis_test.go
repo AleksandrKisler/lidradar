@@ -105,8 +105,14 @@ func TestConfidencePolicyExcludesOnlyUntrustedFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := application.TrustedFacts(r)
-	if len(got) != 2 || got[0].Type != domain.FactBookingIntent || got[1].Type != domain.FactFollowUpCandidate {
-		t.Fatalf("trusted = %#v", got)
+	applied := application.AppliedFacts(r)
+	if len(applied) != 2 || applied[0].Type != domain.FactBookingIntent || !applied[0].Trusted ||
+		applied[1].Type != domain.FactFollowUpCandidate || applied[1].Trusted {
+		t.Fatalf("applied = %#v", applied)
+	}
+	// Слабый факт сохраняется для наблюдения, но менять домен может только сильный.
+	trusted := application.TrustedFacts(r)
+	if len(trusted) != 1 || trusted[0].Type != domain.FactBookingIntent {
+		t.Fatalf("trusted = %#v", trusted)
 	}
 }

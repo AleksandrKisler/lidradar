@@ -131,6 +131,8 @@ func handle(w http.ResponseWriter, request *http.Request, err error) bool {
 		writeError(w, request, http.StatusForbidden, "FORBIDDEN", "недостаточно прав")
 	case errors.Is(err, application.ErrNotFound):
 		writeError(w, request, http.StatusNotFound, "NOT_FOUND", "объект не найден")
+	case errors.Is(err, application.ErrRecoveredAlreadyAttributed):
+		writeError(w, request, http.StatusConflict, "RECOVERED_ALREADY_ATTRIBUTED", "у возможности уже есть атрибуция RECOVERED; последующие события подтверждаются как ORGANIC")
 	case errors.Is(err, application.ErrConflict):
 		writeError(w, request, http.StatusConflict, "IDEMPOTENCY_CONFLICT", "ключ идемпотентности уже использован для другого запроса")
 	case errors.Is(err, application.ErrInvalid), errors.Is(err, domain.ErrInvalid):

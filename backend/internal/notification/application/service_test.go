@@ -38,7 +38,7 @@ func (m *memory) ClaimDue(_ context.Context, owner string, at, leaseUntil time.T
 	for index, d := range m.deliveries {
 		if d.Status == domain.DeliveryPending && !d.AvailableAt.After(at) {
 			d.Status = domain.DeliveryProcessing
-			d.LeaseOwner, d.LeaseUntil, d.UpdatedAt = &owner, &leaseUntil, at
+			d.LeasedBy, d.LeaseUntil, d.UpdatedAt = &owner, &leaseUntil, at
 			m.deliveries[index] = d
 			due = append(due, d)
 		}

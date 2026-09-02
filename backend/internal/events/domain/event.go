@@ -51,7 +51,7 @@ type Event struct {
 	AvailableAt   time.Time       `json:"-"`
 	AttemptCount  int             `json:"-"`
 	MaxAttempts   int             `json:"-"`
-	LeaseOwner    *string         `json:"-"`
+	LeasedBy      *string         `json:"-"`
 	LeaseUntil    *time.Time      `json:"-"`
 	LastErrorCode *string         `json:"-"`
 	CompletedAt   *time.Time      `json:"-"`
@@ -94,15 +94,15 @@ func (event Event) Validate() error {
 	}
 	switch event.Status {
 	case StatusProcessing:
-		if event.LeaseOwner == nil || strings.TrimSpace(*event.LeaseOwner) == "" || event.LeaseUntil == nil || event.CompletedAt != nil {
+		if event.LeasedBy == nil || strings.TrimSpace(*event.LeasedBy) == "" || event.LeaseUntil == nil || event.CompletedAt != nil {
 			return ErrInvalid
 		}
 	case StatusPending, StatusRetry:
-		if event.LeaseOwner != nil || event.LeaseUntil != nil || event.CompletedAt != nil {
+		if event.LeasedBy != nil || event.LeaseUntil != nil || event.CompletedAt != nil {
 			return ErrInvalid
 		}
 	case StatusPublished, StatusDead:
-		if event.LeaseOwner != nil || event.LeaseUntil != nil || event.CompletedAt == nil {
+		if event.LeasedBy != nil || event.LeaseUntil != nil || event.CompletedAt == nil {
 			return ErrInvalid
 		}
 	}

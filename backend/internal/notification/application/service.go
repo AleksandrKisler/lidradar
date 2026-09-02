@@ -117,7 +117,7 @@ func (service Service) DispatchOne(ctx context.Context, owner string, lease time
 		ctx, delivery.Destination, delivery.Title, delivery.Body, delivery.NotificationID,
 	)
 	finishedAt := service.now().UTC()
-	delivery.LeaseOwner, delivery.LeaseUntil = nil, nil
+	delivery.LeasedBy, delivery.LeaseUntil = nil, nil
 	delivery.AttemptedAt = &finishedAt
 	delivery.UpdatedAt = finishedAt
 	var retry *domain.Delivery

@@ -45,7 +45,7 @@ func TestPostgresAIQueuePersistsLifecycleAndSummary(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	store := infrastructure.NewPostgresStore(pool)
 	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, "test-model-v1")
-	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(builder)
 	node, err := service.RegisterNode(ctx, tenants.A.TenantID, "AI-NODE-01", "secret-with-at-least-32-characters")
 	if err != nil {
@@ -71,14 +71,24 @@ func TestPostgresAIQueuePersistsLifecycleAndSummary(t *testing.T) {
 	if err != nil || repeated.ID != job.ID {
 		t.Fatalf("idempotent enqueue = %#v, %v", repeated, err)
 	}
-	conflictingCommand := command
-	conflictingCommand.Prompt = command.Prompt + " "
-	if _, err := service.Enqueue(ctx, conflictingCommand); !errors.Is(err, application.ErrConflict) {
-		t.Fatalf("conflicting enqueue error = %v", err)
+	// Пока задание ожидает, обновлённая инструкция того же снимка заменяет его
+	// содержимое (LR-BE-RM-006); после захвата тот же снимок с другой
+	// инструкцией уже конфликт: узел получил исходную инструкцию.
+	refreshedCommand := command
+	refreshedCommand.Prompt = command.Prompt + " "
+	refreshed, err := service.Enqueue(ctx, refreshedCommand)
+	if err != nil || refreshed.ID != job.ID || refreshed.Prompt != refreshedCommand.Prompt {
+		t.Fatalf("refreshed enqueue = %#v, %v", refreshed, err)
+	}
+	if _, err := service.Enqueue(ctx, command); err != nil {
+		t.Fatal(err)
 	}
 	claimed, found, err := service.Claim(ctx, node.ID, "secret-with-at-least-32-characters")
 	if err != nil || !found || claimed.ID != job.ID || claimed.Status != domain.JobLeased {
 		t.Fatalf("claim = %#v, %v, %v", claimed, found, err)
+	}
+	if _, err := service.Enqueue(ctx, refreshedCommand); !errors.Is(err, application.ErrConflict) {
+		t.Fatalf("conflicting enqueue after claim error = %v", err)
 	}
 	run, err := service.Started(ctx, node.ID, "secret-with-at-least-32-characters", job.ID)
 	if err != nil {
@@ -136,7 +146,7 @@ func TestPostgresExpiredLeaseIsReclaimedAfterDisconnect(t *testing.T) {
 	conversationID, messageID := insertAIConversation(t, pool, tenant, "Можно завтра вечером?")
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	store := infrastructure.NewPostgresStore(pool)
-	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease)
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0)
 	first, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-01", "first-secret-with-at-least-32-chars")
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +212,7 @@ func TestPostgresNodeSecretRotationAndRevocation(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	service := application.NewService(
 		infrastructure.NewPostgresStore(pool), ids.Generator{}, func() time.Time { return now }, application.DefaultLease,
-	)
+	).WithAnalysisDebounce(0)
 	oldSecret := "old-secret-with-at-least-32-characters"
 	newSecret := "new-secret-with-at-least-32-characters"
 	node, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-ROTATION", oldSecret)
@@ -243,7 +253,7 @@ func TestPostgresClaimRequiresMatchingModelVersion(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	service := application.NewService(
 		infrastructure.NewPostgresStore(pool), ids.Generator{}, func() time.Time { return now }, application.DefaultLease,
-	)
+	).WithAnalysisDebounce(0)
 	secret := "model-secret-with-at-least-32-characters"
 	node, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-MODEL", secret)
 	if err != nil {
@@ -283,7 +293,7 @@ func TestPostgresNodeCannotClaimOrLeaseAnotherTenantPrompt(t *testing.T) {
 	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	service := application.NewService(
 		infrastructure.NewPostgresStore(pool), ids.Generator{}, func() time.Time { return now }, application.DefaultLease,
-	)
+	).WithAnalysisDebounce(0)
 	secret := "tenant-bound-node-secret-with-at-least-32-characters"
 	node, err := service.RegisterNode(ctx, tenants.A.TenantID, "AI-NODE-TENANT-A", secret)
 	if err != nil {
@@ -308,8 +318,8 @@ func TestPostgresNodeCannotClaimOrLeaseAnotherTenantPrompt(t *testing.T) {
 
 	_, err = pool.Exec(ctx, `
 		UPDATE ai_jobs
-		SET status = 'LEASED', leased_by = $2, lease_until = $3
-		WHERE id = $1`, job.ID, node.ID, now.Add(time.Minute))
+		SET status = 'LEASED', leased_by = $2, lease_until = $3, leased_at = $4
+		WHERE id = $1`, job.ID, node.ID, now.Add(time.Minute), now)
 	var postgresError *pgconn.PgError
 	if !errors.As(err, &postgresError) || postgresError.Code != "23503" {
 		t.Fatalf("база разрешила межорганизационную аренду: %v", err)
@@ -335,7 +345,7 @@ func TestPostgresFinalizationAtomicallyRejectsFreshnessRace(t *testing.T) {
 		Store: postgresStore, pool: pool, tenantID: tenant.TenantID, conversationID: conversationID,
 	}
 	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, "test-model-v1")
-	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(builder)
 	secret := "freshness-secret-with-at-least-32-characters"
 	node, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-FRESHNESS", secret)
@@ -393,7 +403,7 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 	secret := "stage-14-secret-with-at-least-32-characters"
 	store := infrastructure.NewPostgresStore(pool)
 	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, modelVersion)
-	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(builder)
 	node, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-STAGE-14", secret)
 	if err != nil {
@@ -535,7 +545,7 @@ func TestPostgresFreshnessUsesLastAnalyzableMessage(t *testing.T) {
 	secret := "stage-14-media-secret-with-at-least-32-characters"
 	store := infrastructure.NewPostgresStore(pool)
 	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, modelVersion)
-	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(builder)
 	node, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-STAGE-14-MEDIA", secret)
 	if err != nil {

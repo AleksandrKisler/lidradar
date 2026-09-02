@@ -23,13 +23,20 @@ import (
 
 const DatasetVersion = "lidradar-ai-benchmark.v1"
 
+// Split — назначение случая (LR-BE-RM-024). Дообучения в проекте нет, поэтому
+// выборок две: GOLDEN защищена контрольной суммой и открывается только перед
+// сменой статуса манифеста; DEV служит для итераций инструкции.
 type Split string
 
 const (
-	SplitTrain      Split = "TRAIN"
-	SplitValidation Split = "VALIDATION"
-	SplitGolden     Split = "GOLDEN"
+	SplitGolden Split = "GOLDEN"
+	SplitDev    Split = "DEV"
 )
+
+// GoldenDigestMismatch — код отказа runner при подмене контрольной выборки.
+const GoldenDigestMismatch = "GOLDEN_DIGEST_MISMATCH"
+
+func (split Split) Valid() bool { return split == SplitGolden || split == SplitDev }
 
 type Case struct {
 	Version  string                                   `json:"version"`
@@ -113,7 +120,7 @@ func Load(r io.Reader) ([]Case, string, error) {
 		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 			return nil, "", fmt.Errorf("строка набора %d: лишние данные после JSON", line)
 		}
-		if c.Version != DatasetVersion || c.ID == "" || (c.Split != SplitTrain && c.Split != SplitValidation && c.Split != SplitGolden) || c.Expected == nil {
+		if c.Version != DatasetVersion || c.ID == "" || !c.Split.Valid() || c.Expected == nil {
 			return nil, "", fmt.Errorf("строка набора %d: неверные метаданные или отсутствует разметка", line)
 		}
 		if _, ok := seen[c.ID]; ok {
@@ -139,7 +146,7 @@ func Load(r io.Reader) ([]Case, string, error) {
 // эффект запуска проверки.
 func VerifyGolden(datasetSHA256, expectedSHA256 string) error {
 	if expectedSHA256 == "" || !strings.EqualFold(datasetSHA256, expectedSHA256) {
-		return fmt.Errorf("контрольная сумма golden-набора не совпала: получено %s", datasetSHA256)
+		return fmt.Errorf("%s: контрольная сумма golden-набора не совпала: получено %s", GoldenDigestMismatch, datasetSHA256)
 	}
 	return nil
 }

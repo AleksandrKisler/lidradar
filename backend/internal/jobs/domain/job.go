@@ -49,7 +49,7 @@ type Job struct {
 	AvailableAt   time.Time
 	AttemptCount  int
 	MaxAttempts   int
-	LeaseOwner    *string
+	LeasedBy      *string
 	LeaseUntil    *time.Time
 	LastErrorCode *string
 	CompletedAt   *time.Time
@@ -88,15 +88,15 @@ func (job Job) Validate() error {
 	}
 	switch job.Status {
 	case StatusProcessing:
-		if job.LeaseOwner == nil || strings.TrimSpace(*job.LeaseOwner) == "" || job.LeaseUntil == nil || job.CompletedAt != nil {
+		if job.LeasedBy == nil || strings.TrimSpace(*job.LeasedBy) == "" || job.LeaseUntil == nil || job.CompletedAt != nil {
 			return ErrInvalid
 		}
 	case StatusPending, StatusRetry:
-		if job.LeaseOwner != nil || job.LeaseUntil != nil || job.CompletedAt != nil {
+		if job.LeasedBy != nil || job.LeaseUntil != nil || job.CompletedAt != nil {
 			return ErrInvalid
 		}
 	case StatusSucceeded, StatusDead:
-		if job.LeaseOwner != nil || job.LeaseUntil != nil || job.CompletedAt == nil {
+		if job.LeasedBy != nil || job.LeaseUntil != nil || job.CompletedAt == nil {
 			return ErrInvalid
 		}
 	}

@@ -26,7 +26,7 @@ func (store *memoryStore) Claim(_ context.Context, owner string, now, lease time
 	}
 	store.job.Status = domain.StatusProcessing
 	store.job.AttemptCount++
-	store.job.LeaseOwner = &owner
+	store.job.LeasedBy = &owner
 	store.job.LeaseUntil = &lease
 	store.job.UpdatedAt = now
 	job := store.job

@@ -28,7 +28,7 @@ func (builder backgroundBuilder) BuildAnalysisJob(context.Context, string, strin
 func TestConversationChangedEnqueuesAIAnalysisOnce(t *testing.T) {
 	store := infrastructure.NewTestMemoryStore()
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	service := application.NewService(store, &sequenceIDs{}, func() time.Time { return now }, time.Minute)
+	service := application.NewService(store, &sequenceIDs{}, func() time.Time { return now }, time.Minute).WithAnalysisDebounce(0)
 	command := application.EnqueueCommand{
 		TenantID: "tenant", ConversationID: "conversation", Prompt: `{"task":"ANALYZE_CONVERSATION"}`,
 		BaseConversationRevision: 3, AnalysisThroughMessageID: "message",

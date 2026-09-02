@@ -12,9 +12,8 @@ import (
 )
 
 func main() {
-	trainPath := flag.String("train", "models/datasets/train_v1.jsonl", "обучающая выборка")
-	validationPath := flag.String("validation", "models/datasets/validation_v1.jsonl", "проверочная выборка")
 	goldenPath := flag.String("golden", "models/datasets/golden_v1.jsonl", "контрольная выборка")
+	devPath := flag.String("dev", "models/datasets/dev_v1.jsonl", "выборка для настройки инструкции")
 	checksumPath := flag.String("golden-checksum", "models/datasets/golden_v1.sha256", "контрольная сумма контрольной выборки")
 	flag.Parse()
 
@@ -23,9 +22,8 @@ func main() {
 		path  string
 		split benchmark.Split
 	}{
-		{*trainPath, benchmark.SplitTrain},
-		{*validationPath, benchmark.SplitValidation},
 		{*goldenPath, benchmark.SplitGolden},
+		{*devPath, benchmark.SplitDev},
 	} {
 		file, err := os.Open(item.path)
 		fatal(err)
@@ -54,8 +52,8 @@ func main() {
 	if report.Cases < 300 || report.Cases > 500 {
 		fatal(fmt.Errorf("ТЗ требует от 300 до 500 случаев, получено %d", report.Cases))
 	}
-	if report.SplitCounts[benchmark.SplitTrain] == 0 || report.SplitCounts[benchmark.SplitValidation] == 0 || report.SplitCounts[benchmark.SplitGolden] == 0 {
-		fatal(fmt.Errorf("каждая выборка должна быть непустой"))
+	if report.SplitCounts[benchmark.SplitGolden] != 400 || report.SplitCounts[benchmark.SplitDev] != 100 {
+		fatal(fmt.Errorf("канон LR-BE-RM-024 — 400 GOLDEN и 100 DEV, получено %+v", report.SplitCounts))
 	}
 	fatal(json.NewEncoder(os.Stdout).Encode(report))
 }

@@ -136,7 +136,12 @@ func run(ctx context.Context, configuration config.Config) error {
 				aiapplication.ConversationChangedEventHandler(aiService, aiBuilder),
 				riskapplication.ConversationChangedEventHandler(jobStore, generator),
 			),
-			aiapplication.AnalysisAppliedEventType:      riskapplication.AIAnalysisAppliedEventHandler(jobStore, generator),
+			aiapplication.AnalysisAppliedEventType: eventsapplication.ChainHandlers(
+				opportunityapplication.AnalysisAppliedEventHandler(
+					opportunityRepository, opportunityinfrastructure.NewPostgresSemanticFacts(pool), generator, time.Now,
+				),
+				riskapplication.AIAnalysisAppliedEventHandler(jobStore, generator),
+			),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, generator),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, generator),
 			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(

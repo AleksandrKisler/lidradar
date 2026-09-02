@@ -333,13 +333,21 @@ func (store *PostgresRadarStore) Summary(
 		return application.Summary{}, application.ErrInvalidCommand
 	}
 	arguments := []any{tenantID}
-	where := []string{"r.tenant_id = $1", "r.status IN ('OPEN', 'ACKNOWLEDGED', 'ACTED')"}
+	where := []string{"r.tenant_id = $1"}
 	appendRadarFilters(&where, &arguments, filters)
+	// `selected` применяет только запрошенные фильтры. Счётчики и незакрытые
+	// деньги дополнительно сужаются до активных рисков, а возвращённая выручка —
+	// нет: по ТЗ §39 это сумма подтверждённых событий с атрибуцией RECOVERED, и
+	// закрытие риска, ради которого деньги вернули, не должно её уменьшать.
 	query := `
-		WITH matching AS (
-			SELECT r.id AS risk_id, r.opportunity_id, r.severity
+		WITH selected AS (
+			SELECT r.id AS risk_id, r.opportunity_id, r.severity, r.status
 			FROM risk_signals AS r
 			WHERE ` + strings.Join(where, " AND ") + `
+		), matching AS (
+			SELECT risk_id, opportunity_id, severity
+			FROM selected
+			WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ACTED')
 		), counts AS (
 			SELECT count(*) AS open_risks,
 			       count(*) FILTER (WHERE severity = 'CRITICAL') AS critical_risks
@@ -354,9 +362,9 @@ func (store *PostgresRadarStore) Summary(
 			WHERE o.currency = organization.default_currency
 		), recovered_money AS (
 			SELECT COALESCE(sum(event.amount), 0)::numeric(20,2)::text AS confirmed_recovered_revenue
-			FROM matching
+			FROM selected
 			JOIN revenue_attributions AS attribution
-			  ON attribution.tenant_id = $1 AND attribution.risk_id = matching.risk_id
+			  ON attribution.tenant_id = $1 AND attribution.risk_id = selected.risk_id
 			 AND attribution.type = 'RECOVERED'
 			JOIN revenue_events AS event
 			  ON event.tenant_id = attribution.tenant_id

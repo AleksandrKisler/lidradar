@@ -45,11 +45,14 @@ type Job struct {
 	ModelVersion, PromptVersion, SchemaVersion string
 	Priority, Attempts, MaxAttempts            int
 	Status                                     JobStatus
-	ClaimedBy                                  string
+	LeasedBy                                   string
 	AvailableAt, LeaseUntil                    time.Time
-	LastErrorCode                              string
-	CompletedAt                                time.Time
-	CreatedAt, UpdatedAt                       time.Time
+	// LeasedAt фиксирует момент захвата и не продлевается heartbeat: вместе с
+	// абсолютным потолком аренды он возвращает зависшее задание в очередь.
+	LeasedAt             time.Time
+	LastErrorCode        string
+	CompletedAt          time.Time
+	CreatedAt, UpdatedAt time.Time
 }
 
 type ApplicationStatus string
@@ -95,7 +98,7 @@ type ConversationSummary struct {
 	BaseConversationRevision               int64
 	AnalysisThroughMessageID, ModelVersion string
 	PromptVersion, SchemaVersion, RunID    string
-	Facts                                  []SemanticFact
+	Facts                                  []AppliedFact
 	UpdatedAt                              time.Time
 }
 
@@ -125,6 +128,15 @@ type SemanticFact struct {
 	EvidenceMessageIDs []string `json:"evidenceMessageIds"`
 	Amount             *string  `json:"amount,omitempty"`
 	Currency           string   `json:"currency,omitempty"`
+}
+
+// AppliedFact — факт, сохранённый в производной проекции. Trusted вычисляет
+// Cloud Core по уровням уверенности §59; модель это поле прислать не может,
+// потому что результат разбирается в SemanticFact без него. Ненадёжный факт
+// (trusted = false) остаётся для наблюдения и метрик, но не меняет домен.
+type AppliedFact struct {
+	SemanticFact
+	Trusted bool `json:"trusted"`
 }
 
 type AnalysisResultV1 struct {

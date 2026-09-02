@@ -67,9 +67,11 @@ func TestPostgresRevenueFormalAttributionIsolationWindowAndCurrencies(t *testing
 	); err != nil {
 		t.Fatalf("органическая выручка: %v", err)
 	}
+	// Вторая RECOVERED по той же Opportunity запрещена (LR-BE-RM-001), поэтому
+	// возврат в евро подтверждается по другой сделке той же организации.
 	if _, _, err := service.Confirm(
-		ctx, own.userID, own.tenantID, own.opportunityID, "recovered-eur",
-		recoveredCommand(own, "15.25", "EUR"),
+		ctx, own.userID, own.tenantID, otherOpportunity.opportunityID, "recovered-eur",
+		recoveredCommand(otherOpportunity, "15.25", "EUR"),
 	); err != nil {
 		t.Fatalf("возвращённая выручка EUR: %v", err)
 	}
@@ -195,9 +197,10 @@ func TestPostgresRevenueConcurrentReplayAtomicRollbackUniqueAndAppendOnly(t *tes
 	event, _ := domain.NewConfirmedEvent(
 		eventID, fixture.tenantID, fixture.opportunityID, "5", "RUB", fixture.userID, confirmedAt.Add(time.Minute),
 	)
+	// ORGANIC не задевает единственную RECOVERED-атрибуцию сделки: отказ здесь
+	// должен исходить только от коллизии аудита.
 	attribution, _ := domain.NewAttribution(
-		attributionID, event, domain.AttributionRecovered,
-		fixture.riskID, fixture.actionID, fixture.outcomeID, event.ConfirmedAt,
+		attributionID, event, domain.AttributionOrganic, "", "", "", event.ConfirmedAt,
 	)
 	_, _, err := store.Confirm(ctx, application.Confirmation{Event: event, Attribution: attribution},
 		"rollback-payment", [32]byte{7}, application.AuditRecord{
@@ -336,9 +339,9 @@ func insertRevenueFixture(
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(context.Background(), `
-		INSERT INTO actions(id,tenant_id,risk_id,actor_user_id,type,note,created_at)
-		VALUES ($1,$2,$3,$4,'MARK_CONTACTED','Связались с клиентом',$5)`,
-		actionID, tenant.TenantID, riskID, tenant.UserID, at.Add(time.Minute),
+		INSERT INTO actions(id,tenant_id,risk_id,opportunity_id,actor_user_id,type,note,created_at)
+		VALUES ($1,$2,$3,$4,$5,'MARK_CONTACTED','Связались с клиентом',$6)`,
+		actionID, tenant.TenantID, riskID, opportunityID, tenant.UserID, at.Add(time.Minute),
 	); err != nil {
 		t.Fatal(err)
 	}

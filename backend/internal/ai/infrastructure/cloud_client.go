@@ -63,7 +63,7 @@ func (client CloudClient) Claim(ctx context.Context) (domain.Job, bool, error) {
 		AnalysisThroughMessageID: response.AnalysisThroughMessageID,
 		ModelVersion:             response.ModelVersion, PromptVersion: response.PromptVersion,
 		SchemaVersion: response.SchemaVersion, Status: domain.JobLeased,
-		ClaimedBy: client.NodeID, LeaseUntil: response.LeaseUntil,
+		LeasedBy: client.NodeID, LeaseUntil: response.LeaseUntil,
 	}, true, nil
 }
 

@@ -275,6 +275,9 @@ func mapRevenueError(operation string, err error) error {
 		case "23503":
 			return application.ErrNotFound
 		case "23505":
+			if postgresError.ConstraintName == "revenue_attributions_one_recovered_per_opportunity_idx" {
+				return application.ErrRecoveredAlreadyAttributed
+			}
 			return application.ErrConflict
 		}
 	}

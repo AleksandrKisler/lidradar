@@ -8,7 +8,7 @@ import (
 
 func bookingState(t *testing.T, received string, confidence float64) ConversationState {
 	state := baseState(t, received)
-	state.OpportunityStage = "ENGAGED"
+	state.OpportunityStage = "QUALIFYING"
 	state.BookingIntent = &BookingIntentSignal{
 		Value: true, Confidence: confidence, AIRunID: "ai-run-a",
 		EvidenceMessageID: "message-a", EvidenceAt: state.LastMeaningfulAt,

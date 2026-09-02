@@ -19,6 +19,13 @@ import (
 // Location таблицы как один read-only срез. Он не изменяет чужие агрегаты.
 type PostgresStateReader struct{ pool *pgxpool.Pool }
 
+// activeOpportunityStages повторяет определение активной сделки из ТЗ §26 и
+// частичного уникального индекса `opportunities_one_active_per_conversation_idx`.
+// Проекция обязана совпадать с индексом: пока индекс держит сделку активной и не
+// даёт создать вторую, правила должны продолжать её наблюдать. Исключения
+// конкретного правила (например `BOOKED` для R3) принадлежат самому правилу.
+const activeOpportunityStages = `stage NOT IN ('WON', 'LOST', 'ARCHIVED')`
+
 func NewPostgresStateReader(pool *pgxpool.Pool) *PostgresStateReader {
 	return &PostgresStateReader{pool: pool}
 }
@@ -34,7 +41,7 @@ func (reader *PostgresStateReader) ActiveOpportunityByConversation(
 	err := reader.pool.QueryRow(ctx, `
 		SELECT id FROM opportunities
 		WHERE tenant_id = $1 AND conversation_id = $2
-		  AND stage NOT IN ('BOOKED', 'WON', 'LOST', 'ARCHIVED')`, tenantID, conversationID).Scan(&opportunityID)
+		  AND `+activeOpportunityStages, tenantID, conversationID).Scan(&opportunityID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -61,7 +68,7 @@ func (reader *PostgresStateReader) CurrentState(
 	var bookingAt *time.Time
 	err := reader.pool.QueryRow(ctx, `
 		SELECT o.tenant_id, o.id, o.stage,
-		       o.stage NOT IN ('BOOKED', 'WON', 'LOST', 'ARCHIVED'),
+		       o.`+activeOpportunityStages+`,
 		       c.location_id, l.timezone, l.response_threshold_minutes,
 		       message.id, message.sent_at, message.direction,
 		       booking.confidence, booking.ai_run_id,
@@ -109,6 +116,7 @@ func (reader *PostgresStateReader) CurrentState(
 			 AND evidence_message.provider_deleted_at IS NULL
 			WHERE fact.value ->> 'type' = 'BOOKING_INTENT'
 			  AND fact.value ->> 'value' = 'true'
+			  AND (fact.value ->> 'trusted')::boolean
 			ORDER BY evidence_message.sent_at DESC, evidence_message.id DESC
 			LIMIT 1
 		) AS booking ON TRUE

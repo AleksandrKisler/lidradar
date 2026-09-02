@@ -17,6 +17,10 @@ var (
 	ErrNotFound  = errors.New("связанный объект выручки не найден")
 	ErrInvalid   = errors.New("некорректная команда выручки")
 	ErrConflict  = errors.New("конфликт ключа идемпотентности")
+	// ErrRecoveredAlreadyAttributed: у Opportunity уже есть атрибуция RECOVERED.
+	// Ограничение держит PostgreSQL (LR-BE-RM-001); при оплате частями
+	// следующие события подтверждаются как ORGANIC.
+	ErrRecoveredAlreadyAttributed = errors.New("возвращённая выручка по этой возможности уже учтена")
 )
 
 const (

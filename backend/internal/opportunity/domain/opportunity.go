@@ -273,6 +273,9 @@ type Repository interface {
 	Create(context.Context, Opportunity, StageHistory) (Opportunity, bool, error)
 	Detail(context.Context, string, string) (Detail, bool, error)
 	Transition(context.Context, TransitionCommand) (Opportunity, bool, error)
+	// ActiveByConversation находит единственную активную сделку переписки:
+	// стадия не входит в WON, LOST, ARCHIVED (ТЗ §26).
+	ActiveByConversation(context.Context, string, string) (Opportunity, bool, error)
 }
 
 func cleanOptional(value *string) *string {

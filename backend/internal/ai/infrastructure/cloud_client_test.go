@@ -17,7 +17,7 @@ func TestCloudClientRunsSignedLifecycleWithoutPersistingLocally(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	store := infrastructure.NewTestMemoryStore()
-	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease)
+	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0)
 	secret := "secret-with-at-least-32-characters"
 	node, err := service.RegisterNode(ctx, "tenant", "home", secret)
 	if err != nil {
