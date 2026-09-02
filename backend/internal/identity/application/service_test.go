@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +33,40 @@ func (t *testTokens) NewToken() (string, string, error) {
 	t.next++
 	value := fmt.Sprintf("token-%d", t.next)
 	return value, t.HashToken(value), nil
+}
+
+type testRateBucket struct {
+	attempts  int
+	expiresAt time.Time
+}
+
+type testRateLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]testRateBucket
+}
+
+func newTestRateLimiter() *testRateLimiter {
+	return &testRateLimiter{buckets: map[string]testRateBucket{}}
+}
+
+func (limiter *testRateLimiter) Take(_ context.Context, scope, subject string, limit int, window time.Duration, now time.Time) (RateLimitDecision, error) {
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	key := scope + ":" + subject
+	bucket := limiter.buckets[key]
+	if !bucket.expiresAt.After(now) {
+		bucket = testRateBucket{expiresAt: now.Add(window)}
+	}
+	bucket.attempts++
+	limiter.buckets[key] = bucket
+	return RateLimitDecision{Allowed: bucket.attempts <= limit, ExpiresAt: bucket.expiresAt}, nil
+}
+
+func (limiter *testRateLimiter) Reset(_ context.Context, scope, subject string) error {
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	delete(limiter.buckets, scope+":"+subject)
+	return nil
 }
 func (*testTokens) HashToken(value string) string {
 	digest := sha256.Sum256([]byte(value))
@@ -96,7 +132,7 @@ func (r *memoryRepository) RevokeSession(_ context.Context, hash string, at time
 func TestRegisterAuthenticateRefreshAndLogout(t *testing.T) {
 	repository := newMemoryRepository()
 	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
-	service := NewService(repository, testPasswords{}, &testIDs{}, &testTokens{}, func() time.Time { return now }, 24*time.Hour)
+	service := NewService(repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{}, func() time.Time { return now }, 24*time.Hour)
 
 	registered, err := service.Register(context.Background(), " OWNER@Example.com ", "very-secure-password", "Owner", Client{})
 	if err != nil {
@@ -134,7 +170,7 @@ func TestRegisterAuthenticateRefreshAndLogout(t *testing.T) {
 
 func TestRegistrationConflictAndLoginErrorAreStable(t *testing.T) {
 	repository := newMemoryRepository()
-	service := NewService(repository, testPasswords{}, &testIDs{}, &testTokens{}, time.Now, time.Hour)
+	service := NewService(repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{}, time.Now, time.Hour)
 	if _, err := service.Register(context.Background(), "owner@example.com", "very-secure-password", "Owner", Client{}); err != nil {
 		t.Fatal(err)
 	}
@@ -143,5 +179,36 @@ func TestRegistrationConflictAndLoginErrorAreStable(t *testing.T) {
 	}
 	if _, err := service.Login(context.Background(), "owner@example.com", "wrong", Client{}); err != ErrInvalidCredentials {
 		t.Fatalf("Login() error = %v", err)
+	}
+}
+
+func TestLoginBruteForceIsBlockedAndSuccessfulLoginResetsAccountCounter(t *testing.T) {
+	repository := newMemoryRepository()
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	service := NewService(
+		repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{},
+		func() time.Time { return now }, time.Hour,
+	)
+	client := Client{IPAddress: "192.0.2.10"}
+	if _, err := service.Register(context.Background(), "owner@example.com", "very-secure-password", "Owner", client); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= loginAccountLimit; attempt++ {
+		if _, err := service.Login(context.Background(), "OWNER@example.com", "wrong-password", client); err != ErrInvalidCredentials {
+			t.Fatalf("attempt %d error = %v", attempt, err)
+		}
+	}
+	if _, err := service.Login(context.Background(), "owner@example.com", "very-secure-password", client); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("blocked login error = %v", err)
+	} else if retry := RateLimitRetryAfter(err); retry != loginAccountWindow {
+		t.Fatalf("retry after = %s", retry)
+	}
+
+	now = now.Add(loginAccountWindow)
+	if _, err := service.Login(context.Background(), "owner@example.com", "very-secure-password", client); err != nil {
+		t.Fatalf("login after window = %v", err)
+	}
+	if _, err := service.Login(context.Background(), "owner@example.com", "wrong-password", client); err != ErrInvalidCredentials {
+		t.Fatalf("counter was not reset after success: %v", err)
 	}
 }

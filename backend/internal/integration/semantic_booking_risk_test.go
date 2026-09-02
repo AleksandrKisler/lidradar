@@ -74,7 +74,7 @@ func TestSemanticBookingRiskFlow(t *testing.T) {
 	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).
 		WithStaleJobBuilder(aiBuilder)
 	nodeSecret := "stage-16-node-secret-with-at-least-32-characters"
-	node, err := aiService.RegisterNode(context.Background(), "AI-NODE-STAGE-16", nodeSecret)
+	node, err := aiService.RegisterNode(context.Background(), tenantID, "AI-NODE-STAGE-16", nodeSecret)
 	if err != nil {
 		t.Fatal(err)
 	}

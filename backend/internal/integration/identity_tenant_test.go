@@ -157,7 +157,8 @@ func newAPIFixture(t *testing.T) apiFixture {
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(
-		identityRepository, cryptoplatform.PasswordHasher{}, ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
+		identityRepository, identityinfrastructure.NewPostgresRateLimiter(pool), cryptoplatform.PasswordHasher{},
+		ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
 	)
 	resolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
@@ -192,6 +193,26 @@ func newAPIFixture(t *testing.T) apiFixture {
 type registeredUser struct {
 	ID     string
 	Cookie *http.Cookie
+}
+
+func TestLoginBruteForceReturns429AndRetryAfter(t *testing.T) {
+	fixture := newAPIFixture(t)
+	register(t, fixture.handler, "protected@example.com", "Protected")
+	for attempt := 1; attempt <= 5; attempt++ {
+		response := request(t, fixture.handler, http.MethodPost, "/api/v1/auth/login", `{
+			"email":"protected@example.com","password":"definitely-wrong-password"
+		}`, nil, "")
+		if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"INVALID_CREDENTIALS"`) {
+			t.Fatalf("попытка %d: статус=%d, тело=%s", attempt, response.Code, response.Body.String())
+		}
+	}
+	blocked := request(t, fixture.handler, http.MethodPost, "/api/v1/auth/login", `{
+		"email":"protected@example.com","password":"very-secure-password"
+	}`, nil, "")
+	if blocked.Code != http.StatusTooManyRequests || blocked.Header().Get("Retry-After") == "" ||
+		!strings.Contains(blocked.Body.String(), `"code":"RATE_LIMITED"`) {
+		t.Fatalf("ограниченный вход: статус=%d, Retry-After=%q, тело=%s", blocked.Code, blocked.Header().Get("Retry-After"), blocked.Body.String())
+	}
 }
 
 func TestIdentityTenantOwnerFlowPermissionsAndIsolation(t *testing.T) {

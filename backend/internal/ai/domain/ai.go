@@ -16,7 +16,7 @@ const (
 )
 
 type Node struct {
-	ID, Name                    string
+	ID, Name, TenantID          string
 	SecretHash                  [32]byte
 	Status                      NodeStatus
 	ModelVersion                string

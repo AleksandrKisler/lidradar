@@ -52,7 +52,7 @@ func setup(t *testing.T) (application.Service, *infrastructure.MemoryStore, *tim
 	store := infrastructure.NewTestMemoryStore()
 	svc := application.NewService(store, &ids{}, func() time.Time { return now }, application.DefaultLease).
 		WithStaleJobBuilder(staleBuilder{})
-	if _, err := svc.RegisterNode(context.Background(), "home", nodeSecret); err != nil {
+	if _, err := svc.RegisterNode(context.Background(), "tenant", "home", nodeSecret); err != nil {
 		t.Fatal(err)
 	}
 	return svc, store, &now
@@ -98,7 +98,7 @@ func TestAuthenticatedLifecycleAndFreshness(t *testing.T) {
 func TestExpiredLeaseIsReclaimedAndOldNodeCannotComplete(t *testing.T) {
 	s, _, now := setup(t)
 	ctx := context.Background()
-	if _, err := s.RegisterNode(ctx, "backup", backupSecret); err != nil {
+	if _, err := s.RegisterNode(ctx, "tenant", "backup", backupSecret); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Heartbeat(ctx, "1", nodeSecret, application.HeartbeatCommand{Status: domain.NodeReady, ModelVersion: "test-model", AvailableSlots: 1}); err != nil {
@@ -168,7 +168,7 @@ func TestFreshnessIsRecheckedInsideFinalization(t *testing.T) {
 	s := application.NewService(store, &ids{}, func() time.Time { return now }, application.DefaultLease).
 		WithStaleJobBuilder(staleBuilder{})
 	ctx := context.Background()
-	if _, err := s.RegisterNode(ctx, "home", nodeSecret); err != nil {
+	if _, err := s.RegisterNode(ctx, "tenant", "home", nodeSecret); err != nil {
 		t.Fatal(err)
 	}
 	job := enqueue(t, s)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -165,6 +166,11 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 		httpplatform.WriteError(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Email or password is invalid", nil)
 	case errors.Is(err, application.ErrUnauthenticated):
 		httpplatform.WriteError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required", nil)
+	case errors.Is(err, application.ErrRateLimited):
+		retryAfter := application.RateLimitRetryAfter(err)
+		seconds := int64((retryAfter + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+		httpplatform.WriteError(w, r, http.StatusTooManyRequests, "RATE_LIMITED", "Too many requests", nil)
 	default:
 		httpplatform.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error", nil)
 	}

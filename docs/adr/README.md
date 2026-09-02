@@ -39,6 +39,8 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0029: Separate notifications from delivery attempts](0029-notification-delivery-separation.md) | Accepted |
 | [0030: Use an outbound pull model for local AI](0030-local-pull-ai.md) | Accepted |
 | [0031: Validate AI output and enforce freshness](0031-ai-validation-freshness.md) | Accepted |
+| [0032: Ограничивать попытки аутентификации через PostgreSQL](0032-persistent-auth-throttling.md) | Accepted |
+| [0033: Ограничивать AI-узлы явным списком организаций](0033-ai-node-tenant-allowlist.md) | Accepted |
 
 ## Workflow
 

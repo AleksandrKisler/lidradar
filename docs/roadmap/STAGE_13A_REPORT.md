@@ -99,12 +99,24 @@ mkdir -p runtime
 LIDRADAR_ENV=development \
 LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable' \
 go run ./backend/cmd/ai-node-register \
+  --tenant-id '<uuid-организации>' \
   --name AI-NODE-01 \
   --output runtime/ai-node.json
 ```
 
 Каталог `runtime/` исключён из Git. Для домашнего узла файл переносится в
 `/srv/lidradar/config/ai-node.json` по доверенному каналу.
+
+Для узла, созданного до миграции `000015_security_boundaries`, организация
+разрешается явной локальной командой. Она не читает и не печатает секрет:
+
+```bash
+LIDRADAR_ENV=development \
+LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable' \
+go run ./backend/cmd/ai-node-manage allow-tenant \
+  --node-id '<uuid-узла>' \
+  --tenant-id '<uuid-организации>'
+```
 
 Смена секрета создаёт новый файл и немедленно переводит узел в `OFFLINE`.
 Старый секрет перестаёт работать, а незавершённая аренда естественно истекает:

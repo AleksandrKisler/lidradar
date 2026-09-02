@@ -32,14 +32,18 @@ func main() {
 	flags.SetOutput(os.Stderr)
 	nodeID := flags.String("node-id", "", "идентификатор AI-узла")
 	var output *string
+	var tenantID *string
 	if action == "rotate" {
 		output = flags.String("output", "", "новый файл реквизитов с правами 0600")
+	} else if action == "allow-tenant" {
+		tenantID = flags.String("tenant-id", "", "идентификатор разрешённой организации")
 	} else if action != "revoke" {
 		usage()
 		os.Exit(2)
 	}
 	if err := flags.Parse(os.Args[2:]); err != nil || !ids.Valid(strings.TrimSpace(*nodeID)) || flags.NArg() != 0 ||
-		(action == "rotate" && strings.TrimSpace(*output) == "") {
+		(action == "rotate" && strings.TrimSpace(*output) == "") ||
+		(action == "allow-tenant" && !ids.Valid(strings.TrimSpace(*tenantID))) {
 		if err == nil {
 			fmt.Fprintln(os.Stderr, "обязательны корректные параметры команды")
 		}
@@ -51,8 +55,27 @@ func main() {
 		if action == "rotate" {
 			return rotate(ctx, configuration, strings.TrimSpace(*nodeID), filepath.Clean(*output))
 		}
+		if action == "allow-tenant" {
+			return allowTenant(ctx, configuration, strings.TrimSpace(*nodeID), strings.TrimSpace(*tenantID))
+		}
 		return revoke(ctx, configuration, strings.TrimSpace(*nodeID))
 	}))
+}
+
+func allowTenant(ctx context.Context, configuration config.Config, nodeID, tenantID string) error {
+	service, closePool, err := nodeService(ctx, configuration)
+	if err != nil {
+		return err
+	}
+	defer closePool()
+	if err := service.AllowNodeTenant(ctx, nodeID, tenantID); err != nil {
+		return err
+	}
+	bootstrap.Logger(ctx).Info(
+		"AI node tenant allowed", "event", "ai.node.tenant_allowed",
+		"node_id", nodeID, "tenant_id", tenantID,
+	)
+	return nil
 }
 
 func rotate(ctx context.Context, configuration config.Config, nodeID, output string) error {
@@ -128,5 +151,6 @@ func nodeService(ctx context.Context, configuration config.Config) (application.
 func usage() {
 	fmt.Fprintln(os.Stderr, "использование:")
 	fmt.Fprintln(os.Stderr, "  ai-node-manage rotate --node-id <uuid> --output <новый-файл>")
+	fmt.Fprintln(os.Stderr, "  ai-node-manage allow-tenant --node-id <uuid> --tenant-id <uuid>")
 	fmt.Fprintln(os.Stderr, "  ai-node-manage revoke --node-id <uuid>")
 }

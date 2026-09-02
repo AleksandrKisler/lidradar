@@ -48,6 +48,7 @@ type IDs interface{ NewID() (string, error) }
 // PostgreSQL-адаптером; память допустима только в испытаниях.
 type Store interface {
 	RegisterNode(context.Context, domain.Node) error
+	AllowNodeTenant(context.Context, string, string, time.Time) error
 	RotateNodeSecret(context.Context, string, [32]byte, time.Time) error
 	RevokeNode(context.Context, string, time.Time) error
 	AuthenticateNode(context.Context, string, [32]byte) (domain.Node, bool, error)
@@ -111,7 +112,7 @@ func (s Service) WithStaleJobBuilder(builder StaleJobBuilder) Service {
 
 // RegisterNode returns the only plaintext association between the generated
 // node ID and the caller-provided secret. Persistence receives only SHA-256.
-func (s Service) RegisterNode(ctx context.Context, name, secret string) (domain.Node, error) {
+func (s Service) RegisterNode(ctx context.Context, tenantID, name, secret string) (domain.Node, error) {
 	if s.ids == nil {
 		return domain.Node{}, ErrInvalid
 	}
@@ -119,22 +120,33 @@ func (s Service) RegisterNode(ctx context.Context, name, secret string) (domain.
 	if err != nil {
 		return domain.Node{}, fmt.Errorf("generate AI node ID: %w", err)
 	}
-	return s.RegisterNodeWithID(ctx, id, name, secret)
+	return s.RegisterNodeWithID(ctx, id, tenantID, name, secret)
 }
 
 // RegisterNodeWithID позволяет команде регистрации сначала надёжно записать
 // единственный открытый экземпляр реквизитов, а затем создать запись в БД.
-func (s Service) RegisterNodeWithID(ctx context.Context, id, name, secret string) (domain.Node, error) {
+func (s Service) RegisterNodeWithID(ctx context.Context, id, tenantID, name, secret string) (domain.Node, error) {
 	name = strings.TrimSpace(name)
-	if s.store == nil || s.now == nil || id == "" || name == "" || len(name) > 100 || len(secret) < 32 || len(secret) > 200 {
+	tenantID = strings.TrimSpace(tenantID)
+	if s.store == nil || s.now == nil || id == "" || tenantID == "" || name == "" || len(name) > 100 || len(secret) < 32 || len(secret) > 200 {
 		return domain.Node{}, ErrInvalid
 	}
 	now := s.now().UTC()
 	node := domain.Node{
-		ID: id, Name: name, SecretHash: sha256.Sum256([]byte(secret)),
+		ID: id, Name: name, TenantID: tenantID, SecretHash: sha256.Sum256([]byte(secret)),
 		Status: domain.NodeOffline, MaxInflight: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	return node, s.store.RegisterNode(ctx, node)
+}
+
+// AllowNodeTenant явно расширяет разрешительный список узла. Команда нужна для
+// безопасного переноса существующих узлов; отсутствие назначения всегда
+// означает запрет на получение заданий.
+func (s Service) AllowNodeTenant(ctx context.Context, nodeID, tenantID string) error {
+	if s.store == nil || s.now == nil || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(tenantID) == "" {
+		return ErrInvalid
+	}
+	return s.store.AllowNodeTenant(ctx, strings.TrimSpace(nodeID), strings.TrimSpace(tenantID), s.now().UTC())
 }
 
 // RotateNodeSecret немедленно делает старый секрет недействительным. Текущая

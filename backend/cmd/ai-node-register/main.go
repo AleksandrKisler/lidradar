@@ -26,22 +26,23 @@ func main() {
 	flags := flag.NewFlagSet("ai-node-register", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	name := flags.String("name", "AI-NODE-01", "понятное имя домашнего AI-узла")
+	tenantID := flags.String("tenant-id", "", "идентификатор разрешённой организации")
 	output := flags.String("output", "", "новый файл реквизитов с правами 0600")
-	if err := flags.Parse(os.Args[1:]); err != nil || strings.TrimSpace(*output) == "" {
+	if err := flags.Parse(os.Args[1:]); err != nil || strings.TrimSpace(*output) == "" || !ids.Valid(strings.TrimSpace(*tenantID)) {
 		if err == nil {
-			fmt.Fprintln(os.Stderr, "обязателен параметр --output")
+			fmt.Fprintln(os.Stderr, "обязательны корректные --tenant-id и --output")
 		}
 		os.Exit(2)
 	}
 	ctx := context.Background()
 	os.Exit(bootstrap.Run(ctx, "lidradar-ai-node-register", os.Stderr, func(ctx context.Context, configuration config.Config) error {
-		return run(ctx, configuration, strings.TrimSpace(*name), filepath.Clean(*output))
+		return run(ctx, configuration, strings.TrimSpace(*tenantID), strings.TrimSpace(*name), filepath.Clean(*output))
 	}))
 }
 
-func run(ctx context.Context, configuration config.Config, name, output string) error {
-	if output == "." || name == "" {
-		return errors.New("AI node name and credentials output are required")
+func run(ctx context.Context, configuration config.Config, tenantID, name, output string) error {
+	if output == "." || tenantID == "" || name == "" {
+		return errors.New("AI node tenant, name and credentials output are required")
 	}
 	if _, err := os.Lstat(output); err == nil {
 		return errors.New("AI node credentials output already exists")
@@ -81,14 +82,14 @@ func run(ctx context.Context, configuration config.Config, name, output string) 
 	}
 	defer pool.Close()
 	service := application.NewService(infrastructure.NewPostgresStore(pool), generator, time.Now, application.DefaultLease)
-	node, err := service.RegisterNodeWithID(ctx, nodeID, name, secret)
+	node, err := service.RegisterNodeWithID(ctx, nodeID, tenantID, name, secret)
 	if err != nil {
 		return err
 	}
 	keepCredentials = true
 	bootstrap.Logger(ctx).Info(
 		"AI node registered", "event", "ai.node.registered",
-		"node_id", node.ID, "credentials_file", output,
+		"node_id", node.ID, "tenant_id", tenantID, "credentials_file", output,
 	)
 	return nil
 }

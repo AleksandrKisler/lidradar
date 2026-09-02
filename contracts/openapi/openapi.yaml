@@ -35,6 +35,7 @@ paths:
   /internal/v1/ai/jobs/claim:
     post:
       summary: Atomically lease one available AI job
+      description: Returns prompts only for tenants explicitly assigned to the authenticated node and only when the model version matches.
       operationId: claimAIJob
       security: [{ aiNodeBearer: [] }]
       parameters:
@@ -120,6 +121,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/auth/login:
     post:
       summary: Log in with email and password
@@ -138,6 +140,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/auth/logout:
     post:
       summary: Revoke the current session
@@ -158,6 +161,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/auth/me:
     get:
       summary: Get the authenticated user and active memberships
@@ -745,9 +749,13 @@ components:
     Forbidden: { description: Request origin is not trusted or Membership does not grant the required named permission., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     NotFound: { description: Resource does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: A unique resource already exists., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    RateLimited: { description: Authentication request limit exceeded; the response does not reveal whether an account exists., headers: { Retry-After: { $ref: '#/components/headers/RetryAfter' } }, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     AINodeUnauthorized: { description: 'AI node credentials, timestamp, nonce, body hash, or request signature are invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     AILeaseLost: { description: The AI job lease expired or belongs to another node., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   headers:
+    RetryAfter:
+      description: Seconds until the current authentication limit window expires.
+      schema: { type: integer, minimum: 1 }
     SessionCookie:
       description: HttpOnly SameSite=Strict opaque session cookie; Secure is mandatory in staging and production.
       schema: { type: string }

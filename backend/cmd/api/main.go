@@ -110,6 +110,7 @@ func run(ctx context.Context, configuration config.Config) error {
 	).WithInvalidator(riskInvalidator)
 	identityService := identityapplication.NewService(
 		identityRepository,
+		identityinfrastructure.NewPostgresRateLimiter(pool),
 		cryptoplatform.PasswordHasher{},
 		ids.Generator{},
 		identityinfrastructure.SessionTokens{},

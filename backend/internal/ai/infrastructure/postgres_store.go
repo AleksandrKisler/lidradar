@@ -28,17 +28,42 @@ func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore {
 }
 
 func (store *PostgresStore) RegisterNode(ctx context.Context, node domain.Node) error {
-	if store == nil || store.pool == nil || node.ID == "" || node.Name == "" || node.Status != domain.NodeOffline {
+	if store == nil || store.pool == nil || node.ID == "" || node.Name == "" || node.TenantID == "" || node.Status != domain.NodeOffline {
 		return application.ErrInvalid
 	}
-	_, err := store.pool.Exec(ctx, `
+	tx, err := store.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начало регистрации AI-узла: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO ai_nodes(
 			id, name, secret_digest, status, available_slots, max_inflight,
 			created_at, updated_at
 		) VALUES ($1, $2, $3, 'OFFLINE', 0, 1, $4, $4)`,
-		node.ID, node.Name, node.SecretHash[:], node.CreatedAt.UTC())
-	if err != nil {
+		node.ID, node.Name, node.SecretHash[:], node.CreatedAt.UTC()); err != nil {
 		return mapAIStoreError("регистрация AI-узла", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ai_node_tenants(node_id, tenant_id, created_at)
+		VALUES ($1, $2, $3)`, node.ID, node.TenantID, node.CreatedAt.UTC()); err != nil {
+		return mapAIStoreError("назначение организации AI-узлу", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("фиксация регистрации AI-узла: %w", err)
+	}
+	return nil
+}
+
+func (store *PostgresStore) AllowNodeTenant(ctx context.Context, nodeID, tenantID string, now time.Time) error {
+	if store == nil || store.pool == nil || nodeID == "" || tenantID == "" || now.IsZero() {
+		return application.ErrInvalid
+	}
+	if _, err := store.pool.Exec(ctx, `
+		INSERT INTO ai_node_tenants(node_id, tenant_id, created_at)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (node_id, tenant_id) DO NOTHING`, nodeID, tenantID, now.UTC()); err != nil {
+		return mapAIStoreError("разрешение организации AI-узлу", err)
 	}
 	return nil
 }
@@ -293,16 +318,23 @@ func (store *PostgresStore) Claim(
 		    error_code = 'LEASE_EXPIRED_MAX_ATTEMPTS', completed_at = $1
 		FROM ai_jobs AS job
 		WHERE run.job_id = job.id AND run.status = 'RUNNING'
+		  AND EXISTS (
+			SELECT 1 FROM ai_node_tenants AS allowed
+			WHERE allowed.node_id = $2 AND allowed.tenant_id = job.tenant_id
+		  )
 		  AND job.status IN ('LEASED', 'RUNNING')
-		  AND job.lease_until <= $1 AND job.attempts >= job.max_attempts`, now.UTC()); err != nil {
+		  AND job.lease_until <= $1 AND job.attempts >= job.max_attempts`, now.UTC(), nodeID); err != nil {
 		return domain.Job{}, false, mapAIStoreError("завершение попыток AI с исчерпанной арендой", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE ai_jobs
+		UPDATE ai_jobs AS job
 		SET status = 'DEAD', leased_by = NULL, lease_until = NULL,
 		    last_error_code = 'LEASE_EXPIRED_MAX_ATTEMPTS', completed_at = $1, updated_at = $1
-		WHERE status IN ('LEASED', 'RUNNING') AND lease_until <= $1 AND attempts >= max_attempts`,
-		now.UTC()); err != nil {
+		WHERE status IN ('LEASED', 'RUNNING') AND lease_until <= $1 AND attempts >= max_attempts
+		  AND EXISTS (
+			SELECT 1 FROM ai_node_tenants AS allowed
+			WHERE allowed.node_id = $2 AND allowed.tenant_id = job.tenant_id
+		  )`, now.UTC(), nodeID); err != nil {
 		return domain.Job{}, false, mapAIStoreError("завершение AI-заданий с исчерпанными попытками", err)
 	}
 	job, err := scanJob(tx.QueryRow(ctx, `
@@ -311,14 +343,19 @@ func (store *PostgresStore) Claim(
 		       base_conversation_revision, analysis_through_message_id,
 		       status, attempts, max_attempts, available_at, leased_by, lease_until,
 		       last_error_code, completed_at, created_at, updated_at
-		FROM ai_jobs
-		WHERE model_requirement = $2 AND attempts < max_attempts AND (
+		FROM ai_jobs AS job
+		WHERE model_requirement = $2
+		  AND EXISTS (
+			SELECT 1 FROM ai_node_tenants AS allowed
+			WHERE allowed.node_id = $3 AND allowed.tenant_id = job.tenant_id
+		  )
+		  AND attempts < max_attempts AND (
 			(status IN ('PENDING', 'RETRY') AND available_at <= $1)
 			OR (status IN ('LEASED', 'RUNNING') AND lease_until <= $1)
 		)
 		ORDER BY priority DESC, available_at, created_at, id
 		FOR UPDATE SKIP LOCKED
-		LIMIT 1`, now.UTC(), *modelVersion))
+		LIMIT 1`, now.UTC(), *modelVersion, nodeID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Job{}, false, nil
 	}

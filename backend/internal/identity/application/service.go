@@ -58,6 +58,7 @@ type MembershipLister interface {
 
 type Service struct {
 	repository domain.Repository
+	limiter    RateLimiter
 	passwords  Passwords
 	ids        IDs
 	tokens     Tokens
@@ -65,12 +66,18 @@ type Service struct {
 	sessionTTL time.Duration
 }
 
-func NewService(repository domain.Repository, passwords Passwords, ids IDs, tokens Tokens, now func() time.Time, sessionTTL time.Duration) Service {
-	return Service{repository: repository, passwords: passwords, ids: ids, tokens: tokens, now: now, sessionTTL: sessionTTL}
+func NewService(repository domain.Repository, limiter RateLimiter, passwords Passwords, ids IDs, tokens Tokens, now func() time.Time, sessionTTL time.Duration) Service {
+	return Service{repository: repository, limiter: limiter, passwords: passwords, ids: ids, tokens: tokens, now: now, sessionTTL: sessionTTL}
 }
 
 func (s Service) Register(ctx context.Context, email, password, displayName string, client Client) (Authenticated, error) {
-	if err := s.ready(); err != nil || !validPassword(password) {
+	if err := s.ready(); err != nil {
+		return Authenticated{}, ErrInvalidInput
+	}
+	if err := s.take(ctx, ScopeRegisterIP, client.IPAddress, registerIPLimit, registerIPWindow); err != nil {
+		return Authenticated{}, err
+	}
+	if !validPassword(password) {
 		return Authenticated{}, ErrInvalidInput
 	}
 	normalizedEmail, err := domain.NormalizeEmail(email)
@@ -104,7 +111,17 @@ func (s Service) Register(ctx context.Context, email, password, displayName stri
 }
 
 func (s Service) Login(ctx context.Context, email, password string, client Client) (Authenticated, error) {
-	if err := s.ready(); err != nil || password == "" || len(password) > maximumPasswordLength {
+	if err := s.ready(); err != nil {
+		return Authenticated{}, ErrInvalidCredentials
+	}
+	if err := s.take(ctx, ScopeLoginIP, client.IPAddress, loginIPLimit, loginIPWindow); err != nil {
+		return Authenticated{}, err
+	}
+	accountSubject := rateSubject(email)
+	if err := s.takeSubject(ctx, ScopeLoginAccount, accountSubject, loginAccountLimit, loginAccountWindow); err != nil {
+		return Authenticated{}, err
+	}
+	if password == "" || len(password) > maximumPasswordLength {
 		return Authenticated{}, ErrInvalidCredentials
 	}
 	normalizedEmail, err := domain.NormalizeEmail(email)
@@ -129,6 +146,9 @@ func (s Service) Login(ctx context.Context, email, password string, client Clien
 	}
 	if !valid || user.Status != domain.UserActive {
 		return Authenticated{}, ErrInvalidCredentials
+	}
+	if err := s.limiter.Reset(ctx, ScopeLoginAccount, accountSubject); err != nil {
+		return Authenticated{}, err
 	}
 	now := s.now().UTC()
 	session, token, err := s.newSession(user.ID, now, client)
@@ -163,7 +183,13 @@ func (s Service) Logout(ctx context.Context, token string) error {
 }
 
 func (s Service) Refresh(ctx context.Context, currentToken string, client Client) (Authenticated, error) {
-	if err := s.ready(); err != nil || strings.TrimSpace(currentToken) == "" {
+	if err := s.ready(); err != nil {
+		return Authenticated{}, ErrUnauthenticated
+	}
+	if err := s.take(ctx, ScopeRefreshIP, client.IPAddress, refreshIPLimit, refreshIPWindow); err != nil {
+		return Authenticated{}, err
+	}
+	if strings.TrimSpace(currentToken) == "" {
 		return Authenticated{}, ErrUnauthenticated
 	}
 	currentUser, err := s.Authenticate(ctx, currentToken)
@@ -186,10 +212,30 @@ func (s Service) Refresh(ctx context.Context, currentToken string, client Client
 }
 
 func (s Service) ready() error {
-	if s.repository == nil || s.passwords == nil || s.ids == nil || s.tokens == nil || s.now == nil || s.sessionTTL <= 0 {
+	if s.repository == nil || s.limiter == nil || s.passwords == nil || s.ids == nil || s.tokens == nil || s.now == nil || s.sessionTTL <= 0 {
 		return ErrInvalidInput
 	}
 	return nil
+}
+
+func (s Service) take(ctx context.Context, scope, value string, limit int, window time.Duration) error {
+	return s.takeSubject(ctx, scope, rateSubject(value), limit, window)
+}
+
+func (s Service) takeSubject(ctx context.Context, scope, subject string, limit int, window time.Duration) error {
+	now := s.now().UTC()
+	decision, err := s.limiter.Take(ctx, scope, subject, limit, window, now)
+	if err != nil {
+		return err
+	}
+	if decision.Allowed {
+		return nil
+	}
+	retryAfter := decision.ExpiresAt.Sub(now)
+	if retryAfter < time.Second {
+		retryAfter = time.Second
+	}
+	return RateLimitError{RetryAfter: retryAfter}
 }
 
 func (s Service) newSession(userID string, now time.Time, client Client) (domain.Session, string, error) {

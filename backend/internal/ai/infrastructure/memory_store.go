@@ -16,6 +16,7 @@ import (
 type MemoryStore struct {
 	mu        sync.Mutex
 	nodes     map[string]domain.Node
+	allowed   map[string]struct{}
 	nonces    map[string]time.Time
 	jobs      map[string]domain.Job
 	order     []string
@@ -27,7 +28,8 @@ type MemoryStore struct {
 func NewTestMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		nodes: map[string]domain.Node{}, nonces: map[string]time.Time{},
-		jobs: map[string]domain.Job{}, runs: map[string]domain.Run{},
+		allowed: map[string]struct{}{},
+		jobs:    map[string]domain.Job{}, runs: map[string]domain.Run{},
 		summaries: map[string]domain.ConversationSummary{}, snapshots: map[string]domain.ConversationSnapshot{},
 	}
 }
@@ -36,6 +38,17 @@ func (store *MemoryStore) RegisterNode(_ context.Context, node domain.Node) erro
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.nodes[node.ID] = node
+	store.allowed[nodeTenantKey(node.ID, node.TenantID)] = struct{}{}
+	return nil
+}
+
+func (store *MemoryStore) AllowNodeTenant(_ context.Context, nodeID, tenantID string, _ time.Time) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if _, ok := store.nodes[nodeID]; !ok {
+		return application.ErrNotFound
+	}
+	store.allowed[nodeTenantKey(nodeID, tenantID)] = struct{}{}
 	return nil
 }
 
@@ -164,6 +177,9 @@ func (store *MemoryStore) Claim(_ context.Context, nodeID string, now, leaseUnti
 	}
 	for _, jobID := range store.order {
 		job := store.jobs[jobID]
+		if _, allowed := store.allowed[nodeTenantKey(nodeID, job.TenantID)]; !allowed {
+			continue
+		}
 		if job.ModelVersion != node.ModelVersion {
 			continue
 		}
@@ -310,3 +326,4 @@ func (store *MemoryStore) SetConversationSnapshot(tenantID, conversationID strin
 }
 
 func snapshotKey(tenantID, conversationID string) string { return tenantID + ":" + conversationID }
+func nodeTenantKey(nodeID, tenantID string) string       { return nodeID + ":" + tenantID }

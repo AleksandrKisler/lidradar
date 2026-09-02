@@ -39,6 +39,18 @@ session and issues a replacement, while logout is idempotent. Session cookies
 are HttpOnly and SameSite=Strict. Secure is mandatory in staging and production
 and may be disabled only for local development and tests over HTTP.
 
+Все экземпляры API используют общие атомарные окна ограничения частоты в
+PostgreSQL. Регистрация допускает не более 5 запросов с одного сетевого адреса
+за час, вход — не более 20 запросов с адреса за минуту и не более 5 попыток для
+одной нормализованной учётной записи за 15 минут, обновление сеанса — не более
+60 запросов с адреса за минуту. Успешный вход сбрасывает счётчик учётной записи;
+счётчик адреса не сбрасывается. В таблице находятся только SHA-256-отпечатки.
+Отказ всегда имеет единый код `RATE_LIMITED`, статус 429 и `Retry-After`, не
+сообщая о существовании пользователя. Адрес берётся только из доверенного
+сетевого соединения `RemoteAddr`; присланные клиентом `X-Forwarded-For` и
+подобные заголовки не принимаются без отдельной настройки доверенного
+пограничного прокси.
+
 Organization is the tenant boundary. Creating an Organization and its active
 OWNER Membership is one PostgreSQL transaction. Clients obtain active
 membership summaries from `GET /api/v1/auth/me` and explicitly select a tenant
@@ -451,6 +463,14 @@ PostgreSQL.
 аренды, которыми уже владеет отправивший его узел. Задание содержит организацию,
 переписку, исходную ревизию переписки и идентификатор последнего
 проанализированного сообщения.
+
+Каждый узел имеет явный разрешительный список организаций в PostgreSQL.
+Регистрация требует исходную организацию, а дополнительное назначение возможно
+только локальной административной командой. Захват фильтрует задания по этому
+списку до чтения JSON с инструкцией. Составные внешние ключи
+`(leased_by, tenant_id)` и `(node_id, tenant_id)` запрещают межорганизационную
+аренду и запуск даже при ошибке прикладного SQL. Узел без назначений не получает
+ни одного задания.
 
 Каждый машинный POST-запрос содержит `Authorization: Bearer`,
 `X-LidRadar-Node-ID`, UTC `X-LidRadar-Timestamp`, уникальный
