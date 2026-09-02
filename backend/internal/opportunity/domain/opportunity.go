@@ -276,6 +276,21 @@ type Repository interface {
 	// ActiveByConversation находит единственную активную сделку переписки:
 	// стадия не входит в WON, LOST, ARCHIVED (ТЗ §26).
 	ActiveByConversation(context.Context, string, string) (Opportunity, bool, error)
+	// UpdateEstimate записывает извлечённую AI оценку выручки только если
+	// валюта совпадает, сделка активна и текущая оценка не надёжнее новой
+	// (LR-BE-1807). Возвращает false, если запись отклонена защитой.
+	UpdateEstimate(context.Context, EstimateUpdate) (bool, error)
+}
+
+// EstimateUpdate — извлечённая из переписки оценка потенциальной выручки.
+// Сумма и уверенность уже разобраны точной десятичной арифметикой; источник
+// AI_EXTRACTION остаётся оценкой и никогда не считается фактической выручкой.
+type EstimateUpdate struct {
+	TenantID, OpportunityID string
+	Amount                  PotentialRevenue
+	Confidence              Confidence
+	Currency                string
+	At                      time.Time
 }
 
 func cleanOptional(value *string) *string {

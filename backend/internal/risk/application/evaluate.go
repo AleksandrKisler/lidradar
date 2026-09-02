@@ -44,41 +44,47 @@ func NewEvaluator(repository domain.Repository, states StateReader, policy domai
 // EvaluateDue перечитывает авторитетное состояние, применяет версионированное
 // правило, атомарно устраняет повтор и закрывает утративший силу риск.
 func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID string) (domain.Risk, bool, error) {
+	_, risk, created, err := e.Apply(ctx, tenantID, opportunityID)
+	return risk, created, err
+}
+
+// Apply выполняет то же, что EvaluateDue, и дополнительно возвращает решение
+// правила, чтобы планер мог назначить следующую проверку того же основания.
+func (e Evaluator) Apply(ctx context.Context, tenantID, opportunityID string) (domain.Decision, domain.Risk, bool, error) {
 	if tenantID == "" || opportunityID == "" || e.repository == nil || e.states == nil || e.policy == nil || e.ids == nil || e.now == nil {
-		return domain.Risk{}, false, ErrInvalidCheck
+		return domain.Decision{}, domain.Risk{}, false, ErrInvalidCheck
 	}
 	state, err := e.states.CurrentState(ctx, tenantID, opportunityID)
 	if err != nil {
-		return domain.Risk{}, false, err
+		return domain.Decision{}, domain.Risk{}, false, err
 	}
 	// Другой tenant или объект является нарушением границы, а не безопасным
 	// промахом кэша.
 	if state.TenantID != tenantID || state.OpportunityID != opportunityID {
-		return domain.Risk{}, false, ErrInvalidCheck
+		return domain.Decision{}, domain.Risk{}, false, ErrInvalidCheck
 	}
 	now := e.now().UTC()
 	decision, err := e.policy.Evaluate(state, now)
 	if err != nil {
-		return domain.Risk{}, false, err
+		return domain.Decision{}, domain.Risk{}, false, err
 	}
 	if decision.Finding == nil {
 		if !decision.Resolve {
-			return domain.Risk{}, false, nil
+			return decision, domain.Risk{}, false, nil
 		}
 		active, _, findErr := e.repository.FindActive(ctx, tenantID, opportunityID, e.policy.Type())
 		if findErr != nil {
-			return domain.Risk{}, false, findErr
+			return decision, domain.Risk{}, false, findErr
 		}
 		resolved, resolveErr := e.repository.ResolveActive(ctx, tenantID, opportunityID, e.policy.Type(), now)
 		if resolveErr == nil && resolved && e.events != nil {
 			e.events.Publish(tenantID, "risk.resolved", active.ID)
 		}
-		err = resolveErr
-		return domain.Risk{}, false, err
+		return decision, domain.Risk{}, false, resolveErr
 	}
 	riskID, err := e.ids.NewID()
 	if err != nil {
-		return domain.Risk{}, false, err
+		return decision, domain.Risk{}, false, err
 	}
 	var risk domain.Risk
 	switch e.policy.Type() {
@@ -88,17 +94,19 @@ func (e Evaluator) EvaluateDue(ctx context.Context, tenantID, opportunityID stri
 		risk, err = domain.NewBookingNotConfirmed(riskID, *decision.Finding, now)
 	case domain.TypePromiseNotFulfilled:
 		risk, err = domain.NewPromiseNotFulfilled(riskID, *decision.Finding, now)
+	case domain.TypeCustomerSilentAfterPrice:
+		risk, err = domain.NewCustomerSilentAfterPrice(riskID, *decision.Finding, now)
 	default:
-		return domain.Risk{}, false, ErrInvalidCheck
+		return decision, domain.Risk{}, false, ErrInvalidCheck
 	}
 	if err != nil {
-		return domain.Risk{}, false, err
+		return decision, domain.Risk{}, false, err
 	}
 	stored, created, err := e.repository.UpsertActive(ctx, risk)
 	if err == nil && e.events != nil {
 		e.events.Publish(tenantID, "risk.changed", stored.ID)
 	}
-	return stored, created, err
+	return decision, stored, created, err
 }
 
 // DueAt вычисляет срок долговечной проверки. Задание сохраняет tenant,

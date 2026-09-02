@@ -16,6 +16,12 @@ type semanticRepository struct {
 	opportunity domain.Opportunity
 	found       bool
 	commands    []domain.TransitionCommand
+	estimates   []domain.EstimateUpdate
+}
+
+func (repository *semanticRepository) UpdateEstimate(_ context.Context, update domain.EstimateUpdate) (bool, error) {
+	repository.estimates = append(repository.estimates, update)
+	return true, nil
 }
 
 func (repository *semanticRepository) Create(context.Context, domain.Opportunity, domain.StageHistory) (domain.Opportunity, bool, error) {
@@ -34,12 +40,18 @@ func (repository *semanticRepository) Transition(_ context.Context, command doma
 }
 
 type semanticFacts struct {
-	fact  application.BookingIntentFact
-	found bool
+	fact       application.BookingIntentFact
+	found      bool
+	price      application.PriceFact
+	priceFound bool
 }
 
 func (facts semanticFacts) TrustedBookingIntent(context.Context, string, string, string) (application.BookingIntentFact, bool, error) {
 	return facts.fact, facts.found, nil
+}
+
+func (facts semanticFacts) TrustedPriceMentioned(context.Context, string, string, string) (application.PriceFact, bool, error) {
+	return facts.price, facts.priceFound, nil
 }
 
 type semanticIDs struct{}
@@ -128,5 +140,62 @@ func TestAnalysisAppliedLeavesOpportunityWithoutStrongFactOrPastBooking(t *testi
 				t.Fatalf("неожиданный переход: %#v", repository.commands)
 			}
 		})
+	}
+}
+
+// LR-BE-1802/1807: названная цена переводит сделку в PRICE_SENT и записывает
+// оценку выручки только в валюте сделки и только с разбираемой суммой.
+func TestAnalysisAppliedPriceMovesToPriceSentAndGuardsEstimate(t *testing.T) {
+	for name, test := range map[string]struct {
+		price         application.PriceFact
+		wantEstimates int
+	}{
+		"цена в валюте сделки":          {price: application.PriceFact{RunID: "run-1", Confidence: "0.960", Amount: "5200", Currency: "RUB"}, wantEstimates: 1},
+		"другая валюта не выдумывается": {price: application.PriceFact{RunID: "run-1", Confidence: "0.960", Amount: "50", Currency: "EUR"}, wantEstimates: 0},
+		"слишком точная сумма":          {price: application.PriceFact{RunID: "run-1", Confidence: "0.960", Amount: "5200.123", Currency: "RUB"}, wantEstimates: 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repository := &semanticRepository{opportunity: semanticOpportunity(t, domain.StageNew), found: true}
+			handler := application.AnalysisAppliedEventHandler(
+				repository, semanticFacts{price: test.price, priceFound: true}, semanticIDs{},
+				func() time.Time { return time.Date(2026, 9, 2, 12, 0, 1, 0, time.UTC) },
+			)
+			if err := handler(context.Background(), appliedEvent(t)); err != nil {
+				t.Fatal(err)
+			}
+			if len(repository.commands) != 1 || repository.commands[0].ToStage != domain.StagePriceSent ||
+				repository.commands[0].Source != domain.SourceAI {
+				t.Fatalf("переходы = %#v", repository.commands)
+			}
+			if len(repository.estimates) != test.wantEstimates {
+				t.Fatalf("оценок выручки %d, ожидалось %d: %#v", len(repository.estimates), test.wantEstimates, repository.estimates)
+			}
+			if test.wantEstimates == 1 {
+				estimate := repository.estimates[0]
+				if estimate.Amount.String() != "5200.00" || estimate.Confidence.String() != "0.960" ||
+					estimate.Currency != "RUB" || estimate.OpportunityID != "opportunity" {
+					t.Fatalf("оценка = %#v", estimate)
+				}
+			}
+		})
+	}
+}
+
+// Цена и намерение записаться в одном анализе проходят оба этапа по порядку.
+func TestAnalysisAppliedPriceAndBookingKeepStageOrder(t *testing.T) {
+	repository := &semanticRepository{opportunity: semanticOpportunity(t, domain.StageNew), found: true}
+	handler := application.AnalysisAppliedEventHandler(
+		repository, semanticFacts{
+			price: application.PriceFact{RunID: "run-1", Confidence: "0.900", Amount: "5200", Currency: "RUB"}, priceFound: true,
+			fact: application.BookingIntentFact{RunID: "run-1", Confidence: "0.950"}, found: true,
+		},
+		semanticIDs{}, time.Now,
+	)
+	if err := handler(context.Background(), appliedEvent(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.commands) != 2 || repository.commands[0].ToStage != domain.StagePriceSent ||
+		repository.commands[1].ToStage != domain.StageBookingIntent {
+		t.Fatalf("переходы = %#v", repository.commands)
 	}
 }

@@ -49,4 +49,45 @@ func (source *PostgresSemanticFacts) TrustedBookingIntent(
 	return fact, true, nil
 }
 
+// TrustedPriceMentioned читает названную компанией цену: доверенный факт
+// PRICE_MENTIONED с суммой и валютой, доказательство — исходящее сообщение.
+func (source *PostgresSemanticFacts) TrustedPriceMentioned(
+	ctx context.Context,
+	tenantID, conversationID, runID string,
+) (application.PriceFact, bool, error) {
+	if source == nil || source.pool == nil || tenantID == "" || conversationID == "" || runID == "" {
+		return application.PriceFact{}, false, application.ErrInvalid
+	}
+	var fact application.PriceFact
+	err := source.pool.QueryRow(ctx, `
+		SELECT summary.ai_run_id::text,
+		       to_char((item.value ->> 'confidence')::numeric, 'FM0.000'),
+		       item.value ->> 'amount', item.value ->> 'currency'
+		FROM conversation_summaries AS summary
+		CROSS JOIN LATERAL jsonb_array_elements(summary.semantic_facts) AS item(value)
+		WHERE summary.tenant_id = $1 AND summary.conversation_id = $2 AND summary.ai_run_id = $3
+		  AND item.value ->> 'type' = 'PRICE_MENTIONED'
+		  AND item.value ->> 'value' = 'true'
+		  AND (item.value ->> 'trusted')::boolean
+		  AND item.value ? 'amount' AND item.value ? 'currency'
+		  AND EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements_text(item.value -> 'evidenceMessageIds') AS evidence(id)
+			JOIN messages AS message
+			  ON message.tenant_id = summary.tenant_id AND message.conversation_id = summary.conversation_id
+			 AND message.id::text = evidence.id AND message.direction = 'OUTGOING'
+			 AND message.provider_deleted_at IS NULL
+		  )
+		ORDER BY (item.value ->> 'confidence')::numeric DESC
+		LIMIT 1`, tenantID, conversationID, runID,
+	).Scan(&fact.RunID, &fact.Confidence, &fact.Amount, &fact.Currency)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return application.PriceFact{}, false, nil
+	}
+	if err != nil {
+		return application.PriceFact{}, false, fmt.Errorf("чтение факта названной цены: %w", err)
+	}
+	return fact, true, nil
+}
+
 var _ application.SemanticFactSource = (*PostgresSemanticFacts)(nil)

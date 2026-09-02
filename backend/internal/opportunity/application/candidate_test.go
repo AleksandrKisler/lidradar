@@ -32,6 +32,10 @@ func (*candidateRepository) ActiveByConversation(context.Context, string, string
 	return domain.Opportunity{}, false, nil
 }
 
+func (*candidateRepository) UpdateEstimate(context.Context, domain.EstimateUpdate) (bool, error) {
+	return false, nil
+}
+
 type candidateConversations struct {
 	snapshot conversationdomain.CandidateSnapshot
 }

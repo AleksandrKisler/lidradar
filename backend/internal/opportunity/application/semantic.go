@@ -24,10 +24,20 @@ type BookingIntentFact struct {
 	Confidence string
 }
 
-// SemanticFactSource читает производную проекцию AI. Возвращает факт только
+// PriceFact — проверенная названная компанией цена. Сумма и уверенность —
+// десятичные строки для точной арифметики; валюта — трёхбуквенный код.
+type PriceFact struct {
+	RunID      string
+	Confidence string
+	Amount     string
+	Currency   string
+}
+
+// SemanticFactSource читает производную проекцию AI. Возвращает факты только
 // для указанного run: устаревший run не должен двигать сделку.
 type SemanticFactSource interface {
 	TrustedBookingIntent(ctx context.Context, tenantID, conversationID, runID string) (BookingIntentFact, bool, error)
+	TrustedPriceMentioned(ctx context.Context, tenantID, conversationID, runID string) (PriceFact, bool, error)
 }
 
 type analysisAppliedData struct {
@@ -58,43 +68,122 @@ func AnalysisAppliedEventHandler(
 			data.BaseConversationRevision < 1 || data.AnalysisThroughMessageID == "" {
 			return jobsdomain.Permanent("INVALID_OUTBOX_PAYLOAD", errors.New("некорректное событие применённого анализа"))
 		}
-		fact, found, err := facts.TrustedBookingIntent(ctx, event.TenantID, data.ConversationID, data.RunID)
+		price, priceFound, err := facts.TrustedPriceMentioned(ctx, event.TenantID, data.ConversationID, data.RunID)
 		if err != nil {
 			return jobsdomain.Retryable("SEMANTIC_FACT_UNAVAILABLE", err)
 		}
-		if !found {
+		booking, bookingFound, err := facts.TrustedBookingIntent(ctx, event.TenantID, data.ConversationID, data.RunID)
+		if err != nil {
+			return jobsdomain.Retryable("SEMANTIC_FACT_UNAVAILABLE", err)
+		}
+		if !priceFound && !bookingFound {
 			return nil
 		}
 		opportunity, found, err := repository.ActiveByConversation(ctx, event.TenantID, data.ConversationID)
 		if err != nil {
 			return jobsdomain.Retryable("OPPORTUNITY_UNAVAILABLE", err)
 		}
-		if !found || opportunity.Stage == domain.StageBookingIntent ||
-			!opportunity.Stage.CanTransitionTo(domain.StageBookingIntent) {
+		if !found {
 			return nil
 		}
-		confidence, err := domain.ParseConfidence(fact.Confidence)
-		if err != nil {
-			return jobsdomain.Permanent("SEMANTIC_FACT_INVALID", err)
+		at := now().UTC()
+		// Цена обрабатывается раньше намерения записаться: PRICE_SENT стоит в
+		// машине этапов до BOOKING_INTENT, и обратный порядок потерял бы этап.
+		if priceFound {
+			if err := applyPrice(ctx, repository, ids, event.TenantID, opportunity, price, at); err != nil {
+				return err
+			}
+			opportunity.Stage = maxStage(opportunity.Stage, domain.StagePriceSent)
 		}
-		historyID, err := ids.NewID()
-		if err != nil {
-			return jobsdomain.Retryable("HISTORY_ID_UNAVAILABLE", err)
+		if bookingFound {
+			if err := transitionByFact(ctx, repository, ids, event.TenantID, opportunity, domain.StageBookingIntent,
+				booking.Confidence, booking.RunID, at); err != nil {
+				return err
+			}
 		}
-		runID := fact.RunID
-		_, _, err = repository.Transition(ctx, domain.TransitionCommand{
-			TenantID: event.TenantID, OpportunityID: opportunity.ID, HistoryID: historyID,
-			ToStage: domain.StageBookingIntent, Source: domain.SourceAI,
-			Confidence: &confidence, AIRunID: &runID, At: now().UTC(),
-		})
-		switch {
-		case err == nil, errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrNotFound):
-			// Сделку успели закрыть или продвинуть дальше вручную — факт устарел.
-			return nil
-		case errors.Is(err, domain.ErrInvalid):
-			return jobsdomain.Permanent("OPPORTUNITY_TRANSITION_INVALID", err)
-		default:
-			return jobsdomain.Retryable("OPPORTUNITY_TRANSITION_FAILED", err)
-		}
+		return nil
 	}
+}
+
+// applyPrice переводит сделку в PRICE_SENT и записывает оценку выручки с
+// защитой LR-BE-1807: сумма только из доверенного факта, только в валюте
+// сделки, только с разбираемой десятичной суммой и не поверх более надёжной
+// оценки. Неопределённая сумма никогда не выдумывается.
+func applyPrice(
+	ctx context.Context,
+	repository domain.Repository,
+	ids IDs,
+	tenantID string,
+	opportunity domain.Opportunity,
+	price PriceFact,
+	at time.Time,
+) error {
+	if err := transitionByFact(ctx, repository, ids, tenantID, opportunity, domain.StagePriceSent,
+		price.Confidence, price.RunID, at); err != nil {
+		return err
+	}
+	amount, amountErr := domain.ParsePotentialRevenue(price.Amount)
+	confidence, confidenceErr := domain.ParseConfidence(price.Confidence)
+	if amountErr != nil || confidenceErr != nil || price.Currency != opportunity.Currency {
+		return nil
+	}
+	_, err := repository.UpdateEstimate(ctx, domain.EstimateUpdate{
+		TenantID: tenantID, OpportunityID: opportunity.ID, Amount: amount,
+		Confidence: confidence, Currency: price.Currency, At: at,
+	})
+	switch {
+	case err == nil, errors.Is(err, domain.ErrNotFound):
+		return nil
+	case errors.Is(err, domain.ErrInvalid):
+		return jobsdomain.Permanent("OPPORTUNITY_ESTIMATE_INVALID", err)
+	default:
+		return jobsdomain.Retryable("OPPORTUNITY_ESTIMATE_FAILED", err)
+	}
+}
+
+// transitionByFact выполняет переход по проверенному факту AI только вперёд и
+// идемпотентно: сделка на целевом или более позднем этапе не трогается.
+func transitionByFact(
+	ctx context.Context,
+	repository domain.Repository,
+	ids IDs,
+	tenantID string,
+	opportunity domain.Opportunity,
+	target domain.Stage,
+	rawConfidence, runID string,
+	at time.Time,
+) error {
+	if opportunity.Stage == target || !opportunity.Stage.CanTransitionTo(target) {
+		return nil
+	}
+	confidence, err := domain.ParseConfidence(rawConfidence)
+	if err != nil {
+		return jobsdomain.Permanent("SEMANTIC_FACT_INVALID", err)
+	}
+	historyID, err := ids.NewID()
+	if err != nil {
+		return jobsdomain.Retryable("HISTORY_ID_UNAVAILABLE", err)
+	}
+	_, _, err = repository.Transition(ctx, domain.TransitionCommand{
+		TenantID: tenantID, OpportunityID: opportunity.ID, HistoryID: historyID,
+		ToStage: target, Source: domain.SourceAI,
+		Confidence: &confidence, AIRunID: &runID, At: at,
+	})
+	switch {
+	case err == nil, errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrNotFound):
+		// Сделку успели закрыть или продвинуть дальше вручную — факт устарел.
+		return nil
+	case errors.Is(err, domain.ErrInvalid):
+		return jobsdomain.Permanent("OPPORTUNITY_TRANSITION_INVALID", err)
+	default:
+		return jobsdomain.Retryable("OPPORTUNITY_TRANSITION_FAILED", err)
+	}
+}
+
+// maxStage возвращает более поздний из двух активных этапов.
+func maxStage(current, candidate domain.Stage) domain.Stage {
+	if current.CanTransitionTo(candidate) && current != candidate {
+		return candidate
+	}
+	return current
 }

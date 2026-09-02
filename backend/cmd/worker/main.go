@@ -105,6 +105,13 @@ func run(ctx context.Context, configuration config.Config) error {
 	promisePlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, promiseEvaluator, promisePolicy, generator, time.Now,
 	)
+	pricePolicy := riskdomain.CustomerSilentAfterPricePolicy{}
+	priceEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, pricePolicy, generator, time.Now,
+	).WithInvalidator(riskInvalidator)
+	pricePlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, priceEvaluator, pricePolicy, generator, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	var notificationTransport notificationapplication.Transport
 	var controlTransport notificationinfrastructure.TelegramControlTransport
@@ -162,10 +169,11 @@ func run(ctx context.Context, configuration config.Config) error {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner),
-			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
-			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingEvaluator),
-			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promiseEvaluator),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner),
+			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskPlanner),
+			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingPlanner),
+			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
+			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)

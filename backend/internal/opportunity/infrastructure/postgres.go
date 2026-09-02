@@ -110,6 +110,27 @@ func (repository *PostgresRepository) ActiveByConversation(
 	return opportunity, found, nil
 }
 
+func (repository *PostgresRepository) UpdateEstimate(ctx context.Context, update domain.EstimateUpdate) (bool, error) {
+	if repository == nil || repository.pool == nil || update.TenantID == "" || update.OpportunityID == "" ||
+		len(update.Currency) != 3 || update.At.IsZero() {
+		return false, domain.ErrInvalid
+	}
+	result, err := repository.pool.Exec(ctx, `
+		UPDATE opportunities
+		SET estimated_amount = $3::numeric, estimated_amount_confidence = $4::numeric, updated_at = $5
+		WHERE tenant_id = $1 AND id = $2
+		  AND currency = $6
+		  AND stage NOT IN ('WON', 'LOST', 'ARCHIVED')
+		  AND (estimated_amount IS NULL OR estimated_amount_confidence IS NULL
+		       OR estimated_amount_confidence <= $4::numeric)`,
+		update.TenantID, update.OpportunityID, update.Amount.String(), update.Confidence.String(),
+		update.At.UTC(), update.Currency)
+	if err != nil {
+		return false, mapPostgresError("обновление оценки выручки", err)
+	}
+	return result.RowsAffected() == 1, nil
+}
+
 // Transition блокирует агрегат, проверяет переход по актуальному этапу и в
 // одной транзакции обновляет возможность вместе с добавлением истории.
 func (repository *PostgresRepository) Transition(

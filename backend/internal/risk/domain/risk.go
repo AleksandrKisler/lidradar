@@ -13,15 +13,16 @@ import (
 type Type string
 
 const (
-	TypeNoResponse          Type = "NO_RESPONSE"
-	TypeBookingNotConfirmed Type = "BOOKING_NOT_CONFIRMED"
-	TypePromiseNotFulfilled Type = "PROMISE_NOT_FULFILLED"
+	TypeNoResponse               Type = "NO_RESPONSE"
+	TypeBookingNotConfirmed      Type = "BOOKING_NOT_CONFIRMED"
+	TypePromiseNotFulfilled      Type = "PROMISE_NOT_FULFILLED"
+	TypeCustomerSilentAfterPrice Type = "CUSTOMER_SILENT_AFTER_PRICE"
 )
 
 // SupportedType сообщает, реализовано ли правило для типа риска.
 func SupportedType(riskType Type) bool {
 	switch riskType {
-	case TypeNoResponse, TypeBookingNotConfirmed, TypePromiseNotFulfilled:
+	case TypeNoResponse, TypeBookingNotConfirmed, TypePromiseNotFulfilled, TypeCustomerSilentAfterPrice:
 		return true
 	default:
 		return false
@@ -99,6 +100,12 @@ func NewBookingNotConfirmed(id string, finding Finding, now time.Time) (Risk, er
 // обязательства приходит от AI, поэтому источник всегда HYBRID.
 func NewPromiseNotFulfilled(id string, finding Finding, now time.Time) (Risk, error) {
 	return newRisk(id, TypePromiseNotFulfilled, finding, now)
+}
+
+// NewCustomerSilentAfterPrice создаёт риск молчания клиента после цены.
+// Источник RULE — этап PRICE_SENT, HYBRID — факт PRICE_MENTIONED от AI.
+func NewCustomerSilentAfterPrice(id string, finding Finding, now time.Time) (Risk, error) {
+	return newRisk(id, TypeCustomerSilentAfterPrice, finding, now)
 }
 
 func newRisk(id string, riskType Type, finding Finding, now time.Time) (Risk, error) {
@@ -181,13 +188,16 @@ func (r Risk) Validate() error {
 	if r.Type == TypePromiseNotFulfilled && (r.Severity != SeverityHigh || r.Source != SourceHybrid) {
 		return ErrInvalidRisk
 	}
+	if r.Type == TypeCustomerSilentAfterPrice && r.Severity != SeverityMedium && r.Severity != SeverityHigh {
+		return ErrInvalidRisk
+	}
 	switch r.Source {
 	case SourceRule:
 		if r.Confidence != nil || r.AIRunID != nil {
 			return ErrInvalidRisk
 		}
 	case SourceHybrid:
-		if (r.Type != TypeBookingNotConfirmed && r.Type != TypePromiseNotFulfilled) ||
+		if (r.Type != TypeBookingNotConfirmed && r.Type != TypePromiseNotFulfilled && r.Type != TypeCustomerSilentAfterPrice) ||
 			r.Confidence == nil || *r.Confidence < 0 || *r.Confidence > 1 ||
 			r.AIRunID == nil || strings.TrimSpace(*r.AIRunID) == "" {
 			return ErrInvalidRisk
@@ -274,6 +284,7 @@ type ActiveRiskSnapshot struct {
 	TriggerMessageID     string
 	TriggerAt            time.Time
 	OutgoingAfterTrigger bool
+	IncomingAfterTrigger bool
 }
 
 // ConversationState — свежая авторитетная проекция, читаемая при выполнении
@@ -291,6 +302,9 @@ type ConversationState struct {
 	OpportunityStage  string
 	BookingIntent     *BookingIntentSignal
 	Commitment        *CommitmentSignal
+	Price             *PriceSignal
+	LastOutgoing      *MessageRef
+	LatestOutcome     string
 	ActiveRisks       map[Type]ActiveRiskSnapshot
 }
 
@@ -324,7 +338,12 @@ type Decision struct {
 	Finding          *Finding
 	DueAt            time.Time
 	TriggerMessageID string
-	Resolve          bool
+	// NextDueAt назначает дополнительную проверку того же основания после
+	// наступившей (например эскалацию важности); NextCheckSuffix отличает её
+	// ключ от первой проверки.
+	NextDueAt       time.Time
+	NextCheckSuffix string
+	Resolve         bool
 }
 
 // Policy версионируется, чтобы основание сохранённого риска оставалось объяснимым.

@@ -169,9 +169,15 @@ func RiskOpenedEventHandler(service Service, recipients RecipientStore) eventsap
 		var data riskOpenedData
 		if json.Unmarshal(event.Data, &data) != nil || event.AggregateType != "risk" ||
 			event.AggregateID == "" || data.RiskID != event.AggregateID || data.OpportunityID == "" || data.LocationID == "" ||
-			!immediateRiskType(data.Type) ||
-			(data.Severity != riskdomain.SeverityHigh && data.Severity != riskdomain.SeverityCritical) {
+			!riskdomain.SupportedType(data.Type) {
 			return jobsdomain.Permanent("INVALID_RISK_OPENED_EVENT", errors.New("некорректное событие открытия риска"))
+		}
+		if !immediateRiskType(data.Type) {
+			// DIGEST-типы (ТЗ §46) доставляются политикой уведомлений этапа 20.
+			return nil
+		}
+		if data.Severity != riskdomain.SeverityHigh && data.Severity != riskdomain.SeverityCritical {
+			return jobsdomain.Permanent("INVALID_RISK_OPENED_EVENT", errors.New("неверная важность риска для немедленной доставки"))
 		}
 		userID, _, found, err := recipients.TelegramOwner(ctx, event.TenantID)
 		if err != nil {

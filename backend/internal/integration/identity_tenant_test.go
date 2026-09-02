@@ -132,6 +132,13 @@ func newAPIFixture(t *testing.T) apiFixture {
 	promisePlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, promiseEvaluator, promisePolicy, ids.Generator{}, time.Now,
 	)
+	pricePolicy := riskdomain.CustomerSilentAfterPricePolicy{}
+	priceEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, pricePolicy, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents)
+	pricePlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, priceEvaluator, pricePolicy, ids.Generator{}, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
@@ -163,10 +170,11 @@ func newAPIFixture(t *testing.T) apiFixture {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner),
-			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskEvaluator),
-			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingEvaluator),
-			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promiseEvaluator),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner),
+			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskPlanner),
+			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingPlanner),
+			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
+			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(

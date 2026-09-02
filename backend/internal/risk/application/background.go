@@ -25,6 +25,8 @@ const (
 	BookingEvaluationJobType     = "risk.evaluate-booking-not-confirmed.v1"
 	PromiseCheckType             = "PROMISE_NOT_FULFILLED_DUE"
 	PromiseEvaluationJobType     = "risk.evaluate-promise-not-fulfilled.v1"
+	PriceCheckType               = "CUSTOMER_SILENT_AFTER_PRICE_DUE"
+	PriceEvaluationJobType       = "risk.evaluate-customer-silent-after-price.v1"
 )
 
 type refreshPayload struct {
@@ -112,7 +114,52 @@ func (planner Planner) RefreshOpportunity(ctx context.Context, tenantID, opportu
 			return err
 		}
 	}
-	if decision.DueAt.IsZero() {
+	if decision.TriggerMessageID == "" && decision.Finding == nil {
+		decision.TriggerMessageID = state.LastMeaningfulID
+	}
+	if err := planner.schedule(ctx, tenantID, opportunityID, decision, decision.DueAt, ""); err != nil {
+		return err
+	}
+	return planner.scheduleNext(ctx, tenantID, opportunityID, decision)
+}
+
+// Evaluate выполняет наступившую проверку и планирует следующую проверку того
+// же основания, если правило назначило её (например эскалацию важности).
+func (planner Planner) Evaluate(ctx context.Context, tenantID, opportunityID string) error {
+	if planner.scheduler == nil || planner.policy == nil || planner.ids == nil || planner.now == nil {
+		return ErrInvalidCheck
+	}
+	decision, _, _, err := planner.evaluator.Apply(ctx, tenantID, opportunityID)
+	if err != nil {
+		return err
+	}
+	return planner.scheduleNext(ctx, tenantID, opportunityID, decision)
+}
+
+func (planner Planner) scheduleNext(ctx context.Context, tenantID, opportunityID string, decision domain.Decision) error {
+	if decision.NextDueAt.IsZero() || !decision.NextDueAt.After(planner.now().UTC()) {
+		return nil
+	}
+	return planner.schedule(ctx, tenantID, opportunityID, decision, decision.NextDueAt, decision.NextCheckSuffix)
+}
+
+// schedule сохраняет долговечную проверку с ключом из Opportunity, сообщения-
+// основания, версии правила и необязательного суффикса.
+func (planner Planner) schedule(
+	ctx context.Context,
+	tenantID, opportunityID string,
+	decision domain.Decision,
+	dueAt time.Time,
+	suffix string,
+) error {
+	if dueAt.IsZero() {
+		return nil
+	}
+	triggerID := decision.TriggerMessageID
+	if decision.Finding != nil {
+		triggerID = decision.Finding.TriggerMessageID
+	}
+	if triggerID == "" {
 		return nil
 	}
 	checkID, err := planner.ids.NewID()
@@ -120,21 +167,17 @@ func (planner Planner) RefreshOpportunity(ctx context.Context, tenantID, opportu
 		return err
 	}
 	payload, _ := json.Marshal(refreshPayload{OpportunityID: opportunityID})
-	triggerID := decision.TriggerMessageID
-	if decision.Finding != nil {
-		triggerID = decision.Finding.TriggerMessageID
-	}
-	if triggerID == "" {
-		triggerID = state.LastMeaningfulID
-	}
 	dedupKey := fmt.Sprintf("opportunity:%s:message:%s:policy:%s", opportunityID, triggerID, planner.policy.Version())
+	if suffix != "" {
+		dedupKey += ":" + suffix
+	}
 	checkType, jobType, err := workTypes(planner.policy.Type())
 	if err != nil {
 		return err
 	}
 	check, err := jobsdomain.NewScheduledCheck(
 		checkID, tenantID, checkType, "opportunity", opportunityID,
-		jobType, dedupKey, payload, decision.DueAt, planner.now().UTC(),
+		jobType, dedupKey, payload, dueAt, planner.now().UTC(),
 	)
 	if err != nil {
 		return err
@@ -151,6 +194,8 @@ func workTypes(riskType domain.Type) (string, string, error) {
 		return BookingCheckType, BookingEvaluationJobType, nil
 	case domain.TypePromiseNotFulfilled:
 		return PromiseCheckType, PromiseEvaluationJobType, nil
+	case domain.TypeCustomerSilentAfterPrice:
+		return PriceCheckType, PriceEvaluationJobType, nil
 	default:
 		return "", "", ErrInvalidCheck
 	}
@@ -266,14 +311,15 @@ func RefreshPlansJobHandler(planners ...Planner) jobsapplication.Handler {
 	}
 }
 
-func EvaluationJobHandler(evaluator Evaluator) jobsapplication.Handler {
+// EvaluationJobHandler выполняет наступившую проверку через планер, чтобы
+// правило могло назначить следующую проверку того же основания.
+func EvaluationJobHandler(planner Planner) jobsapplication.Handler {
 	return func(ctx context.Context, job jobsdomain.Job) error {
 		var payload refreshPayload
 		if json.Unmarshal(job.Payload, &payload) != nil || payload.OpportunityID == "" || payload.ConversationID != "" {
 			return jobsdomain.Permanent("INVALID_JOB_PAYLOAD", errors.New("некорректное задание проверки риска"))
 		}
-		_, _, err := evaluator.EvaluateDue(ctx, job.TenantID, payload.OpportunityID)
-		return classifyRiskWork(err, "RISK_EVALUATION")
+		return classifyRiskWork(planner.Evaluate(ctx, job.TenantID, payload.OpportunityID), "RISK_EVALUATION")
 	}
 }
 
