@@ -15,8 +15,9 @@ import (
 	"lidradar/backend/platform/ids"
 )
 
-// PostgresRepository хранит логические уведомления, доставки и Telegram-
-// привязки. Все запросы, затрагивающие пользовательские данные, ограничены tenant_id.
+// PostgresRepository хранит логические уведомления, доставки, настройки
+// получателей, очередь сводок и Telegram-привязки. Все запросы, затрагивающие
+// пользовательские данные, ограничены tenant_id.
 type PostgresRepository struct{ pool *pgxpool.Pool }
 
 type DeliveryStats struct {
@@ -26,6 +27,16 @@ type DeliveryStats struct {
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
+
+const (
+	notificationColumns = `id, tenant_id, user_id, COALESCE(risk_id::text, ''), kind, dedup_key, title, body,
+		snoozed_at, created_at, updated_at`
+	deliveryColumns = `delivery.id, delivery.notification_id, delivery.tenant_id, delivery.destination,
+		delivery.title, delivery.body, delivery.kind, delivery.channel, delivery.attempt, delivery.status,
+		delivery.available_at, delivery.leased_by, delivery.lease_until,
+		delivery.attempted_at, COALESCE(delivery.provider_message_id, ''),
+		COALESCE(delivery.failure_code, ''), delivery.created_at, delivery.updated_at`
+)
 
 func (repository *PostgresRepository) DeliveryStats(ctx context.Context, at time.Time) (DeliveryStats, error) {
 	if repository == nil || repository.pool == nil || at.IsZero() {
@@ -52,10 +63,9 @@ func (repository *PostgresRepository) DeliveryStats(ctx context.Context, at time
 func (repository *PostgresRepository) Create(
 	ctx context.Context,
 	notification domain.Notification,
-	delivery domain.Delivery,
+	deliveries []domain.Delivery,
 ) (domain.Notification, bool, error) {
-	if repository == nil || repository.pool == nil || notification.Validate() != nil || delivery.Validate() != nil ||
-		delivery.TenantID != notification.TenantID || delivery.NotificationID != notification.ID || delivery.Attempt != 1 {
+	if repository == nil || repository.pool == nil || notification.Validate() != nil || !validFirstDeliveries(notification, deliveries) {
 		return domain.Notification{}, false, domain.ErrInvalid
 	}
 	tx, err := repository.pool.Begin(ctx)
@@ -63,38 +73,67 @@ func (repository *PostgresRepository) Create(
 		return domain.Notification{}, false, fmt.Errorf("начало создания уведомления: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	stored, created, err := insertNotification(ctx, tx, notification)
+	if err != nil {
+		return domain.Notification{}, false, err
+	}
+	if created {
+		for _, delivery := range deliveries {
+			if err := insertDelivery(ctx, tx, delivery); err != nil {
+				return domain.Notification{}, false, err
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Notification{}, false, fmt.Errorf("фиксация уведомления: %w", err)
+	}
+	return stored, created, nil
+}
+
+// validFirstDeliveries требует хотя бы одну первую попытку и не более одной на канал.
+func validFirstDeliveries(notification domain.Notification, deliveries []domain.Delivery) bool {
+	if len(deliveries) == 0 {
+		return false
+	}
+	seen := make(map[domain.Channel]struct{}, len(deliveries))
+	for _, delivery := range deliveries {
+		if delivery.Validate() != nil || delivery.TenantID != notification.TenantID || delivery.NotificationID != notification.ID ||
+			delivery.Attempt != 1 || delivery.Kind != notification.Kind {
+			return false
+		}
+		if _, duplicate := seen[delivery.Channel]; duplicate {
+			return false
+		}
+		seen[delivery.Channel] = struct{}{}
+	}
+	return true
+}
+
+// insertNotification сохраняет факт либо возвращает существующий с тем же ключом.
+func insertNotification(ctx context.Context, tx pgx.Tx, notification domain.Notification) (domain.Notification, bool, error) {
 	stored, err := scanNotification(tx.QueryRow(ctx, `
 		INSERT INTO notifications(
 			id, tenant_id, user_id, risk_id, kind, dedup_key, title, body, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, 'RISK_OPENED', $5, $6, $7, $8, $9)
+		) VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (tenant_id, dedup_key) DO NOTHING
-		RETURNING id, tenant_id, user_id, risk_id, dedup_key, title, body, snoozed_at, created_at, updated_at`,
-		notification.ID, notification.TenantID, notification.UserID, notification.RiskID,
+		RETURNING `+notificationColumns,
+		notification.ID, notification.TenantID, notification.UserID, notification.RiskID, notification.Kind,
 		notification.DedupKey, notification.Title, notification.Body, notification.CreatedAt, notification.UpdatedAt,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		stored, err = scanNotification(tx.QueryRow(ctx, `
-			SELECT id, tenant_id, user_id, risk_id, dedup_key, title, body, snoozed_at, created_at, updated_at
+			SELECT `+notificationColumns+`
 			FROM notifications WHERE tenant_id = $1 AND dedup_key = $2`, notification.TenantID, notification.DedupKey))
 		if err != nil {
 			return domain.Notification{}, false, mapNotificationError("чтение повторного уведомления", err)
 		}
-		if stored.RiskID != notification.RiskID {
+		if stored.RiskID != notification.RiskID || stored.Kind != notification.Kind {
 			return domain.Notification{}, false, domain.ErrInvalid
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return domain.Notification{}, false, fmt.Errorf("фиксация повторного уведомления: %w", err)
 		}
 		return stored, false, nil
 	}
 	if err != nil {
 		return domain.Notification{}, false, mapNotificationError("создание уведомления", err)
-	}
-	if err := insertDelivery(ctx, tx, delivery); err != nil {
-		return domain.Notification{}, false, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return domain.Notification{}, false, fmt.Errorf("фиксация уведомления: %w", err)
 	}
 	return stored, true, nil
 }
@@ -104,9 +143,18 @@ func (repository *PostgresRepository) ClaimDue(
 	owner string,
 	now, leaseUntil time.Time,
 	limit int,
+	channels []domain.Channel,
 ) ([]domain.Delivery, error) {
-	if repository == nil || repository.pool == nil || owner == "" || now.IsZero() || !leaseUntil.After(now) || limit < 1 || limit > 100 {
+	if repository == nil || repository.pool == nil || owner == "" || now.IsZero() || !leaseUntil.After(now) ||
+		limit < 1 || limit > 100 || len(channels) == 0 {
 		return nil, domain.ErrInvalid
+	}
+	names := make([]string, 0, len(channels))
+	for _, channel := range channels {
+		if !domain.ValidChannel(channel) {
+			return nil, domain.ErrInvalid
+		}
+		names = append(names, string(channel))
 	}
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
@@ -123,8 +171,9 @@ func (repository *PostgresRepository) ClaimDue(
 	rows, err := tx.Query(ctx, `
 		WITH candidates AS (
 			SELECT id FROM notification_deliveries
-			WHERE (status = 'PENDING' AND available_at <= $1)
-			   OR (status = 'PROCESSING' AND lease_until <= $1 AND attempt < 5)
+			WHERE ((status = 'PENDING' AND available_at <= $1)
+			   OR (status = 'PROCESSING' AND lease_until <= $1 AND attempt < 5))
+			  AND channel = ANY($5)
 			ORDER BY available_at, created_at, id
 			FOR UPDATE SKIP LOCKED
 			LIMIT $4
@@ -132,12 +181,8 @@ func (repository *PostgresRepository) ClaimDue(
 		UPDATE notification_deliveries AS delivery
 		SET status = 'PROCESSING', leased_by = $2, lease_until = $3, updated_at = $1
 		FROM candidates WHERE delivery.id = candidates.id
-		RETURNING delivery.id, delivery.notification_id, delivery.tenant_id, delivery.destination,
-		          delivery.title, delivery.body, delivery.channel, delivery.attempt, delivery.status,
-		          delivery.available_at, delivery.leased_by, delivery.lease_until,
-		          delivery.attempted_at, COALESCE(delivery.provider_message_id, ''),
-		          COALESCE(delivery.failure_code, ''), delivery.created_at, delivery.updated_at`,
-		now.UTC(), owner, leaseUntil.UTC(), limit)
+		RETURNING `+deliveryColumns,
+		now.UTC(), owner, leaseUntil.UTC(), limit, names)
 	if err != nil {
 		return nil, mapNotificationError("аренда доставок", err)
 	}
@@ -173,7 +218,7 @@ func (repository *PostgresRepository) Complete(
 	}
 	if retry != nil && (retry.Validate() != nil || delivery.Status != domain.DeliveryRetry ||
 		retry.NotificationID != delivery.NotificationID || retry.TenantID != delivery.TenantID ||
-		retry.Channel != delivery.Channel || retry.Attempt != delivery.Attempt+1) {
+		retry.Channel != delivery.Channel || retry.Kind != delivery.Kind || retry.Attempt != delivery.Attempt+1) {
 		return domain.ErrInvalid
 	}
 	tx, err := repository.pool.Begin(ctx)
@@ -224,32 +269,6 @@ func (repository *PostgresRepository) TelegramDestination(
 		return "", false, mapNotificationError("чтение Telegram-привязки", err)
 	}
 	return chatID, true, nil
-}
-
-func (repository *PostgresRepository) TelegramOwner(
-	ctx context.Context,
-	tenantID string,
-) (string, string, bool, error) {
-	if repository == nil || repository.pool == nil || tenantID == "" {
-		return "", "", false, domain.ErrInvalid
-	}
-	var userID, destination string
-	err := repository.pool.QueryRow(ctx, `
-		SELECT membership.user_id::text, link.chat_id::text
-		FROM memberships AS membership
-		JOIN telegram_user_links AS link
-		  ON link.tenant_id = membership.tenant_id AND link.user_id = membership.user_id
-		WHERE membership.tenant_id = $1 AND membership.role = 'OWNER'
-		  AND membership.status = 'ACTIVE' AND link.disabled_at IS NULL
-		ORDER BY membership.created_at, membership.id
-		LIMIT 1`, tenantID).Scan(&userID, &destination)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", false, nil
-	}
-	if err != nil {
-		return "", "", false, mapNotificationError("поиск владельца для уведомления", err)
-	}
-	return userID, destination, true, nil
 }
 
 func (repository *PostgresRepository) SaveToken(ctx context.Context, token application.LinkToken) error {
@@ -360,6 +379,8 @@ func (repository *PostgresRepository) DisableLink(
 	return result.RowsAffected() == 1, nil
 }
 
+// CallbackTarget находит получателя и риск команды. Сводка не привязана к
+// одному риску и командам не подлежит.
 func (repository *PostgresRepository) CallbackTarget(
 	ctx context.Context,
 	tenantID, notificationID, telegramUserID, chatID string,
@@ -376,7 +397,7 @@ func (repository *PostgresRepository) CallbackTarget(
 		  ON link.tenant_id = notification.tenant_id AND link.user_id = notification.user_id
 		JOIN memberships AS membership
 		  ON membership.tenant_id = notification.tenant_id AND membership.user_id = notification.user_id
-		WHERE notification.tenant_id = $1 AND notification.id = $2
+		WHERE notification.tenant_id = $1 AND notification.id = $2 AND notification.risk_id IS NOT NULL
 		  AND link.telegram_user_id = $3::bigint AND link.chat_id = $4::bigint
 		  AND link.disabled_at IS NULL AND membership.status = 'ACTIVE'`,
 		tenantID, notificationID, telegramUserID, chatID).Scan(&userID, &riskID)
@@ -461,10 +482,10 @@ func (repository *PostgresRepository) RecordCallback(
 func insertDelivery(ctx context.Context, tx pgx.Tx, delivery domain.Delivery) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO notification_deliveries(
-			id, tenant_id, notification_id, channel, destination, title, body, attempt,
+			id, tenant_id, notification_id, kind, channel, destination, title, body, attempt,
 			status, available_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		delivery.ID, delivery.TenantID, delivery.NotificationID, delivery.Channel, delivery.Destination,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		delivery.ID, delivery.TenantID, delivery.NotificationID, delivery.Kind, delivery.Channel, delivery.Destination,
 		delivery.Title, delivery.Body, delivery.Attempt, delivery.Status, delivery.AvailableAt,
 		delivery.CreatedAt, delivery.UpdatedAt)
 	if err != nil {
@@ -478,7 +499,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanNotification(row rowScanner) (domain.Notification, error) {
 	var notification domain.Notification
 	if err := row.Scan(
-		&notification.ID, &notification.TenantID, &notification.UserID, &notification.RiskID,
+		&notification.ID, &notification.TenantID, &notification.UserID, &notification.RiskID, &notification.Kind,
 		&notification.DedupKey, &notification.Title, &notification.Body, &notification.SnoozedAt,
 		&notification.CreatedAt, &notification.UpdatedAt,
 	); err != nil {
@@ -494,7 +515,7 @@ func scanDelivery(row rowScanner) (domain.Delivery, error) {
 	var delivery domain.Delivery
 	if err := row.Scan(
 		&delivery.ID, &delivery.NotificationID, &delivery.TenantID, &delivery.Destination,
-		&delivery.Title, &delivery.Body, &delivery.Channel, &delivery.Attempt, &delivery.Status,
+		&delivery.Title, &delivery.Body, &delivery.Kind, &delivery.Channel, &delivery.Attempt, &delivery.Status,
 		&delivery.AvailableAt, &delivery.LeasedBy, &delivery.LeaseUntil, &delivery.AttemptedAt,
 		&delivery.ProviderMessageID, &delivery.FailureCode, &delivery.CreatedAt, &delivery.UpdatedAt,
 	); err != nil {
@@ -521,7 +542,8 @@ func mapNotificationError(operation string, err error) error {
 
 var _ application.Store = (*PostgresRepository)(nil)
 var _ application.LinkStore = (*PostgresRepository)(nil)
-var _ application.RecipientStore = (*PostgresRepository)(nil)
 var _ application.TokenStore = (*PostgresRepository)(nil)
 var _ application.LinkManagementStore = (*PostgresRepository)(nil)
 var _ application.CallbackStore = (*PostgresRepository)(nil)
+var _ application.PolicyStore = (*PostgresRepository)(nil)
+var _ application.PreferenceStore = (*PostgresRepository)(nil)

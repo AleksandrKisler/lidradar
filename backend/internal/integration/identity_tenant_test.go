@@ -149,7 +149,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
-	)
+	).WithPolicy(notificationRepository, jobStore)
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, "integration-outbox",
 		map[string]eventsapplication.Handler{
@@ -167,9 +167,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 			),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, ids.Generator{}),
-			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(
-				notificationService, notificationRepository,
-			),
+			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(notificationService),
 		}, time.Now, eventsapplication.DefaultLease,
 	)
 	worker := jobsapplication.NewWorker(
@@ -183,6 +181,8 @@ func newAPIFixture(t *testing.T) apiFixture {
 			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
 			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
 			riskapplication.FollowUpEvaluationJobType:   riskapplication.EvaluationJobHandler(followUpPlanner),
+			notificationapplication.DigestJobType:       notificationapplication.DigestJobHandler(notificationService),
+			notificationapplication.EscalationJobType:   notificationapplication.EscalationJobHandler(notificationService),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
 	identityService := identityapplication.NewService(
@@ -194,6 +194,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),
 		notificationRepository, permissions, "LidRadarDevBot", time.Now,
 	)
+	notificationPreferences := notificationapplication.NewPreferenceService(
+		notificationRepository, permissions, ids.Generator{}, time.Now,
+	)
 	router := httpplatform.NewRouter(
 		"lidradar-api", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		platformpostgres.NewSchemaReadiness(pool),
@@ -204,7 +207,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, resolver).Router())
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, resolver).Router())
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, resolver).Router())
-	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, resolver).Router())
+	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, notificationPreferences, resolver).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, resolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())

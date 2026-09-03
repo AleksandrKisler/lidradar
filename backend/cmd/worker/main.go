@@ -21,6 +21,7 @@ import (
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
 	notificationapplication "lidradar/backend/internal/notification/application"
+	notificationdomain "lidradar/backend/internal/notification/domain"
 	notificationinfrastructure "lidradar/backend/internal/notification/infrastructure"
 	opportunityapplication "lidradar/backend/internal/opportunity/application"
 	opportunityinfrastructure "lidradar/backend/internal/opportunity/infrastructure"
@@ -138,7 +139,9 @@ func run(ctx context.Context, configuration config.Config) error {
 	}
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationTransport, generator, time.Now,
-	)
+	).WithPolicy(notificationRepository, jobStore).WithEscalation(notificationdomain.EscalationPolicy{
+		Enabled: configuration.Notifications.OwnerEscalationEnabled, After: configuration.Notifications.OwnerEscalationAfter,
+	})
 	linker := notificationapplication.NewLinker(notificationRepository, generator, time.Now)
 	callbackExecutor := notificationapplication.NewSafeCallbackExecutor(
 		notificationRepository, riskRadar, generator, time.Now,
@@ -165,9 +168,7 @@ func run(ctx context.Context, configuration config.Config) error {
 			),
 			riskapplication.OpportunityCreatedEventType: riskapplication.OpportunityEventHandler(jobStore, generator),
 			riskapplication.OpportunityStageEventType:   riskapplication.OpportunityEventHandler(jobStore, generator),
-			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(
-				notificationService, notificationRepository,
-			),
+			notificationapplication.RiskOpenedEventType: notificationapplication.RiskOpenedEventHandler(notificationService),
 		},
 		time.Now, eventsapplication.DefaultLease,
 	)
@@ -182,10 +183,17 @@ func run(ctx context.Context, configuration config.Config) error {
 			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
 			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
 			riskapplication.FollowUpEvaluationJobType:   riskapplication.EvaluationJobHandler(followUpPlanner),
+			notificationapplication.DigestJobType:       notificationapplication.DigestJobHandler(notificationService),
+			notificationapplication.EscalationJobType:   notificationapplication.EscalationJobHandler(notificationService),
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)
 	nextDiagnostics := time.Time{}
+	// In-app доставка всегда локальна; Telegram подключается только с токеном.
+	deliveryChannels := []notificationdomain.Channel{notificationdomain.ChannelInApp}
+	if telegramEnabled {
+		deliveryChannels = append(deliveryChannels, notificationdomain.ChannelTelegram)
+	}
 
 	for {
 		now := time.Now().UTC()
@@ -202,13 +210,11 @@ func run(ctx context.Context, configuration config.Config) error {
 		if processErr != nil && ctx.Err() == nil {
 			logger.Error("Ошибка фонового задания", "event", "job.failed", "error", processErr)
 		}
-		delivered := false
-		var deliveryErr error
-		if telegramEnabled {
-			delivered, deliveryErr = notificationService.DispatchOne(ctx, ownerID+":notifications", notificationapplication.DefaultDeliveryLease)
-			if deliveryErr != nil && ctx.Err() == nil {
-				logger.Error("Ошибка доставки уведомления", "event", "notification.delivery_failed", "error", deliveryErr)
-			}
+		delivered, deliveryErr := notificationService.DispatchOne(
+			ctx, ownerID+":notifications", notificationapplication.DefaultDeliveryLease, deliveryChannels...,
+		)
+		if deliveryErr != nil && ctx.Err() == nil {
+			logger.Error("Ошибка доставки уведомления", "event", "notification.delivery_failed", "error", deliveryErr)
 		}
 		if ctx.Err() != nil {
 			return nil

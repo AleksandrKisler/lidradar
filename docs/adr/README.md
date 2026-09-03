@@ -44,6 +44,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0034: Роли PostgreSQL и fail-closed контекст для RLS](0034-rls-roles-fail-closed.md) | Accepted |
 | [0035: Явная единица порога риска](0035-risk-threshold-unit.md) | Proposed |
 | [0036: Одно ожидающее AI-задание на переписку и дебаунс анализа](0036-ai-queue-single-queued-job.md) | Accepted |
+| [0037: Политика уведомлений: получатели, тихие часы и сводки](0037-notification-policy-delivery.md) | Accepted |
 
 ## Workflow
 

@@ -20,7 +20,7 @@ func TestTelegramTransportClassifiesFailures(t *testing.T) {
 			return response(tc.status, `{}`), nil
 		})}
 		transport := infrastructure.TelegramTransport{BaseURL: "https://telegram.test", BotToken: "token", Client: client}
-		_, retry, err := transport.Send(context.Background(), "chat", "title", "body", "018f0000-0000-7000-8000-000000000001")
+		_, retry, err := transport.Send(context.Background(), "chat", "title", "body", "018f0000-0000-7000-8000-000000000001", true)
 		if err == nil || retry != tc.retry {
 			t.Fatalf("status %d retry=%v err=%v", tc.status, retry, err)
 		}
@@ -47,7 +47,7 @@ func TestTelegramTransportSuccess(t *testing.T) {
 		return response(http.StatusOK, `{"ok":true,"result":{"message_id":42}}`), nil
 	})}
 	transport := infrastructure.TelegramTransport{BaseURL: "https://telegram.test", BotToken: "token", Client: client}
-	id, retry, err := transport.Send(context.Background(), "chat", "title", "body", "018f0000-0000-7000-8000-000000000001")
+	id, retry, err := transport.Send(context.Background(), "chat", "title", "body", "018f0000-0000-7000-8000-000000000001", true)
 	if err != nil || retry || id != "42" {
 		t.Fatalf("id=%q retry=%v err=%v", id, retry, err)
 	}

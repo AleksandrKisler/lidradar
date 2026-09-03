@@ -18,16 +18,20 @@ type TelegramTransport struct {
 	Client            *http.Client
 }
 
-func (t TelegramTransport) Send(ctx context.Context, destination, title, body, notificationID string) (string, bool, error) {
+// Send отправляет уведомление; кнопки управления добавляются только для
+// сообщения об одном риске, сводка приходит обычным текстом.
+func (t TelegramTransport) Send(ctx context.Context, destination, title, body, notificationID string, actions bool) (string, bool, error) {
 	if t.Client == nil || t.BaseURL == "" || t.BotToken == "" || destination == "" || notificationID == "" {
 		return "", false, ErrTelegram
 	}
-	payload := map[string]any{"chat_id": destination, "text": title + "\n\n" + body,
-		"reply_markup": map[string]any{"inline_keyboard": [][]map[string]string{
+	payload := map[string]any{"chat_id": destination, "text": title + "\n\n" + body}
+	if actions {
+		payload["reply_markup"] = map[string]any{"inline_keyboard": [][]map[string]string{
 			{{"text": "Открыть риск", "callback_data": "OPEN_RISK:" + notificationID}},
 			{{"text": "Принять в работу", "callback_data": "ACKNOWLEDGE:" + notificationID}},
 			{{"text": "Отложить", "callback_data": "SNOOZE:" + notificationID}},
-		}}}
+		}}
+	}
 	var result struct {
 		MessageID json.Number `json:"message_id"`
 	}

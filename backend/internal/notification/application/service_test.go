@@ -25,15 +25,15 @@ type memory struct {
 	deliveries   []domain.Delivery
 }
 
-func (m *memory) Create(_ context.Context, n domain.Notification, d domain.Delivery) (domain.Notification, bool, error) {
+func (m *memory) Create(_ context.Context, n domain.Notification, d []domain.Delivery) (domain.Notification, bool, error) {
 	if m.notification.DedupKey == n.DedupKey {
 		return m.notification, false, nil
 	}
 	m.notification = n
-	m.deliveries = append(m.deliveries, d)
+	m.deliveries = append(m.deliveries, d...)
 	return n, true, nil
 }
-func (m *memory) ClaimDue(_ context.Context, owner string, at, leaseUntil time.Time, _ int) ([]domain.Delivery, error) {
+func (m *memory) ClaimDue(_ context.Context, owner string, at, leaseUntil time.Time, _ int, _ []domain.Channel) ([]domain.Delivery, error) {
 	var due []domain.Delivery
 	for index, d := range m.deliveries {
 		if d.Status == domain.DeliveryPending && !d.AvailableAt.After(at) {
@@ -63,7 +63,7 @@ type transport struct {
 	retryable bool
 }
 
-func (t *transport) Send(context.Context, string, string, string, string) (string, bool, error) {
+func (t *transport) Send(context.Context, string, string, string, string, bool) (string, bool, error) {
 	t.calls++
 	if t.calls <= t.failures {
 		return "", t.retryable, errors.New("down")

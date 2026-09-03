@@ -14,44 +14,47 @@ import (
 )
 
 const (
-	environmentKey           = "LIDRADAR_ENV"
-	httpAddressKey           = "LIDRADAR_HTTP_ADDRESS"
-	databaseURLKey           = "LIDRADAR_DATABASE_URL"
-	shutdownTimeoutKey       = "LIDRADAR_SHUTDOWN_TIMEOUT"
-	databaseMaxConnsKey      = "LIDRADAR_DATABASE_MAX_CONNS"
-	databaseMinConnsKey      = "LIDRADAR_DATABASE_MIN_CONNS"
-	databaseTimeoutKey       = "LIDRADAR_DATABASE_TIMEOUT"
-	allowedOriginsKey        = "LIDRADAR_ALLOWED_ORIGINS"
-	sessionTTLKey            = "LIDRADAR_SESSION_TTL"
-	cookieSecureKey          = "LIDRADAR_COOKIE_SECURE"
-	publicBaseURLKey         = "LIDRADAR_PUBLIC_BASE_URL"
-	credentialKeyKey         = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
-	telegramTokenKey         = "LIDAR_TELEGRAM_TOKEN"
-	telegramUsernameKey      = "LIDRADAR_TELEGRAM_BOT_USERNAME"
-	aiCloudURLKey            = "LIDRADAR_AI_CLOUD_URL"
-	aiCredentialsKey         = "LIDRADAR_AI_CREDENTIALS_FILE"
-	aiProviderKey            = "LIDRADAR_AI_PROVIDER"
-	aiLlamaURLKey            = "LIDRADAR_AI_LLAMA_URL"
-	aiModelVersionKey        = "LIDRADAR_AI_MODEL_VERSION"
-	aiPollIntervalKey        = "LIDRADAR_AI_POLL_INTERVAL"
-	aiHeartbeatKey           = "LIDRADAR_AI_HEARTBEAT_INTERVAL"
-	aiHTTPTimeoutKey         = "LIDRADAR_AI_HTTP_TIMEOUT"
-	aiSignatureWindowKey     = "LIDRADAR_AI_SIGNATURE_WINDOW"
-	defaultHTTPAddress       = ":8080"
-	defaultDatabaseURL       = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
-	defaultShutdown          = 10 * time.Second
-	defaultDatabaseWait      = 5 * time.Second
-	defaultSessionTTL        = 30 * 24 * time.Hour
-	defaultDatabaseMax       = int32(10)
-	defaultDatabaseMin       = int32(1)
-	defaultTelegramBot       = "LidRadarDevBot"
-	defaultAIProvider        = "fake"
-	defaultAILlamaURL        = "http://llama-server:8080/v1/chat/completions"
-	defaultAIModel           = "lidradar-main-v1"
-	defaultAIPoll            = time.Second
-	defaultAIHeartbeat       = 10 * time.Second
-	defaultAIHTTPTimeout     = 5 * time.Minute
-	defaultAISignatureWindow = 60 * time.Second
+	environmentKey              = "LIDRADAR_ENV"
+	httpAddressKey              = "LIDRADAR_HTTP_ADDRESS"
+	databaseURLKey              = "LIDRADAR_DATABASE_URL"
+	shutdownTimeoutKey          = "LIDRADAR_SHUTDOWN_TIMEOUT"
+	databaseMaxConnsKey         = "LIDRADAR_DATABASE_MAX_CONNS"
+	databaseMinConnsKey         = "LIDRADAR_DATABASE_MIN_CONNS"
+	databaseTimeoutKey          = "LIDRADAR_DATABASE_TIMEOUT"
+	allowedOriginsKey           = "LIDRADAR_ALLOWED_ORIGINS"
+	sessionTTLKey               = "LIDRADAR_SESSION_TTL"
+	cookieSecureKey             = "LIDRADAR_COOKIE_SECURE"
+	publicBaseURLKey            = "LIDRADAR_PUBLIC_BASE_URL"
+	credentialKeyKey            = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
+	telegramTokenKey            = "LIDAR_TELEGRAM_TOKEN"
+	telegramUsernameKey         = "LIDRADAR_TELEGRAM_BOT_USERNAME"
+	ownerEscalationKey          = "LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION"
+	ownerEscalationAfterKey     = "LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION_AFTER"
+	aiCloudURLKey               = "LIDRADAR_AI_CLOUD_URL"
+	aiCredentialsKey            = "LIDRADAR_AI_CREDENTIALS_FILE"
+	aiProviderKey               = "LIDRADAR_AI_PROVIDER"
+	aiLlamaURLKey               = "LIDRADAR_AI_LLAMA_URL"
+	aiModelVersionKey           = "LIDRADAR_AI_MODEL_VERSION"
+	aiPollIntervalKey           = "LIDRADAR_AI_POLL_INTERVAL"
+	aiHeartbeatKey              = "LIDRADAR_AI_HEARTBEAT_INTERVAL"
+	aiHTTPTimeoutKey            = "LIDRADAR_AI_HTTP_TIMEOUT"
+	aiSignatureWindowKey        = "LIDRADAR_AI_SIGNATURE_WINDOW"
+	defaultHTTPAddress          = ":8080"
+	defaultDatabaseURL          = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
+	defaultShutdown             = 10 * time.Second
+	defaultDatabaseWait         = 5 * time.Second
+	defaultSessionTTL           = 30 * 24 * time.Hour
+	defaultDatabaseMax          = int32(10)
+	defaultDatabaseMin          = int32(1)
+	defaultTelegramBot          = "LidRadarDevBot"
+	defaultOwnerEscalationAfter = 30 * time.Minute
+	defaultAIProvider           = "fake"
+	defaultAILlamaURL           = "http://llama-server:8080/v1/chat/completions"
+	defaultAIModel              = "lidradar-main-v1"
+	defaultAIPoll               = time.Second
+	defaultAIHeartbeat          = 10 * time.Second
+	defaultAIHTTPTimeout        = 5 * time.Minute
+	defaultAISignatureWindow    = 60 * time.Second
 )
 
 // LookupEnv is the environment lookup contract used by Load. Keeping the
@@ -104,6 +107,10 @@ type Integrations struct {
 type Notifications struct {
 	TelegramBotToken string
 	TelegramUsername string
+	// OwnerEscalationEnabled — основа LR-BE-2010: эскалация владельцу по
+	// умолчанию выключена; OwnerEscalationAfter задаёт ожидание реакции.
+	OwnerEscalationEnabled bool
+	OwnerEscalationAfter   time.Duration
 }
 
 // AI содержит машинные настройки Cloud Core и одноразового домашнего узла.
@@ -204,6 +211,12 @@ func Load(lookup LookupEnv) (Config, error) {
 	if configuration.Auth.CookieSecure, err = boolValue(lookup, cookieSecureKey, secureDefault); err != nil {
 		return Config{}, err
 	}
+	if configuration.Notifications.OwnerEscalationEnabled, err = boolValue(lookup, ownerEscalationKey, false); err != nil {
+		return Config{}, err
+	}
+	if configuration.Notifications.OwnerEscalationAfter, err = durationValue(lookup, ownerEscalationAfterKey, defaultOwnerEscalationAfter); err != nil {
+		return Config{}, err
+	}
 
 	if configuration.Database.URL == "" && (configuration.Environment == EnvironmentDevelopment || configuration.Environment == EnvironmentTest) {
 		configuration.Database.URL = defaultDatabaseURL
@@ -253,6 +266,9 @@ func (c Config) Validate() error {
 	}
 	if c.Notifications.TelegramBotToken != "" && !telegramTokenPattern.MatchString(c.Notifications.TelegramBotToken) {
 		return fmt.Errorf("%s has invalid format", telegramTokenKey)
+	}
+	if c.Notifications.OwnerEscalationAfter <= 0 {
+		return fmt.Errorf("%s must be positive", ownerEscalationAfterKey)
 	}
 	if c.AI.Provider != "fake" && c.AI.Provider != "llama" {
 		return fmt.Errorf("%s has unsupported value", aiProviderKey)

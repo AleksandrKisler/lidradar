@@ -76,23 +76,23 @@ func TestPostgresNotificationLinkDedupLeaseAndTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, created, err := repository.Create(ctx, notification, delivery); err != nil || !created {
+	if _, created, err := repository.Create(ctx, notification, []domain.Delivery{delivery}); err != nil || !created {
 		t.Fatalf("создание уведомления: created=%v err=%v", created, err)
 	}
 	replay, _ := domain.NewNotification(
 		newID(t), pair.A.TenantID, pair.A.UserID, riskID, "Другой текст", "Не должен заменить факт", now.Add(time.Second),
 	)
 	replayDelivery, _ := domain.NewDelivery(newID(t), replay, "7001", domain.ChannelTelegram, now.Add(time.Second))
-	stored, created, err := repository.Create(ctx, replay, replayDelivery)
+	stored, created, err := repository.Create(ctx, replay, []domain.Delivery{replayDelivery})
 	if err != nil || created || stored.ID != notificationID {
 		t.Fatalf("повтор создал уведомление: stored=%s created=%v err=%v", stored.ID, created, err)
 	}
 
-	claimed, err := repository.ClaimDue(ctx, "worker-a", now, now.Add(time.Minute), 1)
+	claimed, err := repository.ClaimDue(ctx, "worker-a", now, now.Add(time.Minute), 1, []domain.Channel{domain.ChannelTelegram})
 	if err != nil || len(claimed) != 1 || claimed[0].Status != domain.DeliveryProcessing {
 		t.Fatalf("аренда доставки: %#v, %v", claimed, err)
 	}
-	secondClaim, err := repository.ClaimDue(ctx, "worker-b", now, now.Add(time.Minute), 1)
+	secondClaim, err := repository.ClaimDue(ctx, "worker-b", now, now.Add(time.Minute), 1, []domain.Channel{domain.ChannelTelegram})
 	if err != nil || len(secondClaim) != 0 {
 		t.Fatalf("двойная аренда: %#v, %v", secondClaim, err)
 	}
@@ -124,7 +124,7 @@ func TestPostgresNotificationLinkDedupLeaseAndTenantIsolation(t *testing.T) {
 
 type retryingTransport struct{}
 
-func (retryingTransport) Send(context.Context, string, string, string, string) (string, bool, error) {
+func (retryingTransport) Send(context.Context, string, string, string, string, bool) (string, bool, error) {
 	return "", true, errors.New("Telegram недоступен")
 }
 

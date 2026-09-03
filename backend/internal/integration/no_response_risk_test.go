@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	notificationdomain "lidradar/backend/internal/notification/domain"
 	"lidradar/backend/platform/ids"
 )
 
@@ -126,13 +127,13 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	if riskCount != 1 || severity != "HIGH" || status != "OPEN" || source != "RULE" || policyVersion != "no-response/v1" {
 		t.Fatalf("риск: id=%s count=%d severity=%s status=%s source=%s policy=%s", riskID, riskCount, severity, status, source, policyVersion)
 	}
-	if delivered, err := fixture.notifications.DispatchOne(context.Background(), "integration-notifications", time.Minute); err != nil || !delivered {
+	if delivered, err := fixture.notifications.DispatchOne(context.Background(), "integration-notifications", time.Minute, notificationdomain.ChannelTelegram); err != nil || !delivered {
 		t.Fatalf("доставка уведомления = %v, %v", delivered, err)
 	}
 	var notificationCount, successfulDeliveries int
 	if err := fixture.pool.QueryRow(context.Background(), `
 		SELECT count(DISTINCT notification.id),
-		       count(*) FILTER (WHERE delivery.status = 'SUCCEEDED')
+		       count(*) FILTER (WHERE delivery.status = 'SUCCEEDED' AND delivery.channel = 'TELEGRAM')
 		FROM notifications AS notification
 		JOIN notification_deliveries AS delivery ON delivery.notification_id = notification.id
 		WHERE notification.tenant_id = $1 AND notification.risk_id = $2`, tenantID, riskID).Scan(

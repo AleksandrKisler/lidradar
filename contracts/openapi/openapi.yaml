@@ -633,6 +633,43 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/notifications/preferences:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Получить личные настройки уведомлений по типам риска
+      description: Возвращает пять записей — сохранённых или действующих по умолчанию (§46). Тихие часы и время сводки считаются в часовом поясе организации (§3.7).
+      operationId: listNotificationPreferences
+      responses:
+        '200':
+          description: Настройки текущего участника выбранной организации.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferenceList' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/notifications/preferences/{riskType}:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/NotificationRiskType' }]
+    put:
+      summary: Заменить личную настройку уведомлений для типа риска
+      description: Полная замена без частичных обновлений. Совпадающие границы тихих часов отклоняются; интервал через полночь трактуется как [start, 24:00) ∪ [00:00, end).
+      operationId: putNotificationPreference
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferenceRequest' } } }
+      responses:
+        '200':
+          description: Сохранённая настройка.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreference' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      summary: Сбросить настройку типа риска к значению по умолчанию
+      operationId: resetNotificationPreference
+      responses:
+        '204': { description: Настройка удалена либо уже действовала по умолчанию. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks/{riskId}/recommendation:
     parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }]
     post:
@@ -736,6 +773,7 @@ components:
     OpportunityId: { name: opportunityId, in: path, required: true, schema: { type: string, format: uuid } }
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string, format: uuid } }
+    NotificationRiskType: { name: riskType, in: path, required: true, schema: { $ref: '#/components/schemas/RiskType' } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
     AINodeId: { name: X-LidRadar-Node-ID, in: header, required: true, schema: { type: string, format: uuid } }
     AITimestamp: { name: X-LidRadar-Timestamp, in: header, required: true, description: UTC RFC3339Nano timestamp inside the configured replay window., schema: { type: string, format: date-time } }
@@ -1210,6 +1248,42 @@ components:
       properties:
         linked: { type: boolean }
         linkedAt: { type: string, format: date-time }
+    NotificationDeliveryMode: { type: string, enum: [IMMEDIATE, DIGEST, DISABLED] }
+    ClockTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: Время суток HH:MM в часовом поясе организации. }
+    NotificationPreferenceRequest:
+      type: object
+      additionalProperties: false
+      required: [minimumSeverity, deliveryMode, inAppEnabled, telegramEnabled, quietHoursEnabled, digestTime]
+      properties:
+        minimumSeverity: { $ref: '#/components/schemas/RiskSeverity' }
+        deliveryMode: { $ref: '#/components/schemas/NotificationDeliveryMode' }
+        inAppEnabled: { type: boolean }
+        telegramEnabled: { type: boolean }
+        quietHoursEnabled: { type: boolean, description: Требует обеих границ. }
+        quietHoursStart: { oneOf: [{ $ref: '#/components/schemas/ClockTime' }, { type: 'null' }] }
+        quietHoursEnd: { oneOf: [{ $ref: '#/components/schemas/ClockTime' }, { type: 'null' }], description: 'Должна отличаться от начала; меньшее значение означает интервал через полночь.' }
+        digestTime: { $ref: '#/components/schemas/ClockTime' }
+    NotificationPreference:
+      type: object
+      required: [riskType, minimumSeverity, deliveryMode, inAppEnabled, telegramEnabled, quietHoursEnabled, digestTime, timezone, isDefault]
+      properties:
+        riskType: { $ref: '#/components/schemas/RiskType' }
+        minimumSeverity: { $ref: '#/components/schemas/RiskSeverity' }
+        deliveryMode: { $ref: '#/components/schemas/NotificationDeliveryMode' }
+        inAppEnabled: { type: boolean }
+        telegramEnabled: { type: boolean }
+        quietHoursEnabled: { type: boolean }
+        quietHoursStart: { oneOf: [{ $ref: '#/components/schemas/ClockTime' }, { type: 'null' }] }
+        quietHoursEnd: { oneOf: [{ $ref: '#/components/schemas/ClockTime' }, { type: 'null' }] }
+        digestTime: { $ref: '#/components/schemas/ClockTime' }
+        timezone: { type: string, description: 'IANA-пояс организации, в котором считаются тихие часы и сводка.' }
+        isDefault: { type: boolean, description: Строка не сохранена — действует значение по умолчанию §46. }
+        updatedAt: { type: [string, 'null'], format: date-time }
+    NotificationPreferenceList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NotificationPreference' } }
     ActionType: { type: string, enum: [OPEN_CONVERSATION, COPY_REPLY, MARK_CONTACTED, CALL, SEND_MESSAGE, OTHER] }
     OutcomeStatus: { type: string, enum: [RESPONDED, BOOKED, PAID, LOST, THINKING, NOT_A_LEAD] }
     Recommendation:

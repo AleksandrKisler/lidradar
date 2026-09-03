@@ -122,6 +122,9 @@ func run(ctx context.Context, configuration config.Config) error {
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),
 		notificationRepository, permissionService, configuration.Notifications.TelegramUsername, time.Now,
 	)
+	notificationPreferences := notificationapplication.NewPreferenceService(
+		notificationRepository, permissionService, ids.Generator{}, time.Now,
+	)
 	go runRiskInvalidationRelay(ctx, logger, riskInvalidator, riskEvents)
 
 	router := httpplatform.NewRouter(
@@ -137,7 +140,7 @@ func run(ctx context.Context, configuration config.Config) error {
 	router.Mount("/api/v1/services", catalogtransport.NewHandler(catalogService, principalResolver).Router())
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, principalResolver).Router())
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, principalResolver).Router())
-	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, principalResolver).Router())
+	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, notificationPreferences, principalResolver).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, principalResolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())

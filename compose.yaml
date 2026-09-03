@@ -69,6 +69,7 @@ services:
     environment:
       <<: *backend-environment
       LIDAR_TELEGRAM_TOKEN: ${LIDAR_TELEGRAM_TOKEN:-}
+      LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION: ${LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION:-false}
       LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:-LidRadarDevBot}
     depends_on:
       migrate:

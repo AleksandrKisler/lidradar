@@ -11,6 +11,7 @@ import (
 	aiapplication "lidradar/backend/internal/ai/application"
 	aidomain "lidradar/backend/internal/ai/domain"
 	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
+	notificationdomain "lidradar/backend/internal/notification/domain"
 	"lidradar/backend/platform/ids"
 )
 
@@ -191,7 +192,7 @@ func TestSemanticBookingRiskFlow(t *testing.T) {
 	if !strings.Contains(recommendation.Body.String(), "Предложить клиенту конкретный свободный слот.") {
 		t.Fatalf("рекомендация R3 = %s", recommendation.Body.String())
 	}
-	if delivered, err := fixture.notifications.DispatchOne(context.Background(), "stage-16-notifications", time.Minute); err != nil || !delivered {
+	if delivered, err := fixture.notifications.DispatchOne(context.Background(), "stage-16-notifications", time.Minute, notificationdomain.ChannelTelegram); err != nil || !delivered {
 		t.Fatalf("Telegram-доставка = %v, %v", delivered, err)
 	}
 	var title, body, deliveryStatus string
@@ -200,7 +201,7 @@ func TestSemanticBookingRiskFlow(t *testing.T) {
 		FROM notifications AS notification
 		JOIN notification_deliveries AS delivery
 		  ON delivery.tenant_id = notification.tenant_id AND delivery.notification_id = notification.id
-		WHERE notification.tenant_id = $1 AND notification.risk_id = $2`, tenantID, riskID,
+		WHERE notification.tenant_id = $1 AND notification.risk_id = $2 AND delivery.channel = 'TELEGRAM'`, tenantID, riskID,
 	).Scan(&title, &body, &deliveryStatus); err != nil {
 		t.Fatal(err)
 	}
