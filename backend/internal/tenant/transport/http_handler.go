@@ -26,6 +26,9 @@ type TenantService interface {
 	CreateLocation(context.Context, string, string, string, string, int) (domain.Location, error)
 	UpdateLocation(context.Context, string, string, string, application.LocationUpdate) (domain.Location, error)
 	ReplaceBusinessHours(context.Context, string, string, string, string, []application.BusinessHourInput) (domain.Location, error)
+	MLConsent(context.Context, string, string) (domain.MLConsent, bool, error)
+	GrantMLConsent(context.Context, string, string) (domain.MLConsent, bool, error)
+	RevokeMLConsent(context.Context, string, string) (domain.MLConsent, bool, error)
 }
 
 type Handler struct {
@@ -46,7 +49,59 @@ func (handler Handler) Router() http.Handler {
 	router.Post("/locations", handler.createLocation)
 	router.Patch("/locations/{locationID}", handler.updateLocation)
 	router.Put("/locations/{locationID}/business-hours", handler.replaceBusinessHours)
+	router.Get("/organization/ml-consent", handler.getMLConsent)
+	router.Post("/organization/ml-consent", handler.grantMLConsent)
+	router.Delete("/organization/ml-consent", handler.revokeMLConsent)
 	return router
+}
+
+func mlConsentResponse(consent domain.MLConsent, active bool) map[string]any {
+	response := map[string]any{"scope": domain.MLConsentScopeDatasets, "active": active}
+	if active {
+		response["consent"] = consent
+	} else {
+		response["consent"] = nil
+	}
+	return response
+}
+
+func (handler Handler) getMLConsent(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	consent, active, err := handler.service.MLConsent(r.Context(), actorID, tenantID)
+	if handleError(w, r, err) {
+		return
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, mlConsentResponse(consent, active))
+}
+
+func (handler Handler) grantMLConsent(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	consent, created, err := handler.service.GrantMLConsent(r.Context(), actorID, tenantID)
+	if handleError(w, r, err) {
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	httpplatform.WriteJSON(w, status, mlConsentResponse(consent, true))
+}
+
+func (handler Handler) revokeMLConsent(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	if _, _, err := handler.service.RevokeMLConsent(r.Context(), actorID, tenantID); handleError(w, r, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type organizationRequest struct {

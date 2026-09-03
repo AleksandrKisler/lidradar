@@ -145,7 +145,10 @@ func run(ctx context.Context, configuration config.Config) error {
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, principalResolver).Router())
-	risktransport.NewHandler(riskRadar, principalResolver, riskEvents).RegisterRoutes(router, "/api/v1")
+	riskFeedback := riskapplication.NewFeedback(
+		riskinfrastructure.NewPostgresFeedbackStore(pool), permissionService, ids.Generator{}, time.Now,
+	).WithInvalidator(riskInvalidator).WithLeadCorrector(opportunityService)
+	risktransport.NewHandler(riskRadar, principalResolver, riskEvents).WithFeedback(riskFeedback).RegisterRoutes(router, "/api/v1")
 	correctivetransport.NewHandler(correctiveService, principalResolver).RegisterRoutes(router, "/api/v1")
 	revenuetransport.NewHandler(revenueService, principalResolver).RegisterRoutes(router, "/api/v1")
 	return httpplatform.Serve(ctx, configuration.HTTP, router, logger)

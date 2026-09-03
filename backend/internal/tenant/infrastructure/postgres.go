@@ -373,3 +373,122 @@ func mapPostgresError(operation string, err error) error {
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }
+
+const mlConsentColumns = `id, tenant_id, scope, granted_by::text, granted_at, revoked_by::text, revoked_at`
+
+func scanMLConsent(row pgx.Row) (domain.MLConsent, error) {
+	var consent domain.MLConsent
+	if err := row.Scan(
+		&consent.ID, &consent.TenantID, &consent.Scope, &consent.GrantedBy, &consent.GrantedAt,
+		&consent.RevokedBy, &consent.RevokedAt,
+	); err != nil {
+		return domain.MLConsent{}, err
+	}
+	if consent.Validate() != nil {
+		return domain.MLConsent{}, domain.ErrInvalid
+	}
+	return consent, nil
+}
+
+func (r *PostgresRepository) ActiveMLConsent(ctx context.Context, tenantID string) (domain.MLConsent, bool, error) {
+	if r == nil || r.pool == nil || tenantID == "" {
+		return domain.MLConsent{}, false, domain.ErrInvalid
+	}
+	consent, err := scanMLConsent(r.pool.QueryRow(ctx, `
+		SELECT `+mlConsentColumns+` FROM ml_consents
+		WHERE tenant_id = $1 AND scope = $2 AND revoked_at IS NULL`, tenantID, domain.MLConsentScopeDatasets))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.MLConsent{}, false, nil
+	}
+	if err != nil {
+		return domain.MLConsent{}, false, mapPostgresError("read ml consent", err)
+	}
+	return consent, true, nil
+}
+
+// GrantMLConsent опирается на частичный уникальный индекс: второе действующее
+// согласие не вставляется, а возвращается существующее.
+func (r *PostgresRepository) GrantMLConsent(ctx context.Context, consent domain.MLConsent, audit domain.AuditEntry) (domain.MLConsent, bool, error) {
+	if r == nil || r.pool == nil || consent.Validate() != nil || !consent.Active() || audit.ID == "" || audit.ActorID == "" ||
+		audit.Operation == "" || audit.EntityType == "" || audit.At.IsZero() {
+		return domain.MLConsent{}, false, domain.ErrInvalid
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.MLConsent{}, false, fmt.Errorf("begin ml consent grant: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	stored, err := scanMLConsent(tx.QueryRow(ctx, `
+		INSERT INTO ml_consents(id, tenant_id, scope, granted_by, granted_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (tenant_id, scope) WHERE revoked_at IS NULL DO NOTHING
+		RETURNING `+mlConsentColumns,
+		consent.ID, consent.TenantID, consent.Scope, consent.GrantedBy, consent.GrantedAt))
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, err := scanMLConsent(tx.QueryRow(ctx, `
+			SELECT `+mlConsentColumns+` FROM ml_consents
+			WHERE tenant_id = $1 AND scope = $2 AND revoked_at IS NULL`, consent.TenantID, consent.Scope))
+		if err != nil {
+			return domain.MLConsent{}, false, mapPostgresError("read existing ml consent", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.MLConsent{}, false, fmt.Errorf("commit ml consent replay: %w", err)
+		}
+		return existing, false, nil
+	}
+	if err != nil {
+		return domain.MLConsent{}, false, mapPostgresError("insert ml consent", err)
+	}
+	if err := insertTenantAudit(ctx, tx, consent.TenantID, audit, stored.ID); err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.MLConsent{}, false, fmt.Errorf("commit ml consent grant: %w", err)
+	}
+	return stored, true, nil
+}
+
+func (r *PostgresRepository) RevokeMLConsent(ctx context.Context, tenantID, actorID string, at time.Time, audit domain.AuditEntry) (domain.MLConsent, bool, error) {
+	if r == nil || r.pool == nil || tenantID == "" || actorID == "" || at.IsZero() || audit.ID == "" ||
+		audit.ActorID == "" || audit.Operation == "" || audit.EntityType == "" || audit.At.IsZero() {
+		return domain.MLConsent{}, false, domain.ErrInvalid
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.MLConsent{}, false, fmt.Errorf("begin ml consent revoke: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	revoked, err := scanMLConsent(tx.QueryRow(ctx, `
+		UPDATE ml_consents SET revoked_by = $2, revoked_at = $3
+		WHERE tenant_id = $1 AND scope = $4 AND revoked_at IS NULL
+		RETURNING `+mlConsentColumns, tenantID, actorID, at.UTC(), domain.MLConsentScopeDatasets))
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.Commit(ctx); err != nil {
+			return domain.MLConsent{}, false, fmt.Errorf("commit ml consent noop: %w", err)
+		}
+		return domain.MLConsent{}, false, nil
+	}
+	if err != nil {
+		return domain.MLConsent{}, false, mapPostgresError("revoke ml consent", err)
+	}
+	if err := insertTenantAudit(ctx, tx, tenantID, audit, revoked.ID); err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.MLConsent{}, false, fmt.Errorf("commit ml consent revoke: %w", err)
+	}
+	return revoked, true, nil
+}
+
+func insertTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, audit domain.AuditEntry, entityID string) error {
+	if audit.EntityID != "" {
+		entityID = audit.EntityID
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_log(id, tenant_id, actor_user_id, operation, entity_type, entity_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		audit.ID, tenantID, audit.ActorID, audit.Operation, audit.EntityType, entityID, audit.At.UTC()); err != nil {
+		return mapPostgresError("insert audit entry", err)
+	}
+	return nil
+}

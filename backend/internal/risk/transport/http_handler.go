@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -21,14 +22,27 @@ type PrincipalResolver interface {
 	Principal(*http.Request) (actorID, tenantID string, ok bool)
 }
 
+// FeedbackService записывает вердикты по рискам и считает точность (этап 21).
+type FeedbackService interface {
+	Record(context.Context, string, string, string, application.FeedbackCommand) (domain.Feedback, error)
+	Precision(context.Context, string, string, time.Time, time.Time) (application.PrecisionReport, error)
+}
+
 type Handler struct {
 	radar      application.Radar
 	principals PrincipalResolver
 	events     *Hub
+	feedback   FeedbackService
 }
 
 func NewHandler(radar application.Radar, principals PrincipalResolver, events *Hub) Handler {
 	return Handler{radar: radar, principals: principals, events: events}
+}
+
+// WithFeedback подключает обратную связь и метрики точности.
+func (h Handler) WithFeedback(feedback FeedbackService) Handler {
+	h.feedback = feedback
+	return h
 }
 
 func (h Handler) Router() http.Handler {
@@ -47,6 +61,60 @@ func (h Handler) RegisterRoutes(router chi.Router, prefix string) {
 	router.Post(prefix+"/risks/{riskID}/acknowledge", h.acknowledge)
 	router.Post(prefix+"/risks/{riskID}/resolve", h.resolve)
 	router.Get(prefix+"/events", h.stream)
+	if h.feedback != nil {
+		router.Get(prefix+"/risks/precision", h.precision)
+		router.Post(prefix+"/risks/{riskID}/feedback", h.recordFeedback)
+	}
+}
+
+func (h Handler) recordFeedback(w http.ResponseWriter, r *http.Request) {
+	a, t, ok := h.principal(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Verdict string `json:"verdict"`
+		Reason  string `json:"reason"`
+		Note    string `json:"note"`
+	}
+	if httpplatform.DecodeJSON(w, r, &body) != nil {
+		writeError(w, r, 400, "INVALID_ARGUMENT", "invalid request")
+		return
+	}
+	feedback, err := h.feedback.Record(r.Context(), a, t, chi.URLParam(r, "riskID"), application.FeedbackCommand{
+		Verdict: body.Verdict, Reason: body.Reason, Note: body.Note,
+	})
+	if handleError(w, r, err) {
+		return
+	}
+	writeJSON(w, 201, feedback)
+}
+
+// precision читает границы окна обнаружения из from/to (RFC 3339).
+func (h Handler) precision(w http.ResponseWriter, r *http.Request) {
+	a, t, ok := h.principal(w, r)
+	if !ok {
+		return
+	}
+	var from, to time.Time
+	var err error
+	if raw := r.URL.Query().Get("from"); raw != "" {
+		if from, err = time.Parse(time.RFC3339, raw); err != nil {
+			writeError(w, r, 400, "INVALID_ARGUMENT", "invalid from")
+			return
+		}
+	}
+	if raw := r.URL.Query().Get("to"); raw != "" {
+		if to, err = time.Parse(time.RFC3339, raw); err != nil {
+			writeError(w, r, 400, "INVALID_ARGUMENT", "invalid to")
+			return
+		}
+	}
+	report, err := h.feedback.Precision(r.Context(), a, t, from, to)
+	if handleError(w, r, err) {
+		return
+	}
+	writeJSON(w, 200, report)
 }
 
 func (h Handler) principal(w http.ResponseWriter, r *http.Request) (string, string, bool) {

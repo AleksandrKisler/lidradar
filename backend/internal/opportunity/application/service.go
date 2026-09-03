@@ -87,6 +87,30 @@ func (service Service) ChangeStage(
 	return opportunity, changed, nil
 }
 
+// MarkNotALead закрывает активную сделку как LOST по обратной связи «не лид»
+// (LR-BE-2103): ARCHIVED достижим только из WON/LOST, а уже закрытая сделка
+// не меняется. Переход записывается с источником USER и автором вердикта.
+func (service Service) MarkNotALead(ctx context.Context, actorID, tenantID, opportunityID string) error {
+	if err := service.requireManage(ctx, actorID, tenantID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(opportunityID) == "" {
+		return ErrInvalid
+	}
+	detail, found, err := service.repository.Detail(ctx, tenantID, opportunityID)
+	if err != nil {
+		return mapDomainError(err)
+	}
+	if !found {
+		return ErrNotFound
+	}
+	if !detail.Opportunity.Stage.Active() {
+		return nil
+	}
+	_, _, err = service.ChangeStage(ctx, actorID, tenantID, opportunityID, domain.StageLost)
+	return err
+}
+
 func (service Service) requireManage(ctx context.Context, actorID, tenantID string) error {
 	if service.repository == nil || service.authorizer == nil || actorID == "" || tenantID == "" {
 		return ErrForbidden

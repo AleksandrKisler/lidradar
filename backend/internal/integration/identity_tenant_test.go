@@ -212,7 +212,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
 	router.Mount("/api/v1", tenanttransport.NewHandler(tenantService, resolver).Router())
-	risktransport.NewHandler(riskRadar, resolver, riskEvents).RegisterRoutes(router, "/api/v1")
+	riskFeedback := riskapplication.NewFeedback(
+		riskinfrastructure.NewPostgresFeedbackStore(pool), permissions, ids.Generator{}, time.Now,
+	).WithInvalidator(riskEvents).WithLeadCorrector(opportunityService)
+	risktransport.NewHandler(riskRadar, resolver, riskEvents).WithFeedback(riskFeedback).RegisterRoutes(router, "/api/v1")
 	correctivetransport.NewHandler(correctiveService, resolver).RegisterRoutes(router, "/api/v1")
 	revenuetransport.NewHandler(revenueService, resolver).RegisterRoutes(router, "/api/v1")
 	return apiFixture{

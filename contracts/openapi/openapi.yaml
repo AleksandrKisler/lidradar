@@ -215,6 +215,37 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/organization/ml-consent:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Состояние ML-согласия организации
+      description: Явное, активное и отзываемое согласие на использование реальных переписок и обратной связи в наборах данных (§70). Без него данные служат только сервису.
+      operationId: getMLConsent
+      responses:
+        '200':
+          description: Действующее согласие либо его отсутствие.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MLConsentStatus' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Выдать ML-согласие от имени владельца
+      operationId: grantMLConsent
+      responses:
+        '201':
+          description: Согласие выдано.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MLConsentStatus' } } }
+        '200':
+          description: Согласие уже действовало; повтор ничего не меняет.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MLConsentStatus' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      summary: Отозвать ML-согласие
+      operationId: revokeMLConsent
+      responses:
+        '204': { description: Согласие отозвано либо уже отсутствовало; история выдач сохраняется. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/locations:
     parameters: [{ $ref: '#/components/parameters/TenantId' }]
     get:
@@ -596,6 +627,39 @@ paths:
       operationId: resolveRisk
       responses:
         '200': { description: Текущее состояние риска; повтор команды идемпотентен., content: { application/json: { schema: { $ref: '#/components/schemas/Risk' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/risks/precision:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Точность рисков по типам за окно обнаружения
+      description: Каждый риск учитывается один раз по последнему вердикту (LR-BE-RM-019); coverageRate — доля рисков окна с обратной связью, reliable — покрытие не ниже minimumCoverage. Требует analytics.read.
+      operationId: getRiskPrecision
+      parameters:
+        - { name: from, in: query, required: false, description: 'Начало окна обнаружения (RFC 3339); по умолчанию — с начала.', schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, description: 'Конец окна обнаружения (RFC 3339, исключительно); по умолчанию — сейчас.', schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Отчёт по пяти типам риска.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RiskPrecisionReport' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/risks/{riskId}/feedback:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }]
+    post:
+      summary: Записать вердикт по риску
+      description: Append-only факт со снимком риска и сделки на момент вердикта. FALSE_POSITIVE закрывает активный риск как ложное срабатывание; причина NOT_A_LEAD дополнительно закрывает сделку как LOST. Требует risks.manage.
+      operationId: recordRiskFeedback
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RiskFeedbackRequest' } } }
+      responses:
+        '201':
+          description: Вердикт сохранён.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RiskFeedback' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1407,6 +1471,87 @@ components:
         actions: { type: array, items: { $ref: '#/components/schemas/RadarAction' } }
         outcome: { $ref: '#/components/schemas/RadarOutcome' }
         revenue: { $ref: '#/components/schemas/RadarRevenue' }
+    RiskVerdict: { type: string, enum: [TRUE_POSITIVE, FALSE_POSITIVE] }
+    RiskFeedbackReason: { type: string, enum: [CUSTOMER_ALREADY_BOOKED, CUSTOMER_ALREADY_ANSWERED, NOT_A_LEAD, CUSTOMER_REJECTED, WRONG_INTERPRETATION, OTHER] }
+    RiskFeedbackRequest:
+      type: object
+      additionalProperties: false
+      required: [verdict]
+      properties:
+        verdict: { $ref: '#/components/schemas/RiskVerdict' }
+        reason: { $ref: '#/components/schemas/RiskFeedbackReason', description: Обязательна для FALSE_POSITIVE. }
+        note: { type: string, maxLength: 1000 }
+    RiskFeedbackContext:
+      type: object
+      additionalProperties: false
+      required: [type, severity, status, source, policyVersion, triggerMessageId, opportunityStage, detectedAt]
+      properties:
+        type: { $ref: '#/components/schemas/RiskType' }
+        severity: { $ref: '#/components/schemas/RiskSeverity' }
+        status: { $ref: '#/components/schemas/RiskStatus' }
+        source: { type: string, enum: [RULE, HYBRID, MANUAL] }
+        policyVersion: { type: string }
+        aiRunId: { type: string, format: uuid }
+        triggerMessageId: { type: string, format: uuid }
+        opportunityStage: { $ref: '#/components/schemas/OpportunityStage' }
+        detectedAt: { type: string, format: date-time }
+    RiskFeedback:
+      type: object
+      additionalProperties: false
+      required: [id, riskId, opportunityId, actorId, verdict, note, context, datasetEligible, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        riskId: { type: string, format: uuid }
+        opportunityId: { type: string, format: uuid }
+        actorId: { type: string, format: uuid }
+        verdict: { $ref: '#/components/schemas/RiskVerdict' }
+        reason: { $ref: '#/components/schemas/RiskFeedbackReason' }
+        note: { type: string }
+        context: { $ref: '#/components/schemas/RiskFeedbackContext' }
+        datasetEligible: { type: boolean, description: Действовало ли явное ML-согласие организации в момент записи (§70). }
+        createdAt: { type: string, format: date-time }
+    RiskPrecisionItem:
+      type: object
+      additionalProperties: false
+      required: [riskType, totalRisks, withFeedback, truePositives, falsePositives, precision, falsePositiveRate, coverageRate, reliable]
+      properties:
+        riskType: { $ref: '#/components/schemas/RiskType' }
+        totalRisks: { type: integer, minimum: 0 }
+        withFeedback: { type: integer, minimum: 0 }
+        truePositives: { type: integer, minimum: 0 }
+        falsePositives: { type: integer, minimum: 0 }
+        precision: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        falsePositiveRate: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        coverageRate: { type: number, minimum: 0, maximum: 1 }
+        reliable: { type: boolean }
+    RiskPrecisionReport:
+      type: object
+      additionalProperties: false
+      required: [from, to, minimumCoverage, items]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        minimumCoverage: { type: number }
+        items: { type: array, items: { $ref: '#/components/schemas/RiskPrecisionItem' } }
+    MLConsent:
+      type: object
+      additionalProperties: false
+      required: [id, scope, grantedBy, grantedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [DATASETS] }
+        grantedBy: { type: string, format: uuid }
+        grantedAt: { type: string, format: date-time }
+        revokedBy: { type: string, format: uuid }
+        revokedAt: { type: string, format: date-time }
+    MLConsentStatus:
+      type: object
+      additionalProperties: false
+      required: [scope, active, consent]
+      properties:
+        scope: { type: string, enum: [DATASETS] }
+        active: { type: boolean }
+        consent: { oneOf: [{ $ref: '#/components/schemas/MLConsent' }, { type: 'null' }] }
     RadarSummary:
       type: object
       required: [openRisks, criticalRisks, potentialRevenue, confirmedRecoveredRevenue]

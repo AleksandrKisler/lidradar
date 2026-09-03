@@ -49,6 +49,15 @@ func (*permissionRepository) UpdateLocation(context.Context, string, string, dom
 func (*permissionRepository) ReplaceBusinessHours(context.Context, string, string, string, []domain.BusinessHour, time.Time) (domain.Location, bool, error) {
 	return domain.Location{}, false, nil
 }
+func (*permissionRepository) ActiveMLConsent(context.Context, string) (domain.MLConsent, bool, error) {
+	return domain.MLConsent{}, false, nil
+}
+func (*permissionRepository) GrantMLConsent(context.Context, domain.MLConsent, domain.AuditEntry) (domain.MLConsent, bool, error) {
+	return domain.MLConsent{}, false, nil
+}
+func (*permissionRepository) RevokeMLConsent(context.Context, string, string, time.Time, domain.AuditEntry) (domain.MLConsent, bool, error) {
+	return domain.MLConsent{}, false, nil
+}
 
 func TestPermissionServiceUsesMembershipRoleMapping(t *testing.T) {
 	repository := &permissionRepository{membership: domain.Membership{TenantID: "tenant", UserID: "user", Role: domain.RoleOwner, Status: domain.MembershipActive}}

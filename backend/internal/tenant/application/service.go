@@ -335,6 +335,63 @@ func (service Service) ReplaceBusinessHours(ctx context.Context, actorID, tenant
 	return location, nil
 }
 
+// MLConsent возвращает действующее согласие организации на наборы данных.
+func (service Service) MLConsent(ctx context.Context, actorID, tenantID string) (domain.MLConsent, bool, error) {
+	if !service.ready() {
+		return domain.MLConsent{}, false, ErrInvalid
+	}
+	if err := service.requireMember(ctx, actorID, tenantID); err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	return service.repository.ActiveMLConsent(ctx, tenantID)
+}
+
+// GrantMLConsent выдаёт согласие от имени владельца; повтор возвращает
+// действующее согласие без новой записи.
+func (service Service) GrantMLConsent(ctx context.Context, actorID, tenantID string) (domain.MLConsent, bool, error) {
+	if !service.ready() {
+		return domain.MLConsent{}, false, ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionOrganizationManage); err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	consentID, err := service.ids.NewID()
+	if err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	auditID, err := service.ids.NewID()
+	if err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	now := service.now().UTC()
+	consent, err := domain.NewMLConsent(consentID, tenantID, actorID, now)
+	if err != nil {
+		return domain.MLConsent{}, false, ErrInvalid
+	}
+	return service.repository.GrantMLConsent(ctx, consent, domain.AuditEntry{
+		ID: auditID, ActorID: actorID, Operation: "ML_CONSENT_GRANTED", EntityType: "ML_CONSENT", EntityID: consent.ID, At: now,
+	})
+}
+
+// RevokeMLConsent отзывает действующее согласие; повтор без согласия
+// возвращает false без ошибки.
+func (service Service) RevokeMLConsent(ctx context.Context, actorID, tenantID string) (domain.MLConsent, bool, error) {
+	if !service.ready() {
+		return domain.MLConsent{}, false, ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionOrganizationManage); err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	auditID, err := service.ids.NewID()
+	if err != nil {
+		return domain.MLConsent{}, false, err
+	}
+	now := service.now().UTC()
+	return service.repository.RevokeMLConsent(ctx, tenantID, actorID, now, domain.AuditEntry{
+		ID: auditID, ActorID: actorID, Operation: "ML_CONSENT_REVOKED", EntityType: "ML_CONSENT", At: now,
+	})
+}
+
 func (service Service) ready() bool {
 	return service.repository != nil && service.ids != nil && service.now != nil
 }

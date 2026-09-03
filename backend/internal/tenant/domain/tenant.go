@@ -191,4 +191,53 @@ type Repository interface {
 	CreateLocation(context.Context, string, Location) error
 	UpdateLocation(context.Context, string, string, Location) (Location, bool, error)
 	ReplaceBusinessHours(context.Context, string, string, string, []BusinessHour, time.Time) (Location, bool, error)
+	ActiveMLConsent(context.Context, string) (MLConsent, bool, error)
+	// GrantMLConsent сохраняет согласие и аудит; при действующем согласии
+	// возвращает его без изменений и false.
+	GrantMLConsent(context.Context, MLConsent, AuditEntry) (MLConsent, bool, error)
+	// RevokeMLConsent отзывает действующее согласие, не удаляя строку;
+	// без действующего согласия возвращает false.
+	RevokeMLConsent(context.Context, string, string, time.Time, AuditEntry) (MLConsent, bool, error)
+}
+
+// MLConsentScopeDatasets — единственная область согласия MVP: наборы для
+// обучения, настройки промптов и оценки за пределами оказания услуги (ТЗ §70).
+const MLConsentScopeDatasets = "DATASETS"
+
+// MLConsent — явное, активное и отзываемое согласие организации на
+// использование реальных переписок и обратной связи в наборах данных
+// (LR-BE-2107). Без действующего согласия данные служат только сервису.
+type MLConsent struct {
+	ID        string     `json:"id"`
+	TenantID  string     `json:"-"`
+	Scope     string     `json:"scope"`
+	GrantedBy string     `json:"grantedBy"`
+	GrantedAt time.Time  `json:"grantedAt"`
+	RevokedBy *string    `json:"revokedBy,omitempty"`
+	RevokedAt *time.Time `json:"revokedAt,omitempty"`
+}
+
+func NewMLConsent(id, tenantID, grantedBy string, at time.Time) (MLConsent, error) {
+	consent := MLConsent{ID: id, TenantID: tenantID, Scope: MLConsentScopeDatasets, GrantedBy: grantedBy, GrantedAt: at.UTC()}
+	if consent.Validate() != nil {
+		return MLConsent{}, ErrInvalid
+	}
+	return consent, nil
+}
+
+func (consent MLConsent) Validate() error {
+	if consent.ID == "" || consent.TenantID == "" || consent.Scope != MLConsentScopeDatasets || consent.GrantedBy == "" ||
+		consent.GrantedAt.IsZero() || (consent.RevokedAt == nil) != (consent.RevokedBy == nil) ||
+		(consent.RevokedAt != nil && (consent.RevokedAt.Before(consent.GrantedAt) || *consent.RevokedBy == "")) {
+		return ErrInvalid
+	}
+	return nil
+}
+
+func (consent MLConsent) Active() bool { return consent.RevokedAt == nil }
+
+// AuditEntry — запись аудита, сохраняемая вместе с изменением согласия.
+type AuditEntry struct {
+	ID, ActorID, Operation, EntityType, EntityID string
+	At                                           time.Time
 }
