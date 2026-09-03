@@ -8,6 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	adminapplication "lidradar/backend/internal/admin/application"
+	admininfrastructure "lidradar/backend/internal/admin/infrastructure"
+	admintransport "lidradar/backend/internal/admin/transport"
 	aiapplication "lidradar/backend/internal/ai/application"
 	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
 	aitransport "lidradar/backend/internal/ai/transport"
@@ -144,6 +147,9 @@ func run(ctx context.Context, configuration config.Config) error {
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, principalResolver).Router())
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, principalResolver).Router())
 	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, notificationPreferences, principalResolver).Router())
+	router.Mount("/api/v1/admin", admintransport.NewHandler(
+		adminapplication.NewService(admininfrastructure.NewPostgresStore(pool), ids.Generator{}, time.Now), principalResolver,
+	).Router())
 	router.Mount("/api/v1/analytics", analyticstransport.NewHandler(
 		analyticsapplication.NewService(analyticsinfrastructure.NewPostgresStore(pool), permissionService, time.Now), principalResolver,
 	).Router())

@@ -8,6 +8,7 @@ import (
 
 	"lidradar/backend/internal/events/domain"
 	jobsdomain "lidradar/backend/internal/jobs/domain"
+	"lidradar/backend/platform/observability"
 )
 
 const DefaultLease = 30 * time.Second
@@ -84,6 +85,10 @@ func (dispatcher Dispatcher) RunOne(ctx context.Context) (bool, error) {
 	}
 	retryable, code := jobsdomain.Classify(handleErr)
 	next := finishedAt.Add(jobsdomain.RetryDelay(event.AttemptCount))
-	_, err = dispatcher.store.Fail(ctx, event.ID, dispatcher.owner, code, retryable, next, finishedAt)
+	status, err := dispatcher.store.Fail(ctx, event.ID, dispatcher.owner, code, retryable, next, finishedAt)
+	observability.Logger(ctx).Warn("Событие исходящего журнала завершилось ошибкой", "event", "outbox.failed",
+		"event_id", event.ID, "event_type", event.Type, "tenant_id", event.TenantID, "aggregate_type", event.AggregateType,
+		"aggregate_id", event.AggregateID, "trace_id", event.TraceID, "attempt", event.AttemptCount,
+		"error_code", code, "retryable", retryable, "status", string(status), "duration_ms", finishedAt.Sub(now).Milliseconds())
 	return true, err
 }

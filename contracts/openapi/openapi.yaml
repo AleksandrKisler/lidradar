@@ -794,6 +794,229 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/admin/me:
+    get:
+      summary: Является ли текущий пользователь платформенным администратором
+      operationId: getAdminMe
+      responses:
+        '200': { description: Признак права PLATFORM_ADMIN., content: { application/json: { schema: { type: object, required: [userId, platformAdmin], properties: { userId: { type: string, format: uuid }, platformAdmin: { type: boolean } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/admin/admins:
+    get:
+      summary: История выдач права PLATFORM_ADMIN
+      operationId: listPlatformAdmins
+      responses:
+        '200': { description: 'Все выдачи, включая отозванные.', content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/PlatformAdmin' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+    post:
+      summary: Выдать право PLATFORM_ADMIN существующему пользователю
+      description: Первый администратор появляется только через команду platform-admin grant. Повтор для действующего права возвращает 200 без новой записи.
+      operationId: grantPlatformAdmin
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [email], properties: { email: { type: string, format: email }, note: { type: string, maxLength: 500 } } } } } }
+      responses:
+        '201': { description: 'Право выдано, аудит записан.', content: { application/json: { schema: { $ref: '#/components/schemas/PlatformAdmin' } } } }
+        '200': { description: Право уже действовало., content: { application/json: { schema: { $ref: '#/components/schemas/PlatformAdmin' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/admin/admins/{userId}:
+    parameters: [{ name: userId, in: path, required: true, schema: { type: string, format: uuid } }]
+    delete:
+      summary: Отозвать право PLATFORM_ADMIN
+      operationId: revokePlatformAdmin
+      responses:
+        '204': { description: Право отозвано либо уже отсутствовало; строка сохраняется. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/organizations:
+    get:
+      summary: Организации с ключевыми счётчиками
+      operationId: adminOrganizations
+      responses:
+        '200': { description: Все организации платформы., content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminOrganization' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/connections:
+    get:
+      summary: Состояние каналов всех организаций
+      operationId: adminConnections
+      responses:
+        '200': { description: Каналы с очередью сырых событий., content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminConnection' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/queue:
+    get:
+      summary: Панель очередей
+      description: Счётчики §67 для заданий, исходящего журнала, AI-заданий, доставок и просроченных проверок одним снимком.
+      operationId: adminQueue
+      responses:
+        '200': { description: Состояние очередей., content: { application/json: { schema: { $ref: '#/components/schemas/AdminQueueStats' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/jobs:
+    get:
+      summary: Последние фоновые задания
+      operationId: adminJobs
+      parameters:
+        - { name: tenantId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, PROCESSING, RETRY, SUCCEEDED, DEAD] } }
+        - { name: type, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200': { description: 'Задания, новые первыми.', content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminJob' } } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/dead-letters:
+    get:
+      summary: Мёртвые элементы, которые ещё никто не отложил
+      operationId: adminDeadLetters
+      parameters: [{ name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }]
+      responses:
+        '200': { description: 'Мёртвые задания, события, AI-задания и доставки.', content: { application/json: { schema: { $ref: '#/components/schemas/AdminDeadLetters' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/jobs/{jobId}/retry:
+    parameters: [{ $ref: '#/components/parameters/AdminJobId' }]
+    post:
+      summary: Вернуть мёртвое задание в очередь
+      operationId: adminRetryJob
+      responses:
+        '200': { description: Задание снова ожидает выполнения; аудит записан., content: { application/json: { schema: { $ref: '#/components/schemas/AdminJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AdminConflict' }
+  /api/v1/admin/jobs/{jobId}/discard:
+    parameters: [{ $ref: '#/components/parameters/AdminJobId' }]
+    post:
+      summary: Отложить мёртвое задание
+      operationId: adminDiscardJob
+      responses:
+        '200': { description: Задание помечено отложенным и уходит из панели., content: { application/json: { schema: { $ref: '#/components/schemas/AdminJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AdminConflict' }
+  /api/v1/admin/outbox/{eventId}/replay:
+    parameters: [{ $ref: '#/components/parameters/AdminEventId' }]
+    post:
+      summary: Повторить мёртвое событие исходящего журнала
+      operationId: adminReplayEvent
+      responses:
+        '200': { description: Событие снова ожидает доставки., content: { application/json: { schema: { $ref: '#/components/schemas/AdminOutboxEvent' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AdminConflict' }
+  /api/v1/admin/outbox/{eventId}/discard:
+    parameters: [{ $ref: '#/components/parameters/AdminEventId' }]
+    post:
+      summary: Отложить мёртвое событие
+      operationId: adminDiscardEvent
+      responses:
+        '200': { description: Событие отложено., content: { application/json: { schema: { $ref: '#/components/schemas/AdminOutboxEvent' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AdminConflict' }
+  /api/v1/admin/ai/jobs/{jobId}/retry:
+    parameters: [{ $ref: '#/components/parameters/AdminJobId' }]
+    post:
+      summary: Вернуть мёртвое AI-задание в очередь
+      description: Подчиняется правилу «одно ожидающее AI-задание на переписку»; при более новом ожидающем задании отвечает 409.
+      operationId: adminRetryAIJob
+      responses:
+        '200': { description: AI-задание снова ожидает узел., content: { application/json: { schema: { $ref: '#/components/schemas/AdminAIJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AdminConflict' }
+  /api/v1/admin/ai/jobs/{jobId}/discard:
+    parameters: [{ $ref: '#/components/parameters/AdminJobId' }]
+    post:
+      summary: Отложить мёртвое AI-задание
+      operationId: adminDiscardAIJob
+      responses:
+        '200': { description: AI-задание отложено., content: { application/json: { schema: { $ref: '#/components/schemas/AdminAIJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AdminConflict' }
+  /api/v1/admin/notifications/deliveries/{deliveryId}/discard:
+    parameters: [{ name: deliveryId, in: path, required: true, schema: { type: string, format: uuid } }]
+    post:
+      summary: Отложить мёртвую доставку уведомления
+      operationId: adminDiscardDelivery
+      responses:
+        '200': { description: Доставка отложена., content: { application/json: { schema: { $ref: '#/components/schemas/AdminDelivery' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/AdminConflict' }
+  /api/v1/admin/ai/nodes:
+    get:
+      summary: AI-узлы с допущенными организациями и загрузкой
+      operationId: adminAINodes
+      responses:
+        '200': { description: Узлы без секретов., content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminAINode' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/ai/runs:
+    get:
+      summary: AI-прогоны без сырого вывода модели
+      operationId: adminAIRuns
+      parameters:
+        - { name: tenantId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [RUNNING, SUCCEEDED, FAILED] } }
+        - { name: applicationStatus, in: query, required: false, schema: { type: string, enum: [PENDING, APPLIED, STALE, REJECTED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200': { description: 'Прогоны, новые первыми.', content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminAIRun' } } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/ai/tenants/{tenantId}/conversations/{conversationId}/summary:
+    parameters:
+      - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { $ref: '#/components/parameters/ConversationId' }
+    get:
+      summary: Семантический результат переписки с признаком доверия фактов
+      description: Слабые факты (0.65–0.849) видны с trusted=false (LR-BE-RM-017); текст резюме не раскрывается.
+      operationId: adminConversationSummary
+      responses:
+        '200': { description: Последний применённый результат., content: { application/json: { schema: { $ref: '#/components/schemas/AdminConversationSummary' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/admin/usage:
+    get:
+      summary: Потребление организаций за окно UTC
+      description: 'Основа стоимости AI на организацию (§68): сообщения, сырые события, задания, AI-задания и прогоны с длительностью, риски, уведомления и доставки. По умолчанию последние 30 дней; не длиннее 366 дней.'
+      operationId: adminUsage
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Потребление по организациям., content: { application/json: { schema: { $ref: '#/components/schemas/AdminUsageReport' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+  /api/v1/admin/trace/tenants/{tenantId}/messages/{messageId}:
+    parameters:
+      - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: messageId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Цепочка от сообщения до выручки
+      description: 'Message → Job → AIRun → Semantic Result → Risk → Notification → Action → Outcome → Revenue (LR-BE-2310) без текста сообщения, промптов и сырого вывода.'
+      operationId: adminTrace
+      responses:
+        '200': { description: Восстановленная цепочка., content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrace' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/AdminForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/events:
     get:
       summary: Получать сигналы об изменениях организации
@@ -854,6 +1077,8 @@ components:
     OpportunityId: { name: opportunityId, in: path, required: true, schema: { type: string, format: uuid } }
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string, format: uuid } }
+    AdminJobId: { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    AdminEventId: { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
     NotificationRiskType: { name: riskType, in: path, required: true, schema: { $ref: '#/components/schemas/RiskType' } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
     AINodeId: { name: X-LidRadar-Node-ID, in: header, required: true, schema: { type: string, format: uuid } }
@@ -868,6 +1093,8 @@ components:
     Forbidden: { description: Request origin is not trusted or Membership does not grant the required named permission., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     NotFound: { description: Resource does not exist in the authenticated tenant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: A unique resource already exists., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    AdminForbidden: { description: The session user is not an active PLATFORM_ADMIN., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    AdminConflict: { description: 'The object state does not allow the command (not DEAD, already discarded, or a newer queued AI job exists).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     RateLimited: { description: Authentication request limit exceeded; the response does not reveal whether an account exists., headers: { Retry-After: { $ref: '#/components/headers/RetryAfter' } }, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     AINodeUnauthorized: { description: 'AI node credentials, timestamp, nonce, body hash, or request signature are invalid.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     AILeaseLost: { description: The AI job lease expired or belongs to another node., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -1648,6 +1875,254 @@ components:
         risks: { $ref: '#/components/schemas/AnalyticsRisks' }
         outcomes: { $ref: '#/components/schemas/AnalyticsOutcomes' }
         revenue: { $ref: '#/components/schemas/AnalyticsRevenue' }
+    PlatformAdmin:
+      type: object
+      required: [id, userId, grantedBy, grantedAt, note]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        email: { type: string }
+        displayName: { type: string }
+        grantedBy: { type: [string, 'null'], format: uuid, description: Пусто для выдачи из CLI. }
+        grantedAt: { type: string, format: date-time }
+        revokedBy: { type: string, format: uuid }
+        revokedAt: { type: string, format: date-time }
+        note: { type: string }
+    AdminOrganization:
+      type: object
+      required: [id, name, timezone, currency, status, createdAt, members, locations, connections, openRisks, messagesLast24h]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        timezone: { type: string }
+        currency: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        members: { type: integer }
+        locations: { type: integer }
+        connections: { type: integer }
+        openRisks: { type: integer }
+        messagesLast24h: { type: integer }
+    AdminConnection:
+      type: object
+      required: [id, tenantId, tenantName, provider, name, status, rawEventsPending, rawEventsFailed]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        tenantName: { type: string }
+        provider: { type: string }
+        name: { type: string }
+        status: { type: string }
+        locationId: { type: [string, 'null'], format: uuid }
+        lastEventAt: { type: [string, 'null'], format: date-time }
+        lastSuccessAt: { type: [string, 'null'], format: date-time }
+        lastErrorAt: { type: [string, 'null'], format: date-time }
+        lastErrorCode: { type: [string, 'null'] }
+        rawEventsPending: { type: integer }
+        rawEventsFailed: { type: integer }
+    AdminLifecycleCounts:
+      type: object
+      required: [pending, processing, retry, dead, expiredLeases]
+      properties: { pending: { type: integer }, processing: { type: integer }, retry: { type: integer }, dead: { type: integer }, expiredLeases: { type: integer } }
+    AdminQueueStats:
+      type: object
+      required: [checkedAt, jobs, outbox, aiJobs, deliveries, scheduledOverdue, deadUnhandled]
+      properties:
+        checkedAt: { type: string, format: date-time }
+        jobs: { $ref: '#/components/schemas/AdminLifecycleCounts' }
+        outbox: { $ref: '#/components/schemas/AdminLifecycleCounts' }
+        aiJobs: { type: object, required: [pending, leased, running, retry, dead, nodesReady], properties: { pending: { type: integer }, leased: { type: integer }, running: { type: integer }, retry: { type: integer }, dead: { type: integer }, nodesReady: { type: integer } } }
+        deliveries: { type: object, required: [pending, processing, retry, dead], properties: { pending: { type: integer }, processing: { type: integer }, retry: { type: integer }, dead: { type: integer } } }
+        scheduledOverdue: { type: integer }
+        deadUnhandled: { type: integer, description: Мёртвые элементы всех очередей без признака «отложено». }
+    AdminJob:
+      type: object
+      required: [id, tenantId, type, dedupKey, status, priority, availableAt, attemptCount, maxAttempts, createdAt, updatedAt, payload]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        type: { type: string }
+        dedupKey: { type: string }
+        status: { type: string, enum: [PENDING, PROCESSING, RETRY, SUCCEEDED, DEAD] }
+        priority: { type: integer }
+        availableAt: { type: string, format: date-time }
+        attemptCount: { type: integer }
+        maxAttempts: { type: integer }
+        leasedBy: { type: [string, 'null'] }
+        leaseUntil: { type: [string, 'null'], format: date-time }
+        lastErrorCode: { type: [string, 'null'] }
+        completedAt: { type: [string, 'null'], format: date-time }
+        discardedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        payload: { type: object, description: Идентификаторы без пользовательского содержимого. }
+    AdminOutboxEvent:
+      type: object
+      required: [id, tenantId, eventType, aggregateType, aggregateId, status, attemptCount, maxAttempts, occurredAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        eventType: { type: string }
+        aggregateType: { type: string }
+        aggregateId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, PROCESSING, RETRY, PUBLISHED, DEAD] }
+        attemptCount: { type: integer }
+        maxAttempts: { type: integer }
+        lastErrorCode: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        discardedAt: { type: [string, 'null'], format: date-time }
+    AdminAIJob:
+      type: object
+      required: [id, tenantId, conversationId, analysisThroughMessageId, status, modelRequirement, attempts, maxAttempts, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        analysisThroughMessageId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, LEASED, RUNNING, SUCCEEDED, RETRY, DEAD] }
+        modelRequirement: { type: string }
+        attempts: { type: integer }
+        maxAttempts: { type: integer }
+        lastErrorCode: { type: [string, 'null'] }
+        leasedBy: { type: [string, 'null'], format: uuid }
+        leasedAt: { type: [string, 'null'], format: date-time }
+        leaseUntil: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        discardedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    AdminDelivery:
+      type: object
+      required: [id, tenantId, notificationId, kind, channel, status, attempt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        notificationId: { type: string, format: uuid }
+        kind: { type: string }
+        channel: { type: string, enum: [IN_APP, TELEGRAM] }
+        status: { type: string }
+        attempt: { type: integer }
+        failureCode: { type: [string, 'null'] }
+        attemptedAt: { type: [string, 'null'], format: date-time }
+        discardedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    AdminDeadLetters:
+      type: object
+      required: [jobs, outbox, aiJobs, deliveries]
+      properties:
+        jobs: { type: array, items: { $ref: '#/components/schemas/AdminJob' } }
+        outbox: { type: array, items: { $ref: '#/components/schemas/AdminOutboxEvent' } }
+        aiJobs: { type: array, items: { $ref: '#/components/schemas/AdminAIJob' } }
+        deliveries: { type: array, items: { $ref: '#/components/schemas/AdminDelivery' } }
+    AdminAINode:
+      type: object
+      required: [id, name, status, availableSlots, inflight, tenants, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [OFFLINE, READY, REVOKED] }
+        modelVersion: { type: [string, 'null'] }
+        availableSlots: { type: integer }
+        inflight: { type: integer }
+        lastHeartbeatAt: { type: [string, 'null'], format: date-time }
+        revokedAt: { type: [string, 'null'], format: date-time }
+        tenants: { type: array, items: { type: string, format: uuid } }
+        createdAt: { type: string, format: date-time }
+    AdminAIRun:
+      type: object
+      required: [id, tenantId, jobId, nodeId, conversationId, status, applicationStatus, modelVersion, promptVersion, schemaVersion, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        jobId: { type: string, format: uuid }
+        nodeId: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        status: { type: string, enum: [RUNNING, SUCCEEDED, FAILED] }
+        applicationStatus: { type: string, enum: [PENDING, APPLIED, STALE, REJECTED] }
+        modelVersion: { type: string }
+        promptVersion: { type: string }
+        schemaVersion: { type: string }
+        errorCode: { type: [string, 'null'] }
+        validationError: { type: [string, 'null'] }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        durationMs: { type: [integer, 'null'] }
+    AdminSemanticFact:
+      type: object
+      required: [type, value, confidence, trusted, evidenceMessageIds]
+      properties:
+        type: { type: string }
+        value: {}
+        confidence: { type: number }
+        trusted: { type: boolean }
+        evidenceMessageIds: { type: array, items: { type: string, format: uuid } }
+    AdminConversationSummary:
+      type: object
+      required: [tenantId, conversationId, revision, analysisThroughMessageId, modelVersion, promptVersion, schemaVersion, aiRunId, updatedAt, facts, trustedFacts, weakFacts]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        revision: { type: integer }
+        analysisThroughMessageId: { type: string, format: uuid }
+        modelVersion: { type: string }
+        promptVersion: { type: string }
+        schemaVersion: { type: string }
+        aiRunId: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+        facts: { type: array, items: { $ref: '#/components/schemas/AdminSemanticFact' } }
+        trustedFacts: { type: integer }
+        weakFacts: { type: integer }
+    AdminTenantUsage:
+      type: object
+      required: [tenantId, name, messages, rawEvents, jobs, aiJobs, aiRuns, aiRunsApplied, aiRunsRejected, aiRunsStale, aiRunSeconds, risks, notifications, deliveries]
+      properties:
+        tenantId: { type: string, format: uuid }
+        name: { type: string }
+        messages: { type: integer }
+        rawEvents: { type: integer }
+        jobs: { type: integer }
+        aiJobs: { type: integer }
+        aiRuns: { type: integer }
+        aiRunsApplied: { type: integer }
+        aiRunsRejected: { type: integer }
+        aiRunsStale: { type: integer }
+        aiRunSeconds: { type: number }
+        risks: { type: integer }
+        notifications: { type: integer }
+        deliveries: { type: integer }
+    AdminUsageReport:
+      type: object
+      required: [from, to, tenants]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        tenants: { type: array, items: { $ref: '#/components/schemas/AdminTenantUsage' } }
+    AdminTrace:
+      type: object
+      required: [message, jobs, aiJobs, aiRuns, semanticResult, risks, notifications, actions, outcomes, revenue]
+      properties:
+        message:
+          type: object
+          required: [id, tenantId, conversationId, connectionId, direction, type, externalId, sentAt, receivedAt]
+          properties:
+            id: { type: string, format: uuid }
+            tenantId: { type: string, format: uuid }
+            conversationId: { type: string, format: uuid }
+            connectionId: { type: string, format: uuid }
+            direction: { type: string }
+            type: { type: string }
+            externalId: { type: string }
+            sentAt: { type: string, format: date-time }
+            receivedAt: { type: string, format: date-time }
+        jobs: { type: array, items: { $ref: '#/components/schemas/AdminJob' } }
+        aiJobs: { type: array, items: { $ref: '#/components/schemas/AdminAIJob' } }
+        aiRuns: { type: array, items: { $ref: '#/components/schemas/AdminAIRun' } }
+        semanticResult: { oneOf: [{ $ref: '#/components/schemas/AdminConversationSummary' }, { type: 'null' }] }
+        risks: { type: array, items: { type: object, required: [id, opportunityId, type, severity, status, source, policyVersion, detectedAt], properties: { id: { type: string, format: uuid }, opportunityId: { type: string, format: uuid }, type: { $ref: '#/components/schemas/RiskType' }, severity: { $ref: '#/components/schemas/RiskSeverity' }, status: { $ref: '#/components/schemas/RiskStatus' }, source: { type: string }, policyVersion: { type: string }, aiRunId: { type: [string, 'null'], format: uuid }, detectedAt: { type: string, format: date-time }, resolvedAt: { type: [string, 'null'], format: date-time } } } }
+        notifications: { type: array, items: { type: object, required: [id, userId, kind, dedupKey, createdAt, deliveries], properties: { id: { type: string, format: uuid }, userId: { type: string, format: uuid }, kind: { type: string }, riskId: { type: [string, 'null'], format: uuid }, dedupKey: { type: string }, createdAt: { type: string, format: date-time }, deliveries: { type: array, items: { $ref: '#/components/schemas/AdminDelivery' } } } } }
+        actions: { type: array, items: { type: object, required: [id, riskId, type, actorId, createdAt], properties: { id: { type: string, format: uuid }, riskId: { type: string, format: uuid }, type: { type: string }, actorId: { type: string, format: uuid }, createdAt: { type: string, format: date-time } } } }
+        outcomes: { type: array, items: { type: object, required: [id, opportunityId, status, actorId, createdAt], properties: { id: { type: string, format: uuid }, opportunityId: { type: string, format: uuid }, status: { type: string }, actorId: { type: string, format: uuid }, createdAt: { type: string, format: date-time } } } }
+        revenue: { type: array, items: { type: object, required: [eventId, opportunityId, amount, currency, status, confirmedAt], properties: { eventId: { type: string, format: uuid }, opportunityId: { type: string, format: uuid }, amount: { type: string }, currency: { type: string }, status: { type: string }, attribution: { type: [string, 'null'] }, riskId: { type: [string, 'null'], format: uuid }, confirmedAt: { type: string, format: date-time } } } }
     RadarSummary:
       type: object
       required: [openRisks, criticalRisks, potentialRevenue, confirmedRecoveredRevenue]

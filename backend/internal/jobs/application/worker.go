@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"lidradar/backend/internal/jobs/domain"
+	"lidradar/backend/platform/observability"
 )
 
 const DefaultLease = 30 * time.Second
@@ -60,7 +61,12 @@ func (worker Worker) RunOne(ctx context.Context) (bool, error) {
 		handleErr = handler(ctx, job)
 	}
 	finishedAt := worker.now().UTC()
+	logger := observability.Logger(ctx).With(
+		"job_id", job.ID, "job_type", job.Type, "tenant_id", job.TenantID,
+		"attempt", job.AttemptCount, "duration_ms", finishedAt.Sub(now).Milliseconds(),
+	)
 	if handleErr == nil {
+		logger.Debug("Фоновое задание выполнено", "event", "job.succeeded")
 		return true, worker.store.Succeed(ctx, job.ID, worker.owner, finishedAt)
 	}
 	if ctx.Err() != nil {
@@ -69,6 +75,9 @@ func (worker Worker) RunOne(ctx context.Context) (bool, error) {
 	}
 	retryable, code := domain.Classify(handleErr)
 	next := finishedAt.Add(domain.RetryDelay(job.AttemptCount))
-	_, err = worker.store.Fail(ctx, job.ID, worker.owner, code, retryable, next, finishedAt)
+	status, err := worker.store.Fail(ctx, job.ID, worker.owner, code, retryable, next, finishedAt)
+	// Причина ошибки не пишется целиком: она может содержать текст сообщения (§64).
+	logger.Warn("Фоновое задание завершилось ошибкой", "event", "job.failed",
+		"error_code", code, "retryable", retryable, "status", string(status))
 	return true, err
 }

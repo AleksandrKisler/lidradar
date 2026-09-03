@@ -14,6 +14,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	adminapplication "lidradar/backend/internal/admin/application"
+	admininfrastructure "lidradar/backend/internal/admin/infrastructure"
+	admintransport "lidradar/backend/internal/admin/transport"
 	aiapplication "lidradar/backend/internal/ai/application"
 	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
 	analyticsapplication "lidradar/backend/internal/analytics/application"
@@ -211,6 +214,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, resolver).Router())
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, resolver).Router())
 	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, notificationPreferences, resolver).Router())
+	router.Mount("/api/v1/admin", admintransport.NewHandler(
+		adminapplication.NewService(admininfrastructure.NewPostgresStore(pool), ids.Generator{}, time.Now), resolver,
+	).Router())
 	router.Mount("/api/v1/analytics", analyticstransport.NewHandler(
 		analyticsapplication.NewService(analyticsinfrastructure.NewPostgresStore(pool), permissions, time.Now), resolver,
 	).Router())

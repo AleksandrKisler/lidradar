@@ -47,6 +47,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0037: Политика уведомлений: получатели, тихие часы и сводки](0037-notification-policy-delivery.md) | Accepted |
 | [0038: Обратная связь по рискам, окно точности и граница ML-согласия](0038-risk-feedback-precision-consent.md) | Accepted |
 | [0039: Базовая аналитика читает необработанные факты модулей](0039-basic-analytics-raw-facts.md) | Accepted |
+| [0040: Платформенное администрирование читает все модули и правит очереди](0040-platform-admin-observability.md) | Accepted |
 
 ## Workflow
 
