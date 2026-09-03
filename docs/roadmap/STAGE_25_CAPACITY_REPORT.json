@@ -1,0 +1,208 @@
+{
+  "ai": {
+    "completed": 800,
+    "note": "узел имитирован; реальная задержка вывода — этап 15 (RTX 4060)",
+    "queueWait": {
+      "count": 800,
+      "p50Ms": 8842.259,
+      "p95Ms": 15659.811,
+      "p99Ms": 15963.168,
+      "maxMs": 16057.53
+    },
+    "queued": 800,
+    "simulatedInference": {
+      "count": 800,
+      "p50Ms": 1.146,
+      "p95Ms": 1.478,
+      "p99Ms": 2.574,
+      "maxMs": 10.866
+    },
+    "simulatedJobsPerSecond": 179.11559045111161
+  },
+  "api": {
+    "analytics": {
+      "count": 300,
+      "p50Ms": 32.122,
+      "p95Ms": 122.719,
+      "p99Ms": 151.765,
+      "maxMs": 155.318
+    },
+    "conversations": {
+      "count": 300,
+      "p50Ms": 4.184,
+      "p95Ms": 5.16,
+      "p99Ms": 5.74,
+      "maxMs": 8.232
+    },
+    "messages": {
+      "count": 300,
+      "p50Ms": 10.981,
+      "p95Ms": 18.961,
+      "p99Ms": 21.739,
+      "maxMs": 23.231
+    },
+    "opportunity": {
+      "count": 300,
+      "p50Ms": 7.592,
+      "p95Ms": 13.281,
+      "p99Ms": 14.455,
+      "maxMs": 15.775
+    },
+    "radar": {
+      "count": 300,
+      "p50Ms": 4.977,
+      "p95Ms": 49.168,
+      "p99Ms": 51.982,
+      "maxMs": 54.557
+    },
+    "risks": {
+      "count": 300,
+      "p50Ms": 11.9,
+      "p95Ms": 21.595,
+      "p99Ms": 24.401,
+      "maxMs": 25.046
+    }
+  },
+  "apiRequestsPerSecond": 983.5330385511423,
+  "dataset": {
+    "conversations": 50000,
+    "generationMs": 15288,
+    "messages": 500000,
+    "opportunities": 20000,
+    "organizations": 100,
+    "risks": 6000
+  },
+  "db": {
+    "p95Ms": 1.674,
+    "queries": 17380,
+    "top": [
+      {
+        "count": 300,
+        "maxMs": 83.423,
+        "p50Ms": 10.157,
+        "p95Ms": 57.877,
+        "sql": "SELECT count(*), count(*) FILTER (WHERE direction = 'INCOMING'), count(*) FILTER (WHERE direction = 'OUTGOING'…"
+      },
+      {
+        "count": 300,
+        "maxMs": 22.809,
+        "p50Ms": 0.727,
+        "p95Ms": 4.144,
+        "sql": "SELECT (SELECT count(*) FROM opportunities WHERE tenant_id = $1 AND opened_at \u003e= $2 AND opened_at \u003c $3), count…"
+      },
+      {
+        "count": 300,
+        "maxMs": 14.672,
+        "p50Ms": 0.661,
+        "p95Ms": 3.88,
+        "sql": "WITH selected AS ( SELECT r.id AS risk_id, r.opportunity_id, r.severity, r.status FROM risk_signals AS r WHERE…"
+      },
+      {
+        "count": 8,
+        "maxMs": 8.549,
+        "p50Ms": 0.673,
+        "p95Ms": 3.252,
+        "sql": "SET ROLE \"lidradar_app\""
+      },
+      {
+        "count": 300,
+        "maxMs": 7.668,
+        "p50Ms": 1.052,
+        "p95Ms": 3.16,
+        "sql": "WITH ranked AS (SELECT r.id AS risk_id, r.tenant_id, r.opportunity_id, r.location_id, r.type, r.severity, r.st…"
+      },
+      {
+        "count": 300,
+        "maxMs": 6.195,
+        "p50Ms": 0.513,
+        "p95Ms": 3.017,
+        "sql": "SELECT type, count(*) FILTER (WHERE detected_at \u003e= $2 AND detected_at \u003c $3), count(*) FILTER (WHERE acted_at \u003e…"
+      },
+      {
+        "count": 300,
+        "maxMs": 5.166,
+        "p50Ms": 0.646,
+        "p95Ms": 2.232,
+        "sql": "SELECT id, tenant_id, conversation_id, connection_id, external_id, direction, type, text, sender_external_id, …"
+      },
+      {
+        "count": 300,
+        "maxMs": 6.817,
+        "p50Ms": 0.254,
+        "p95Ms": 2.211,
+        "sql": "commit"
+      },
+      {
+        "count": 300,
+        "maxMs": 8.036,
+        "p50Ms": 0.436,
+        "p95Ms": 2.079,
+        "sql": "SELECT (SELECT COALESCE(sum(estimated_amount), 0)::numeric(20,2)::text FROM opportunities WHERE tenant_id = $1…"
+      },
+      {
+        "count": 300,
+        "maxMs": 3.901,
+        "p50Ms": 0.212,
+        "p95Ms": 1.872,
+        "sql": "begin isolation level repeatable read read only"
+      },
+      {
+        "count": 300,
+        "maxMs": 3.955,
+        "p50Ms": 0.378,
+        "p95Ms": 1.75,
+        "sql": "SELECT id, tenant_id, opportunity_id, from_stage, to_stage, source, COALESCE(confidence::text, ''), ai_run_id,…"
+      },
+      {
+        "count": 300,
+        "maxMs": 3.356,
+        "p50Ms": 0.297,
+        "p95Ms": 1.577,
+        "sql": "SELECT count(*) FILTER (WHERE status = 'BOOKED'), count(*) FILTER (WHERE status = 'PAID'), count(*) FILTER (WH…"
+      }
+    ]
+  },
+  "explain": {
+    "lastMessage": "Limit  (cost=0.42..8.44 rows=1 width=24) (actual time=0.029..0.029 rows=1.00 loops=1)\n  Buffers: shared hit=4\n  -\u003e  Index Scan using messages_conversation_time_idx on messages m  (cost=0.42..8.44 rows=1 width=24) (actual time=0.028..0.028 rows=1.00 loops=1)\n        Index Cond: ((tenant_id = '01a066d8-8bab-7600-9da9-6d95fcb9e6d0'::uuid) AND (conversation_id = '01a066d8-8bb6-7a29-a39d-58c656358d6f'::uuid))\n        Filter: ((provider_deleted_at IS NULL) AND (direction = ANY ('{INCOMING,OUTGOING}'::text[])))\n        Index Searches: 1\n        Buffers: shared hit=4\nPlanning Time: 0.062 ms\nExecution Time: 0.037 ms",
+    "messagesCount": "Aggregate  (cost=404.15..404.16 rows=1 width=8) (actual time=0.673..0.673 rows=1.00 loops=1)\n  Buffers: shared hit=62 read=17\n  -\u003e  Index Only Scan using messages_conversation_time_idx on messages  (cost=0.43..391.63 rows=5007 width=0) (actual time=0.019..0.514 rows=5007.00 loops=1)\n        Index Cond: ((tenant_id = '01a066d8-8bab-7600-9da9-6d95fcb9e6d0'::uuid) AND (sent_at \u003e= (now() - '30 days'::interval)) AND (sent_at \u003c now()))\n        Heap Fetches: 8\n        Index Searches: 1\n        Buffers: shared hit=62 read=17\nPlanning:\n  Buffers: shared hit=6\nPlanning Time: 0.072 ms\nExecution Time: 0.684 ms",
+    "radarRisks": "Limit  (cost=23.63..23.68 rows=20 width=24) (actual time=0.035..0.036 rows=8.00 loops=1)\n  Buffers: shared hit=14\n  -\u003e  Sort  (cost=23.63..23.72 rows=34 width=24) (actual time=0.035..0.035 rows=8.00 loops=1)\n        Sort Key: detected_at DESC\n        Sort Method: quicksort  Memory: 25kB\n        Buffers: shared hit=14\n        -\u003e  Index Only Scan using risk_signals_radar_idx on risk_signals  (cost=0.28..22.77 rows=34 width=24) (actual time=0.023..0.029 rows=8.00 loops=1)\n              Index Cond: ((tenant_id = '01a066d8-8bab-7600-9da9-6d95fcb9e6d0'::uuid) AND (status = ANY ('{OPEN,ACKNOWLEDGED,ACTED}'::text[])))\n              Heap Fetches: 38\n              Index Searches: 1\n              Buffers: shared hit=14\nPlanning:\n  Buffers: shared hit=61\nPlanning Time: 0.264 ms\nExecution Time: 0.044 ms"
+  },
+  "scheduler": {
+    "checks": 200,
+    "completionLag": {
+      "count": 200,
+      "p50Ms": 2959.439,
+      "p95Ms": 3078.714,
+      "p99Ms": 3092.99,
+      "maxMs": 3096.48
+    },
+    "promotionLag": {
+      "count": 200,
+      "p50Ms": 373.904,
+      "p95Ms": 410.434,
+      "p99Ms": 410.434,
+      "maxMs": 410.434
+    },
+    "promotionMs": 395
+  },
+  "targets": {
+    "aiQueueP95S": 60,
+    "apiP95Ms": 300,
+    "ruleRiskAfterDueS": 10,
+    "webhookP95Ms": 200
+  },
+  "webhook": {
+    "count": 400,
+    "p50Ms": 16.078,
+    "p95Ms": 21.259,
+    "p99Ms": 24.917,
+    "maxMs": 26.229
+  },
+  "worker": {
+    "parallelJobs": 1600,
+    "parallelJobsPerSecond": 479.84311538939204,
+    "parallelWorkers": 4,
+    "singleJobs": 1600,
+    "singleJobsPerSecond": 170.87690601121807
+  }
+}

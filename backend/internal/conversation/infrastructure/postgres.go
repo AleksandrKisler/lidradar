@@ -708,25 +708,31 @@ func (repository *PostgresRepository) Messages(
 	if err != nil {
 		return nil, false, fmt.Errorf("список сообщений: %w", err)
 	}
-	defer rows.Close()
-	items := make([]domain.MessageView, 0, limit+1)
-	for rows.Next() {
-		message, _, scanErr := scanMessage(rows)
-		if scanErr != nil {
-			return nil, false, scanErr
-		}
-		attachments, attachmentErr := attachmentsByMessage(ctx, repository.pool, tenantID, message.ID)
-		if attachmentErr != nil {
-			return nil, false, attachmentErr
-		}
-		items = append(items, domain.MessageView{Message: message, Attachments: attachments})
-	}
-	if err := rows.Err(); err != nil {
+	// Сначала полностью вычитываем страницу и освобождаем соединение: вложенный запрос
+	// при открытом курсоре требовал второе соединение на запрос и при конкуренции
+	// >= размера пула приводил к взаимной блокировке пула (найдено нагрузочным тестом этапа 25).
+	messages, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Message, error) {
+		message, _, scanErr := scanMessage(row)
+		return message, scanErr
+	})
+	if err != nil {
 		return nil, false, fmt.Errorf("обход списка сообщений: %w", err)
 	}
-	more := len(items) > limit
+	more := len(messages) > limit
 	if more {
-		items = items[:limit]
+		messages = messages[:limit]
+	}
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		messageIDs = append(messageIDs, message.ID)
+	}
+	attachments, err := attachmentsByMessages(ctx, repository.pool, tenantID, messageIDs)
+	if err != nil {
+		return nil, false, err
+	}
+	items := make([]domain.MessageView, 0, len(messages))
+	for _, message := range messages {
+		items = append(items, domain.MessageView{Message: message, Attachments: attachments[message.ID]})
 	}
 	return items, more, nil
 }
@@ -772,22 +778,42 @@ func scanMessage(row rowScanner) (domain.Message, bool, error) {
 	return message, true, nil
 }
 
-func attachmentsByMessage(
+type attachmentQueryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func attachmentsByMessage(ctx context.Context, queryer attachmentQueryer, tenantID, messageID string) ([]domain.Attachment, error) {
+	byMessage, err := attachmentsByMessages(ctx, queryer, tenantID, []string{messageID})
+	if err != nil {
+		return nil, err
+	}
+	return byMessage[messageID], nil
+}
+
+// attachmentsByMessages читает вложения сразу для всей страницы сообщений одним запросом.
+// Для каждого сообщения в результате есть запись (возможно, пустой срез), чтобы
+// представление не различало «нет вложений» и «не загружали».
+func attachmentsByMessages(
 	ctx context.Context,
-	queryer interface {
-		Query(context.Context, string, ...any) (pgx.Rows, error)
-	},
-	tenantID, messageID string,
-) ([]domain.Attachment, error) {
+	queryer attachmentQueryer,
+	tenantID string,
+	messageIDs []string,
+) (map[string][]domain.Attachment, error) {
+	byMessage := make(map[string][]domain.Attachment, len(messageIDs))
+	for _, messageID := range messageIDs {
+		byMessage[messageID] = make([]domain.Attachment, 0)
+	}
+	if len(messageIDs) == 0 {
+		return byMessage, nil
+	}
 	rows, err := queryer.Query(ctx, `
 		SELECT id, tenant_id, message_id, object_key, mime_type, size_bytes, sha256, provider_file_id, created_at
-		FROM attachments WHERE tenant_id = $1 AND message_id = $2
-		ORDER BY object_key, id`, tenantID, messageID)
+		FROM attachments WHERE tenant_id = $1 AND message_id = ANY($2::uuid[])
+		ORDER BY message_id, object_key, id`, tenantID, messageIDs)
 	if err != nil {
 		return nil, fmt.Errorf("чтение вложений: %w", err)
 	}
 	defer rows.Close()
-	items := make([]domain.Attachment, 0)
 	for rows.Next() {
 		var attachment domain.Attachment
 		if err := rows.Scan(
@@ -800,9 +826,12 @@ func attachmentsByMessage(
 		if attachment.Validate() != nil {
 			return nil, domain.ErrInvalid
 		}
-		items = append(items, attachment)
+		byMessage[attachment.MessageID] = append(byMessage[attachment.MessageID], attachment)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("обход вложений: %w", err)
+	}
+	return byMessage, nil
 }
 
 func cursorTime(cursor *domain.PageCursor) *time.Time {

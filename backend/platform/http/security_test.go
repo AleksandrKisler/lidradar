@@ -73,3 +73,38 @@ func TestRateLimitProtectsUnauthenticatedPrefixes(t *testing.T) {
 		t.Fatalf("адрес IPv6 = %q", address)
 	}
 }
+
+// Этап 25: правила ограничения независимы — исчерпанный предел входа не
+// блокирует вебхуки с того же адреса (провайдеры шлют события всех
+// организаций с общих адресов), и наоборот.
+func TestRateLimitRulesAreIndependentPerPrefix(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	router := NewRouter("lidradar-api", observability.NewLogger(&bytes.Buffer{}, "test", "test"), readinessStub{},
+		WithRateLimit(
+			RateLimit{Requests: 2, Window: time.Minute, Prefixes: []string{"/api/v1/auth/"}},
+			RateLimit{Requests: 5, Window: time.Minute, Prefixes: []string{"/api/v1/webhooks/"}},
+		), WithClock(func() time.Time { return now }))
+	call := func(path string) int {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		request.RemoteAddr = "203.0.113.9:6000"
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response.Code
+	}
+	call("/api/v1/auth/login")
+	call("/api/v1/auth/login")
+	if code := call("/api/v1/auth/login"); code != http.StatusTooManyRequests {
+		t.Fatalf("третий вход = %d, нужно 429", code)
+	}
+	for attempt := 1; attempt <= 5; attempt++ {
+		if code := call("/api/v1/webhooks/GENERIC_WEBHOOK/t/c"); code == http.StatusTooManyRequests {
+			t.Fatalf("вебхук %d ограничен пределом входа", attempt)
+		}
+	}
+	if code := call("/api/v1/webhooks/GENERIC_WEBHOOK/t/c"); code != http.StatusTooManyRequests {
+		t.Fatalf("шестой вебхук = %d, нужно 429", code)
+	}
+	if code := call("/api/v1/risks"); code == http.StatusTooManyRequests {
+		t.Fatal("маршрут вне правил ограничен")
+	}
+}

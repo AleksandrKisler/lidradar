@@ -58,12 +58,16 @@ func TestLoadParsesRuntimeSettings(t *testing.T) {
 		databaseMaxConnsKey: "20",
 		databaseMinConnsKey: "2",
 		databaseTimeoutKey:  "750ms",
+		httpRateLimitKey:    "60",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if configuration.HTTP.Address != "127.0.0.1:9090" || configuration.HTTP.ShutdownTimeout != 3*time.Second {
 		t.Fatalf("Load().HTTP = %#v", configuration.HTTP)
+	}
+	if configuration.HTTP.RateLimitPerMinute != 60 || configuration.HTTP.WebhookRateLimitPerMinute != 1200 {
+		t.Fatalf("Load().HTTP пределы частоты = %#v", configuration.HTTP)
 	}
 	if configuration.Database.MaxConnections != 20 || configuration.Database.MinConnections != 2 || configuration.Database.ConnectTimeout != 750*time.Millisecond {
 		t.Fatalf("Load().Database = %#v", configuration.Database)
@@ -74,6 +78,10 @@ func TestLoadRejectsInvalidRuntimeSettings(t *testing.T) {
 	values := map[string]string{environmentKey: string(EnvironmentTest), databaseMaxConnsKey: "not-a-number"}
 	if _, err := Load(mapLookup(values)); err == nil || !strings.Contains(err.Error(), databaseMaxConnsKey) {
 		t.Fatalf("Load() error = %v, want connection limit error", err)
+	}
+	values = map[string]string{environmentKey: string(EnvironmentTest), httpWebhookRateLimitKey: "-1"}
+	if _, err := Load(mapLookup(values)); err == nil || !strings.Contains(err.Error(), httpWebhookRateLimitKey) {
+		t.Fatalf("Load() error = %v, want webhook rate limit error", err)
 	}
 }
 

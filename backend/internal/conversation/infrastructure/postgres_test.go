@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -273,5 +275,75 @@ func requireConversationCounts(
 		if count != query.want {
 			t.Fatalf("%s: count=%d, нужно %d", query.table, count, query.want)
 		}
+	}
+}
+
+// Регрессия этапа 25: страница сообщений читалась с открытым курсором и вложенным запросом
+// вложений, то есть требовала два соединения на запрос и при конкуренции >= размера пула
+// блокировала пул навсегда. Пул из двух соединений и шесть параллельных читателей
+// должны завершиться, а не упереться в дедлайн контекста.
+func TestMessagesPageUsesOneConnectionUnderContention(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	pair := testsupport.TwoTenants(t, ctx, pool)
+	generator := ids.Generator{}
+	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
+	repository := NewPostgresRepository(pool)
+	service := conversationapplication.NewService(repository, allowReader(true), generator)
+	connection := conversationConnection(t, connectorRepository, generator, pair.A.TenantID, &pair.A.LocationID)
+	baseTime := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	mime := "image/jpeg"
+	for index := 0; index < 5; index++ {
+		event := canonicalMessage(connection, fmt.Sprintf("event-%d", index), "dialog-1", fmt.Sprintf("message-%d", index),
+			"contact-1", connectordomain.CanonicalIncoming, baseTime.Add(time.Duration(index)*time.Minute))
+		event.Attachments = []connectordomain.CanonicalAttachment{{
+			ObjectKey: fmt.Sprintf("fixtures/photo-%d.jpg", index), MIMEType: &mime, SizeBytes: 1024,
+		}}
+		if err := service.IngestCanonical(ctx, event); err != nil {
+			t.Fatalf("сообщение %d: %v", index, err)
+		}
+	}
+	conversation := onlyConversation(t, repository, pair.A.TenantID)
+
+	configuration := pool.Config()
+	configuration.MaxConns = 2
+	configuration.MinConns = 0
+	small, err := pgxpool.NewWithConfig(ctx, configuration)
+	if err != nil {
+		t.Fatalf("пул из двух соединений: %v", err)
+	}
+	t.Cleanup(small.Close)
+	contended := NewPostgresRepository(small)
+
+	deadline, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	const readers = 6
+	failures := make(chan error, readers)
+	var wait sync.WaitGroup
+	for reader := 0; reader < readers; reader++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			messages, more, err := contended.Messages(deadline, pair.A.TenantID, conversation.ID, 3, nil)
+			if err != nil {
+				failures <- err
+				return
+			}
+			if len(messages) != 3 || !more {
+				failures <- fmt.Errorf("страница = %d сообщений, more=%v", len(messages), more)
+				return
+			}
+			for _, view := range messages {
+				if len(view.Attachments) != 1 || view.Attachments[0].MessageID != view.Message.ID {
+					failures <- fmt.Errorf("вложения сообщения %s = %#v", view.Message.ID, view.Attachments)
+					return
+				}
+			}
+		}()
+	}
+	wait.Wait()
+	close(failures)
+	for err := range failures {
+		t.Fatalf("конкурентное чтение страницы при пуле из двух соединений: %v", err)
 	}
 }

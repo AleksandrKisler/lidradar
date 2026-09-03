@@ -63,6 +63,9 @@ func schemaPools(t testing.TB, withRoles bool) Pools {
 			t.Fatalf("parse integration PostgreSQL: %v", err)
 		}
 		configuration.ConnConfig.RuntimeParams["search_path"] = schema
+		if TraceEnabled() {
+			configuration.ConnConfig.Tracer = LoadTrace
+		}
 		if role != "" {
 			platformpostgres.ConfigureRole(configuration, role)
 		}

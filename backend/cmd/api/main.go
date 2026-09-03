@@ -145,10 +145,16 @@ func run(ctx context.Context, configuration config.Config) error {
 		"lidradar-api", logger, postgres.NewSchemaReadiness(pool),
 		httpplatform.WithAllowedOrigins(configuration.HTTP.AllowedOrigins),
 		httpplatform.WithStrictTransport(configuration.Auth.CookieSecure),
-		httpplatform.WithRateLimit(httpplatform.RateLimit{
-			Requests: int(configuration.HTTP.RateLimitPerMinute), Window: time.Minute,
-			Prefixes: []string{"/api/v1/auth/", "/api/v1/webhooks/"},
-		}),
+		httpplatform.WithRateLimit(
+			httpplatform.RateLimit{
+				Requests: int(configuration.HTTP.RateLimitPerMinute), Window: time.Minute,
+				Prefixes: []string{"/api/v1/auth/"},
+			},
+			httpplatform.RateLimit{
+				Requests: int(configuration.HTTP.WebhookRateLimitPerMinute), Window: time.Minute,
+				Prefixes: []string{"/api/v1/webhooks/"},
+			},
+		),
 	)
 	router.Mount("/api/v1/auth", identitytransport.NewHandler(
 		identityService,

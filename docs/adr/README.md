@@ -49,6 +49,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0039: Базовая аналитика читает необработанные факты модулей](0039-basic-analytics-raw-facts.md) | Accepted |
 | [0040: Платформенное администрирование читает все модули и правит очереди](0040-platform-admin-observability.md) | Accepted |
 | [0041: Реализация RLS через роли пула и усиление периметра](0041-rls-enforcement-and-hardening.md) | Accepted |
+| [0042: Нагрузочное испытание в процессе на синтетическом наборе](0042-capacity-test-method.md) | Accepted |
 
 ## Workflow
 

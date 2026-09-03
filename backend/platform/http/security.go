@@ -93,10 +93,23 @@ func (limiter *rateLimiter) applies(path string) bool {
 	return false
 }
 
-func rateLimited(limiter *rateLimiter) func(http.Handler) http.Handler {
+// matchRateLimiter возвращает первое правило, чей префикс совпал с путём;
+// правила независимы: вебхуки провайдеров приходят с общих адресов и имеют
+// собственный, более высокий предел (этап 25), вход и регистрация — свой.
+func matchRateLimiter(limiters []*rateLimiter, path string) *rateLimiter {
+	for _, limiter := range limiters {
+		if limiter != nil && limiter.limit.Requests > 0 && limiter.applies(path) {
+			return limiter
+		}
+	}
+	return nil
+}
+
+func rateLimited(limiters []*rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if limiter == nil || limiter.limit.Requests <= 0 || !limiter.applies(r.URL.Path) {
+			limiter := matchRateLimiter(limiters, r.URL.Path)
+			if limiter == nil {
 				next.ServeHTTP(w, r)
 				return
 			}

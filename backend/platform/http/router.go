@@ -16,7 +16,7 @@ import (
 type routerOptions struct {
 	allowedOrigins  []string
 	strictTransport bool
-	rateLimit       RateLimit
+	rateLimits      []RateLimit
 	now             func() time.Time
 }
 
@@ -37,8 +37,9 @@ func WithStrictTransport(enabled bool) RouterOption {
 }
 
 // WithRateLimit ограничивает частоту запросов на адрес для указанных префиксов.
-func WithRateLimit(limit RateLimit) RouterOption {
-	return func(options *routerOptions) { options.rateLimit = limit }
+// Каждое правило считается отдельно; при совпадении нескольких применяется первое.
+func WithRateLimit(limits ...RateLimit) RouterOption {
+	return func(options *routerOptions) { options.rateLimits = append(options.rateLimits, limits...) }
 }
 
 // WithClock подменяет часы ограничителя частоты в тестах.
@@ -68,7 +69,11 @@ func NewRouter(service string, logger *slog.Logger, readiness health.Checker, op
 	router.Use(recovery(logger))
 	router.Use(requestLogging(logger))
 	router.Use(originProtection(configuration.allowedOrigins))
-	router.Use(rateLimited(newRateLimiter(configuration.rateLimit, configuration.now)))
+	limiters := make([]*rateLimiter, 0, len(configuration.rateLimits))
+	for _, limit := range configuration.rateLimits {
+		limiters = append(limiters, newRateLimiter(limit, configuration.now))
+	}
+	router.Use(rateLimited(limiters))
 
 	router.Get("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": service})
