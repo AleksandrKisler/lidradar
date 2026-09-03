@@ -6,3 +6,5 @@
 .env.*
 bin
 work
+runtime
+backups

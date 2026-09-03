@@ -1,7 +1,7 @@
 .PHONY: ai-benchmark-dev ai-benchmark-golden ai-dataset ai-dataset-audit build check clean fmt test test-db vet
 
 BIN_DIR ?= bin
-COMMANDS := api worker scheduler ai-agent ai-node-register ai-node-manage migrate
+COMMANDS := api worker scheduler ai-agent ai-node-register ai-node-manage migrate dev-data
 BUILD_VERSION ?= development
 BUILD_REVISION ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_LDFLAGS := -X lidradar/backend/platform/buildinfo.Version=$(BUILD_VERSION) -X lidradar/backend/platform/buildinfo.Revision=$(BUILD_REVISION)
@@ -69,3 +69,31 @@ check: vet test ai-dataset-audit
 
 clean:
 	rm -rf "$(BIN_DIR)"
+
+# Отдельный стенд фронтенда: .env и основная база никогда не используются.
+FRONTEND_COMPOSE := docker compose --env-file /dev/null -f compose.frontend.yaml
+.PHONY: frontend-up frontend-stop frontend-data-up frontend-data-down frontend-data-status frontend-background
+
+frontend-up:
+	@mkdir -p runtime/frontend
+	$(FRONTEND_COMPOSE) up -d --wait postgres
+	$(FRONTEND_COMPOSE) run --rm --build migrate
+	$(FRONTEND_COMPOSE) run --rm --build --user "$$(id -u):$$(id -g)" dev-data up -password-file /run/lidradar-dev/password.txt
+	$(FRONTEND_COMPOSE) up -d --build --wait api
+
+frontend-data-up:
+	@mkdir -p runtime/frontend
+	$(FRONTEND_COMPOSE) run --rm --build --user "$$(id -u):$$(id -g)" dev-data up -password-file /run/lidradar-dev/password.txt
+
+frontend-data-down:
+	$(FRONTEND_COMPOSE) stop api worker scheduler
+	$(FRONTEND_COMPOSE) run --rm --build dev-data down -confirm frontend-v1
+
+frontend-data-status:
+	$(FRONTEND_COMPOSE) run --rm --build dev-data status
+
+frontend-background:
+	$(FRONTEND_COMPOSE) --profile background up -d --build worker scheduler
+
+frontend-stop:
+	$(FRONTEND_COMPOSE) --profile background stop

@@ -1,0 +1,92 @@
+# Независимый стенд: не использует .env, токен Telegram, AI-узел или том
+# основного compose.yaml. Команды запуска всегда содержат --env-file /dev/null.
+name: lidradar-frontend
+
+x-environment: &environment
+  LIDRADAR_ENV: development
+  LIDRADAR_DATABASE_URL: postgres://lidradar:lidradar@postgres:5432/lidradar_frontend?sslmode=disable
+  LIDRADAR_DATABASE_MAX_CONNS: "10"
+  LIDRADAR_DATABASE_MIN_CONNS: "1"
+
+x-command: &command
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: *environment
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: lidradar_frontend
+      POSTGRES_USER: lidradar
+      POSTGRES_PASSWORD: lidradar
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lidradar -d lidradar_frontend"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - frontend-postgres:/var/lib/postgresql
+
+  migrate:
+    <<: *command
+    build:
+      context: .
+      args:
+        COMMAND: migrate
+    profiles: ["tools"]
+
+  dev-data:
+    <<: *command
+    build:
+      context: .
+      args:
+        COMMAND: dev-data
+    profiles: ["tools"]
+    volumes:
+      - ./runtime/frontend:/run/lidradar-dev
+    command: ["status"]
+
+  api:
+    <<: *command
+    build:
+      context: .
+      args:
+        COMMAND: api
+    environment:
+      <<: *environment
+      LIDRADAR_HTTP_ADDRESS: :8080
+      LIDRADAR_COOKIE_SECURE: "false"
+      LIDRADAR_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "127.0.0.1:8081:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/ready"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  worker:
+    <<: *command
+    build:
+      context: .
+      args:
+        COMMAND: worker
+    profiles: ["background"]
+
+  scheduler:
+    <<: *command
+    build:
+      context: .
+      args:
+        COMMAND: scheduler
+    profiles: ["background"]
+
+volumes:
+  frontend-postgres:
