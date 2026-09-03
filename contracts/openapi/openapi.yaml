@@ -777,6 +777,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Ключ идемпотентности использован с другим содержимым., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/analytics/summary:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Сводка базовой аналитики за окно календарных дат
+      description: Показатели считаются из необработанных фактов модулей одним снимком (ADR 0039). Окно задаётся датами включительно в часовом поясе организации; по умолчанию — 30 дней, включая сегодняшний; не длиннее 366 дней. Деньги — только в валюте организации. Требует analytics.read.
+      operationId: getAnalyticsSummary
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date }, description: Начальная дата YYYY-MM-DD включительно. }
+        - { name: to, in: query, required: false, schema: { type: string, format: date }, description: Конечная дата YYYY-MM-DD включительно. }
+      responses:
+        '200':
+          description: Сводка за окно.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AnalyticsSummary' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/events:
     get:
       summary: Получать сигналы об изменениях организации
@@ -1552,6 +1569,85 @@ components:
         scope: { type: string, enum: [DATASETS] }
         active: { type: boolean }
         consent: { oneOf: [{ $ref: '#/components/schemas/MLConsent' }, { type: 'null' }] }
+    AnalyticsPeriod:
+      type: object
+      additionalProperties: false
+      required: [fromDate, toDate, timezone, from, to]
+      properties:
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        timezone: { type: string, description: 'IANA-пояс организации, в котором заданы даты.' }
+        from: { type: string, format: date-time, description: Начало окна в UTC включительно. }
+        to: { type: string, format: date-time, description: Конец окна в UTC исключительно. }
+    AnalyticsMessages:
+      type: object
+      additionalProperties: false
+      required: [total, incoming, outgoing, conversations]
+      properties:
+        total: { type: integer, minimum: 0 }
+        incoming: { type: integer, minimum: 0 }
+        outgoing: { type: integer, minimum: 0 }
+        conversations: { type: integer, minimum: 0, description: Переписки с первым сообщением в окне. }
+    AnalyticsOpportunities:
+      type: object
+      additionalProperties: false
+      required: [created, booked, won, lost]
+      properties:
+        created: { type: integer, minimum: 0, description: 'Сделки, открытые в окне.' }
+        booked: { type: integer, minimum: 0, description: Сделки с переходом в BOOKED в окне. }
+        won: { type: integer, minimum: 0 }
+        lost: { type: integer, minimum: 0 }
+    AnalyticsRiskCounters:
+      type: object
+      required: [detected, acted, resolved, falsePositive]
+      properties:
+        detected: { type: integer, minimum: 0 }
+        acted: { type: integer, minimum: 0 }
+        resolved: { type: integer, minimum: 0 }
+        falsePositive: { type: integer, minimum: 0 }
+    AnalyticsRiskType:
+      allOf:
+        - $ref: '#/components/schemas/AnalyticsRiskCounters'
+        - type: object
+          required: [riskType]
+          properties:
+            riskType: { $ref: '#/components/schemas/RiskType' }
+    AnalyticsRisks:
+      allOf:
+        - $ref: '#/components/schemas/AnalyticsRiskCounters'
+        - type: object
+          required: [byType]
+          properties:
+            byType: { type: array, items: { $ref: '#/components/schemas/AnalyticsRiskType' }, description: Всегда пять типов в порядке §27. }
+    AnalyticsOutcomes:
+      type: object
+      additionalProperties: false
+      required: [booked, paid, lost]
+      properties:
+        booked: { type: integer, minimum: 0 }
+        paid: { type: integer, minimum: 0 }
+        lost: { type: integer, minimum: 0 }
+    AnalyticsRevenue:
+      type: object
+      additionalProperties: false
+      required: [currency, potential, confirmed, confirmedRecovered, confirmedPayments]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        potential: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: 'Оценка ещё открытых сделок, открытых в окне; не выручка.' }
+        confirmed: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Подтверждённые события выручки окна. }
+        confirmedRecovered: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Их часть с атрибуцией RECOVERED (§39). }
+        confirmedPayments: { type: integer, minimum: 0 }
+    AnalyticsSummary:
+      type: object
+      additionalProperties: false
+      required: [period, messages, opportunities, risks, outcomes, revenue]
+      properties:
+        period: { $ref: '#/components/schemas/AnalyticsPeriod' }
+        messages: { $ref: '#/components/schemas/AnalyticsMessages' }
+        opportunities: { $ref: '#/components/schemas/AnalyticsOpportunities' }
+        risks: { $ref: '#/components/schemas/AnalyticsRisks' }
+        outcomes: { $ref: '#/components/schemas/AnalyticsOutcomes' }
+        revenue: { $ref: '#/components/schemas/AnalyticsRevenue' }
     RadarSummary:
       type: object
       required: [openRisks, criticalRisks, potentialRevenue, confirmedRecoveredRevenue]

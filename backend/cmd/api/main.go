@@ -11,6 +11,9 @@ import (
 	aiapplication "lidradar/backend/internal/ai/application"
 	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
 	aitransport "lidradar/backend/internal/ai/transport"
+	analyticsapplication "lidradar/backend/internal/analytics/application"
+	analyticsinfrastructure "lidradar/backend/internal/analytics/infrastructure"
+	analyticstransport "lidradar/backend/internal/analytics/transport"
 	catalogapplication "lidradar/backend/internal/catalog/application"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	catalogtransport "lidradar/backend/internal/catalog/transport"
@@ -141,6 +144,9 @@ func run(ctx context.Context, configuration config.Config) error {
 	router.Mount("/api/v1/conversations", conversationtransport.NewHandler(conversationService, principalResolver).Router())
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, principalResolver).Router())
 	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, notificationPreferences, principalResolver).Router())
+	router.Mount("/api/v1/analytics", analyticstransport.NewHandler(
+		analyticsapplication.NewService(analyticsinfrastructure.NewPostgresStore(pool), permissionService, time.Now), principalResolver,
+	).Router())
 	connectorHandler := connectortransport.NewHandler(connectorService, principalResolver)
 	router.Mount("/api/v1/integrations", connectorHandler.ManagementRouter())
 	router.Mount("/api/v1/webhooks", connectorHandler.WebhookRouter())
