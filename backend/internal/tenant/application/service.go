@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	auditapplication "lidradar/backend/internal/audit/application"
 	identityapplication "lidradar/backend/internal/identity/application"
 	"lidradar/backend/internal/tenant/domain"
+	"lidradar/backend/platform/tenantctx"
 )
 
 var (
@@ -87,6 +89,20 @@ type Service struct {
 	permissions PermissionService
 	ids         IDs
 	now         func() time.Time
+	auditor     auditapplication.Recorder
+}
+
+// WithAuditor включает аудит настроек организации и изменений состава (ТЗ §65).
+func (service Service) WithAuditor(auditor auditapplication.Recorder) Service {
+	service.auditor = auditor
+	return service
+}
+
+func (service Service) audit(ctx context.Context, tenantID, actorID, operation, entityType, entityID string) error {
+	if service.auditor == nil {
+		return nil
+	}
+	return service.auditor.Tenant(ctx, auditapplication.TenantEntry(tenantID, actorID, operation, entityType, entityID, service.now()))
 }
 
 func NewService(repository domain.Repository, permissions PermissionService, ids IDs, now func() time.Time) Service {
@@ -114,7 +130,8 @@ func (service Service) CreateOrganization(ctx context.Context, actorID, name, ti
 	if err != nil {
 		return domain.Organization{}, ErrInvalid
 	}
-	if err := service.repository.CreateOrganizationWithOwner(ctx, organization, membership); err != nil {
+	// Новая организация ещё не в заголовке запроса: контекст RLS задаётся из её идентификатора.
+	if err := service.repository.CreateOrganizationWithOwner(tenantctx.WithTenant(ctx, organization.ID), organization, membership); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			return domain.Organization{}, ErrConflict
 		}
@@ -177,6 +194,9 @@ func (service Service) UpdateOrganization(ctx context.Context, actorID, tenantID
 	if !found {
 		return domain.Organization{}, ErrNotFound
 	}
+	if err := service.audit(ctx, tenantID, actorID, "ORGANIZATION_UPDATED", "ORGANIZATION", tenantID); err != nil {
+		return domain.Organization{}, err
+	}
 	return organization, nil
 }
 
@@ -196,6 +216,9 @@ func (service Service) AddMember(ctx context.Context, actorID, tenantID, userID 
 		if errors.Is(err, domain.ErrConflict) {
 			return domain.Membership{}, ErrConflict
 		}
+		return domain.Membership{}, err
+	}
+	if err := service.audit(ctx, tenantID, actorID, "MEMBER_ADDED", "MEMBERSHIP", membership.ID); err != nil {
 		return domain.Membership{}, err
 	}
 	return membership, nil

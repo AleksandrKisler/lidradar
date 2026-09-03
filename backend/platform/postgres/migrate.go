@@ -26,9 +26,28 @@ type migration struct {
 
 // Migrate applies every immutable SQL migration exactly once.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return MigrateUpTo(ctx, pool, "")
+}
+
+// MigrateUpTo применяет миграции по указанную версию включительно: так
+// проверяется, что схема прежнего выпуска принимает следующие миграции
+// (LR-BE-2409). Пустая версия означает все миграции.
+func MigrateUpTo(ctx context.Context, pool *pgxpool.Pool, upTo string) error {
 	migrations, err := loadMigrations()
 	if err != nil {
 		return err
+	}
+	if upTo != "" {
+		limit := -1
+		for index, item := range migrations {
+			if item.version == upTo {
+				limit = index
+			}
+		}
+		if limit < 0 {
+			return fmt.Errorf("migration %s is unknown", upTo)
+		}
+		migrations = migrations[:limit+1]
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {

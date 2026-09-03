@@ -9,6 +9,7 @@ import (
 	"lidradar/backend/internal/events/domain"
 	jobsdomain "lidradar/backend/internal/jobs/domain"
 	"lidradar/backend/platform/observability"
+	"lidradar/backend/platform/tenantctx"
 )
 
 const DefaultLease = 30 * time.Second
@@ -74,7 +75,7 @@ func (dispatcher Dispatcher) RunOne(ctx context.Context) (bool, error) {
 	if handler == nil {
 		handleErr = jobsdomain.Permanent("UNSUPPORTED_EVENT_TYPE", errors.New("обработчик события не зарегистрирован"))
 	} else {
-		handleErr = handler(ctx, event)
+		handleErr = handler(tenantctx.WithTenant(ctx, event.TenantID), event)
 	}
 	finishedAt := dispatcher.now().UTC()
 	if handleErr == nil {

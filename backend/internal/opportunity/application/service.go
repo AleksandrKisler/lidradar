@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	auditapplication "lidradar/backend/internal/audit/application"
 	"lidradar/backend/internal/opportunity/domain"
 )
 
@@ -31,6 +32,13 @@ type Service struct {
 	authorizer Authorizer
 	ids        IDs
 	now        func() time.Time
+	auditor    auditapplication.Recorder
+}
+
+// WithAuditor включает аудит ручных переходов этапа (ТЗ §65).
+func (service Service) WithAuditor(auditor auditapplication.Recorder) Service {
+	service.auditor = auditor
+	return service
 }
 
 func NewService(repository domain.Repository, authorizer Authorizer, ids IDs, now func() time.Time) Service {
@@ -83,6 +91,13 @@ func (service Service) ChangeStage(
 	})
 	if err != nil {
 		return domain.Opportunity{}, false, mapDomainError(err)
+	}
+	if changed && service.auditor != nil {
+		if err := service.auditor.Tenant(ctx, auditapplication.TenantEntry(
+			tenantID, actorID, "OPPORTUNITY_STAGE_CHANGED", "OPPORTUNITY", opportunityID, service.now(),
+		)); err != nil {
+			return domain.Opportunity{}, false, err
+		}
 	}
 	return opportunity, changed, nil
 }

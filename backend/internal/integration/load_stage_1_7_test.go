@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"lidradar/backend/platform/tenantctx"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -118,7 +119,7 @@ func TestLoadCommercialCandidateContention(t *testing.T) {
 		go func(index int) {
 			defer wait.Done()
 			requestStarted := time.Now()
-			_, created, err := fixture.candidates.Evaluate(context.Background(), tenantID, conversationID)
+			_, created, err := fixture.candidates.Evaluate(tenantctx.WithTenant(context.Background(), tenantID), tenantID, conversationID)
 			durations[index] = time.Since(requestStarted)
 			errorsChannel <- err
 			createdChannel <- created

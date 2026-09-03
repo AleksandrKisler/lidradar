@@ -650,6 +650,34 @@ Outcome → Revenue` по сообщению. Тексты сообщений, �
 `job_id`, `job_type`, `event_id`, `event_type`, `tenant_id`, `attempt`,
 `error_code`, `duration_ms`; текст ошибки целиком не пишется.
 
+### Изоляция организаций на уровне базы и усиление периметра
+
+RLS включён на всех таблицах с `tenant_id` и на `organizations` с
+принудительным режимом (ADR 0034, ADR 0041). Политика пропускает строку
+организации из настройки сеанса `lidradar.tenant_id` либо члена роли
+`lidradar_platform`; пустая настройка не совпадает ни с одной строкой.
+Роли `lidradar_app` (API), `lidradar_worker` (обработчики заданий и событий)
+и `lidradar_platform` (захват заданий и доставок, планировщик, диспетчер,
+API AI-узла, администрирование) создаются миграцией `000020`; пул
+`postgres.OpenAs` переключает роль при подключении и перед каждой выдачей
+соединения приводит настройки сеанса к контексту запроса
+(`platform/tenantctx`). Пользователь видит собственные членства и
+организации через `lidradar.user_id`. Прямые вызовы сервисов без контекста
+видят пустые данные — так и задумано.
+
+Каждое критическое действие §65 оставляет запись: вход, выход и регистрация
+— в append-only `auth_audit_log`; настройки организации, состав участников,
+подключение и отключение каналов, ручной переход этапа, подтверждение и
+закрытие риска, обратная связь, действия, исходы, выручка, изменение политики
+уведомлений и ML-согласие — в `audit_log`; административные команды — в
+`admin_audit_log`. Ответы API несут заголовки `X-Content-Type-Options`,
+`X-Frame-Options`, `Referrer-Policy`, `Cache-Control: no-store`,
+`Content-Security-Policy`, а HSTS — при Secure cookie или TLS. Маршруты без
+сессии (`/api/v1/auth/*`, `/api/v1/webhooks/*`) ограничены по адресу
+(`LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE`); ограничение входа по учётной записи
+хранится в PostgreSQL. Резервные копии и учение восстановления описаны в
+[`../runbooks/backup-restore.md`](../runbooks/backup-restore.md).
+
 ### Рекомендации, действия и исходы
 
 Каждый поддерживаемый тип Risk имеет детерминированную шаблонную рекомендацию,
@@ -869,6 +897,7 @@ RTX 4060 с 8 GB видеопамяти, с записанными SHA-256 мо�
   считается по последнему вердикту на Risk через `DISTINCT ON (risk_id)`, а
   критерий Milestone E засчитывается только при `coverage_rate >= 0.5`
   (LR-BE-RM-019); см. «Обратная связь и точность рисков».
-- RLS (этап 24): роли `lidradar_app`, `lidradar_worker`, `lidradar_platform` и
-  fail-closed политика по `current_setting('lidradar.tenant_id', true)`
-  (ADR 0034).
+- RLS — включён миграцией `000020_row_level_security`: роли `lidradar_app`,
+  `lidradar_worker`, `lidradar_platform` и fail-closed политика по
+  `current_setting('lidradar.tenant_id', true)` (ADR 0034, ADR 0041); см.
+  «Изоляция организаций на уровне базы».

@@ -16,6 +16,7 @@ import (
 const (
 	environmentKey              = "LIDRADAR_ENV"
 	httpAddressKey              = "LIDRADAR_HTTP_ADDRESS"
+	httpRateLimitKey            = "LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE"
 	databaseURLKey              = "LIDRADAR_DATABASE_URL"
 	shutdownTimeoutKey          = "LIDRADAR_SHUTDOWN_TIMEOUT"
 	databaseMaxConnsKey         = "LIDRADAR_DATABASE_MAX_CONNS"
@@ -40,6 +41,7 @@ const (
 	aiHTTPTimeoutKey            = "LIDRADAR_AI_HTTP_TIMEOUT"
 	aiSignatureWindowKey        = "LIDRADAR_AI_SIGNATURE_WINDOW"
 	defaultHTTPAddress          = ":8080"
+	defaultHTTPRateLimit        = int32(120)
 	defaultDatabaseURL          = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
 	defaultShutdown             = 10 * time.Second
 	defaultDatabaseWait         = 5 * time.Second
@@ -88,6 +90,9 @@ type HTTP struct {
 	Address         string
 	ShutdownTimeout time.Duration
 	AllowedOrigins  []string
+	// RateLimitPerMinute ограничивает запросы без сессии (вход, вебхуки) на
+	// сетевой адрес; ноль отключает ограничение (LR-BE-2404).
+	RateLimitPerMinute int32
 }
 
 // Auth contains server-side session and cookie settings.
@@ -183,6 +188,9 @@ func Load(lookup LookupEnv) (Config, error) {
 	if configuration.HTTP.ShutdownTimeout, err = durationValue(lookup, shutdownTimeoutKey, defaultShutdown); err != nil {
 		return Config{}, err
 	}
+	if configuration.HTTP.RateLimitPerMinute, err = int32Value(lookup, httpRateLimitKey, defaultHTTPRateLimit); err != nil {
+		return Config{}, err
+	}
 	if configuration.Database.ConnectTimeout, err = durationValue(lookup, databaseTimeoutKey, defaultDatabaseWait); err != nil {
 		return Config{}, err
 	}
@@ -240,6 +248,9 @@ func (c Config) Validate() error {
 	}
 	if c.HTTP.ShutdownTimeout <= 0 {
 		return fmt.Errorf("%s must be positive", shutdownTimeoutKey)
+	}
+	if c.HTTP.RateLimitPerMinute < 0 {
+		return fmt.Errorf("%s must not be negative", httpRateLimitKey)
 	}
 	if c.Database.ConnectTimeout <= 0 {
 		return fmt.Errorf("%s must be positive", databaseTimeoutKey)

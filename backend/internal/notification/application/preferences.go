@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	auditapplication "lidradar/backend/internal/audit/application"
 	"lidradar/backend/internal/notification/domain"
 )
 
@@ -43,6 +44,13 @@ type PreferenceService struct {
 	authorizer MembershipAuthorizer
 	ids        IDs
 	now        func() time.Time
+	auditor    auditapplication.Recorder
+}
+
+// WithAuditor включает аудит изменения политики уведомлений (ТЗ §65).
+func (service PreferenceService) WithAuditor(auditor auditapplication.Recorder) PreferenceService {
+	service.auditor = auditor
+	return service
 }
 
 func NewPreferenceService(store PreferenceStore, authorizer MembershipAuthorizer, ids IDs, now func() time.Time) PreferenceService {
@@ -91,6 +99,13 @@ func (service PreferenceService) Put(
 	if err != nil {
 		return PreferenceView{}, err
 	}
+	if service.auditor != nil {
+		if err := service.auditor.Tenant(ctx, auditapplication.TenantEntry(
+			tenantID, actorID, "NOTIFICATION_POLICY_CHANGED", "NOTIFICATION_PREFERENCE", saved.ID, service.now(),
+		)); err != nil {
+			return PreferenceView{}, err
+		}
+	}
 	return PreferenceView{Preference: saved, Timezone: timezone}, nil
 }
 
@@ -103,8 +118,23 @@ func (service PreferenceService) Reset(ctx context.Context, actorID, tenantID, r
 	if !domain.ValidRiskType(parsed) {
 		return domain.ErrInvalidPreference
 	}
-	_, err := service.store.DeletePreference(ctx, tenantID, actorID, parsed)
-	return err
+	stored, err := service.store.Preferences(ctx, tenantID, actorID)
+	if err != nil {
+		return err
+	}
+	var storedID string
+	for _, preference := range stored {
+		if preference.RiskType == parsed {
+			storedID = preference.ID
+		}
+	}
+	deleted, err := service.store.DeletePreference(ctx, tenantID, actorID, parsed)
+	if err != nil || !deleted || service.auditor == nil || storedID == "" {
+		return err
+	}
+	return service.auditor.Tenant(ctx, auditapplication.TenantEntry(
+		tenantID, actorID, "NOTIFICATION_POLICY_RESET", "NOTIFICATION_PREFERENCE", storedID, service.now(),
+	))
 }
 
 func (service PreferenceService) authorize(ctx context.Context, actorID, tenantID string) (string, error) {

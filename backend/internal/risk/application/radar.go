@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	auditapplication "lidradar/backend/internal/audit/application"
 	"lidradar/backend/internal/risk/domain"
 )
 
@@ -114,10 +115,17 @@ type Invalidator interface {
 }
 
 type Radar struct {
-	store  RadarStore
-	auth   Authorizer
-	events Invalidator
-	now    func() time.Time
+	store   RadarStore
+	auth    Authorizer
+	events  Invalidator
+	now     func() time.Time
+	auditor auditapplication.Recorder
+}
+
+// WithAuditor включает аудит подтверждения и закрытия риска (ТЗ §65).
+func (s Radar) WithAuditor(auditor auditapplication.Recorder) Radar {
+	s.auditor = auditor
+	return s
 }
 
 func NewRadar(store RadarStore, auth Authorizer, events Invalidator, now func() time.Time) Radar {
@@ -213,6 +221,15 @@ func (s Radar) change(ctx context.Context, actor, tenant, id, event string, fn f
 	}
 	if mutation.Changed && s.events != nil {
 		s.events.Publish(tenant, event, id)
+	}
+	if mutation.Changed && s.auditor != nil {
+		operation := "RISK_RESOLVED"
+		if event == "risk.acknowledged" {
+			operation = "RISK_ACKNOWLEDGED"
+		}
+		if err := s.auditor.Tenant(ctx, auditapplication.TenantEntry(tenant, actor, operation, "RISK", id, s.now())); err != nil {
+			return domain.Risk{}, err
+		}
 	}
 	return mutation.Risk, nil
 }

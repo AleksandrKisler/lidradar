@@ -15,6 +15,7 @@ import (
 	"lidradar/backend/internal/identity/application"
 	"lidradar/backend/internal/identity/domain"
 	httpplatform "lidradar/backend/platform/http"
+	"lidradar/backend/platform/tenantctx"
 )
 
 const SessionCookieName = "lidradar_session"
@@ -112,7 +113,7 @@ func (h Handler) me(w http.ResponseWriter, r *http.Request) {
 	}
 	memberships := []application.MembershipSummary{}
 	if h.memberships != nil {
-		memberships, err = h.memberships.MembershipsForUser(r.Context(), user.ID)
+		memberships, err = h.memberships.MembershipsForUser(tenantctx.WithActor(r.Context(), user.ID), user.ID)
 		if err != nil {
 			httpplatform.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error", nil)
 			return

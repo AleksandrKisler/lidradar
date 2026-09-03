@@ -22,6 +22,7 @@ import (
 	analyticsapplication "lidradar/backend/internal/analytics/application"
 	analyticsinfrastructure "lidradar/backend/internal/analytics/infrastructure"
 	analyticstransport "lidradar/backend/internal/analytics/transport"
+	auditinfrastructure "lidradar/backend/internal/audit/infrastructure"
 	catalogapplication "lidradar/backend/internal/catalog/application"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	catalogtransport "lidradar/backend/internal/catalog/transport"
@@ -63,6 +64,7 @@ import (
 	httpplatform "lidradar/backend/platform/http"
 	"lidradar/backend/platform/ids"
 	platformpostgres "lidradar/backend/platform/postgres"
+	"lidradar/backend/platform/tenantctx"
 )
 
 type apiFixture struct {
@@ -78,7 +80,12 @@ type apiFixture struct {
 
 func newAPIFixture(t *testing.T) apiFixture {
 	t.Helper()
-	pool := testsupport.Postgres(t)
+	pools := testsupport.PostgresRoles(t)
+	// Репозитории API и обработчиков работают под ролью с RLS; захват заданий,
+	// исходящий журнал, доставки и администрирование — под платформенной ролью.
+	pool := pools.App
+	auditRecorder := auditinfrastructure.NewPostgresRecorder(pool, ids.Generator{})
+	claimStore := jobsinfrastructure.NewPostgresStore(pools.Platform)
 	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
@@ -86,13 +93,13 @@ func newAPIFixture(t *testing.T) apiFixture {
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
 	opportunityRepository := opportunityinfrastructure.NewPostgresRepository(pool)
 	permissions := application.NewPermissionService(tenantRepository)
-	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now)
+	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now).WithAuditor(auditRecorder)
 	catalogService := catalogapplication.NewService(catalogRepository, permissions, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
 		connectorRepository, permissions, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
-	)
+	).WithAuditor(auditRecorder)
 	conversationService := conversationapplication.NewService(conversationRepository, permissions, ids.Generator{})
-	opportunityService := opportunityapplication.NewService(opportunityRepository, permissions, ids.Generator{}, time.Now)
+	opportunityService := opportunityapplication.NewService(opportunityRepository, permissions, ids.Generator{}, time.Now).WithAuditor(auditRecorder)
 	candidateProcessor := opportunityapplication.NewCandidateProcessor(
 		opportunityRepository, conversationService, catalogRepository, ids.Generator{}, time.Now,
 	)
@@ -100,7 +107,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 		connectorRepository, connectorinfrastructure.NewRegistry(), conversationService, time.Now,
 	)
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
-	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+	eventStore := eventsinfrastructure.NewPostgresStore(pools.Platform)
 	aiStore := aiinfrastructure.NewPostgresStore(pool)
 	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, aiapplication.DefaultModelVersion)
 	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).WithAnalysisDebounce(0).
@@ -112,7 +119,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	riskEvents := risktransport.NewHub()
 	riskRadar := riskapplication.NewRadar(
 		riskinfrastructure.NewPostgresRadarStore(pool), permissions, riskEvents, time.Now,
-	)
+	).WithAuditor(auditRecorder)
 	correctiveService := correctiveapplication.NewService(
 		correctiveinfrastructure.NewPostgresStore(pool), permissions, ids.Generator{}, time.Now,
 	).WithInvalidator(riskEvents)
@@ -156,6 +163,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
 	).WithPolicy(notificationRepository, jobStore)
+	deliveryRepository := notificationinfrastructure.NewPostgresRepository(pools.Platform)
+	deliveryService := notificationapplication.NewService(
+		deliveryRepository, deliveryRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
+	).WithPolicy(deliveryRepository, claimStore)
 	dispatcher := eventsapplication.NewDispatcher(
 		eventStore, "integration-outbox",
 		map[string]eventsapplication.Handler{
@@ -177,7 +188,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 		}, time.Now, eventsapplication.DefaultLease,
 	)
 	worker := jobsapplication.NewWorker(
-		jobStore, "integration-jobs",
+		claimStore, "integration-jobs",
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
@@ -194,7 +205,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	identityService := identityapplication.NewService(
 		identityRepository, identityinfrastructure.NewPostgresRateLimiter(pool), cryptoplatform.PasswordHasher{},
 		ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
-	)
+	).WithAuditor(auditRecorder)
 	resolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),
@@ -202,7 +213,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	)
 	notificationPreferences := notificationapplication.NewPreferenceService(
 		notificationRepository, permissions, ids.Generator{}, time.Now,
-	)
+	).WithAuditor(auditRecorder)
 	router := httpplatform.NewRouter(
 		"lidradar-api", slog.New(slog.NewTextHandler(io.Discard, nil)),
 		platformpostgres.NewSchemaReadiness(pool),
@@ -215,7 +226,7 @@ func newAPIFixture(t *testing.T) apiFixture {
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, resolver).Router())
 	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, notificationPreferences, resolver).Router())
 	router.Mount("/api/v1/admin", admintransport.NewHandler(
-		adminapplication.NewService(admininfrastructure.NewPostgresStore(pool), ids.Generator{}, time.Now), resolver,
+		adminapplication.NewService(admininfrastructure.NewPostgresStore(pools.Platform), ids.Generator{}, time.Now), resolver,
 	).Router())
 	router.Mount("/api/v1/analytics", analyticstransport.NewHandler(
 		analyticsapplication.NewService(analyticsinfrastructure.NewPostgresStore(pool), permissions, time.Now), resolver,
@@ -232,8 +243,8 @@ func newAPIFixture(t *testing.T) apiFixture {
 	revenuetransport.NewHandler(revenueService, resolver).RegisterRoutes(router, "/api/v1")
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
-		worker: worker, candidates: candidateProcessor, notifications: notificationService, pool: pool,
-		scheduler: jobsapplication.NewScheduler(jobStore, time.Now),
+		worker: worker, candidates: candidateProcessor, notifications: deliveryService, pool: pools.Owner,
+		scheduler: jobsapplication.NewScheduler(claimStore, time.Now),
 	}
 }
 
@@ -323,7 +334,7 @@ func TestIdentityTenantOwnerFlowPermissionsAndIsolation(t *testing.T) {
 	}
 
 	manager := register(t, fixture.handler, "manager@example.com", "Manager")
-	if _, err := fixture.tenantService.AddMember(context.Background(), owner.ID, organizationID, manager.ID, domain.RoleManager); err != nil {
+	if _, err := fixture.tenantService.AddMember(tenantctx.WithTenant(context.Background(), organizationID), owner.ID, organizationID, manager.ID, domain.RoleManager); err != nil {
 		t.Fatalf("AddMember() error = %v", err)
 	}
 	managerUpdate := request(t, fixture.handler, http.MethodPatch, "/api/v1/organization", `{"name":"Unauthorized change"}`, manager.Cookie, organizationID)

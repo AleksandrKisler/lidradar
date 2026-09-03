@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	auditapplication "lidradar/backend/internal/audit/application"
 	"lidradar/backend/internal/connector/domain"
 )
 
@@ -66,6 +67,20 @@ type Service struct {
 	ids        IDs
 	now        func() time.Time
 	cipher     CredentialCipher
+	auditor    auditapplication.Recorder
+}
+
+// WithAuditor включает аудит подключения и отключения каналов (ТЗ §65).
+func (service Service) WithAuditor(auditor auditapplication.Recorder) Service {
+	service.auditor = auditor
+	return service
+}
+
+func (service Service) audit(ctx context.Context, tenantID, actorID, operation, connectionID string) error {
+	if service.auditor == nil {
+		return nil
+	}
+	return service.auditor.Tenant(ctx, auditapplication.TenantEntry(tenantID, actorID, operation, "CHANNEL_CONNECTION", connectionID, service.now()))
 }
 
 func NewService(
@@ -177,6 +192,9 @@ func (service Service) Connect(ctx context.Context, actorID, tenantID string, co
 		}
 		connection = updated
 	}
+	if err := service.audit(ctx, tenantID, actorID, "INTEGRATION_CONNECTED", connection.ID); err != nil {
+		return domain.ChannelConnection{}, err
+	}
 	return connection, nil
 }
 
@@ -228,6 +246,9 @@ func (service Service) Disconnect(ctx context.Context, actorID, tenantID, connec
 	}
 	if !found {
 		return ErrNotFound
+	}
+	if err := service.audit(ctx, tenantID, actorID, "INTEGRATION_DISCONNECTED", connectionID); err != nil {
+		return err
 	}
 	registration, registered := service.registry.Lookup(connection.Provider)
 	if !registered || registration.Provisioner == nil || len(connection.EncryptedCredentials) == 0 {

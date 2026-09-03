@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"lidradar/backend/platform/tenantctx"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ func TestOpportunityStageSevenExitGateThroughRealMessageFlow(t *testing.T) {
 	tenantID := createOrganization(t, fixture, owner, "Организация возможностей")
 	locationID := createLocation(t, fixture, owner, tenantID, "Основная точка")
 	manager := register(t, fixture.handler, "opportunity-manager@example.com", "Менеджер продаж")
-	if _, err := fixture.tenantService.AddMember(context.Background(), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
+	if _, err := fixture.tenantService.AddMember(tenantctx.WithTenant(context.Background(), tenantID), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
 		t.Fatal(err)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"lidradar/backend/platform/tenantctx"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,7 @@ func TestConnectorCoreManagementPersistFirstDeduplicationAndIsolation(t *testing
 	locationID := createLocation(t, fixture, owner, tenantID, "Connector location")
 
 	manager := register(t, fixture.handler, "connector-manager@example.com", "Connector Manager")
-	if _, err := fixture.tenantService.AddMember(context.Background(), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
+	if _, err := fixture.tenantService.AddMember(tenantctx.WithTenant(context.Background(), tenantID), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
 		t.Fatal(err)
 	}
 	requireStatus(t, request(t, fixture.handler, http.MethodGet, "/api/v1/integrations", "", manager.Cookie, tenantID), http.StatusForbidden)

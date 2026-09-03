@@ -3,15 +3,22 @@ package httpplatform
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"lidradar/backend/platform/buildinfo"
 	"lidradar/backend/platform/health"
 	"lidradar/backend/platform/ids"
+	"lidradar/backend/platform/tenantctx"
 )
 
-type routerOptions struct{ allowedOrigins []string }
+type routerOptions struct {
+	allowedOrigins  []string
+	strictTransport bool
+	rateLimit       RateLimit
+	now             func() time.Time
+}
 
 // RouterOption configures shared HTTP boundary behavior.
 type RouterOption func(*routerOptions)
@@ -22,6 +29,21 @@ func WithAllowedOrigins(origins []string) RouterOption {
 	return func(options *routerOptions) {
 		options.allowedOrigins = append([]string(nil), origins...)
 	}
+}
+
+// WithStrictTransport включает HSTS для ответов за TLS-прокси.
+func WithStrictTransport(enabled bool) RouterOption {
+	return func(options *routerOptions) { options.strictTransport = enabled }
+}
+
+// WithRateLimit ограничивает частоту запросов на адрес для указанных префиксов.
+func WithRateLimit(limit RateLimit) RouterOption {
+	return func(options *routerOptions) { options.rateLimit = limit }
+}
+
+// WithClock подменяет часы ограничителя частоты в тестах.
+func WithClock(now func() time.Time) RouterOption {
+	return func(options *routerOptions) { options.now = now }
 }
 
 // NewRouter creates the shared platform router. Feature routers are mounted by
@@ -36,12 +58,17 @@ func NewRouter(service string, logger *slog.Logger, readiness health.Checker, op
 			option(&configuration)
 		}
 	}
+	if configuration.now == nil {
+		configuration.now = time.Now
+	}
 	router := chi.NewRouter()
 	router.Use(correlation)
+	router.Use(securityHeaders(configuration.strictTransport))
 	router.Use(validTenantSelector)
 	router.Use(recovery(logger))
 	router.Use(requestLogging(logger))
 	router.Use(originProtection(configuration.allowedOrigins))
+	router.Use(rateLimited(newRateLimiter(configuration.rateLimit, configuration.now)))
 
 	router.Get("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": service})
@@ -83,6 +110,10 @@ func validTenantSelector(next http.Handler) http.Handler {
 		if tenantID != "" && !ids.Valid(tenantID) {
 			WriteError(w, request, http.StatusBadRequest, "INVALID_TENANT", "X-Tenant-ID must be a UUID", nil)
 			return
+		}
+		if tenantID != "" {
+			// Контекст организации для RLS (ADR 0034); проверки членства остаются на приложении.
+			request = request.WithContext(tenantctx.WithTenant(request.Context(), tenantID))
 		}
 		next.ServeHTTP(w, request)
 	})

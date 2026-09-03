@@ -50,11 +50,17 @@ func main() {
 }
 
 func run(ctx context.Context, configuration config.Config) error {
-	pool, err := postgres.Open(ctx, configuration.Database)
+	pool, err := postgres.OpenAs(ctx, configuration.Database, postgres.RoleWorker)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	// Захват заданий, исходящий журнал и доставки охватывают все организации (ADR 0034).
+	platformPool, err := postgres.OpenAs(ctx, configuration.Database, postgres.RolePlatform)
+	if err != nil {
+		return err
+	}
+	defer platformPool.Close()
 	logger := bootstrap.Logger(ctx)
 	logger.Info("PostgreSQL готов", "event", "postgres.ready")
 
@@ -72,7 +78,8 @@ func run(ctx context.Context, configuration config.Config) error {
 		opportunityRepository, conversationService, catalogRepository, generator, time.Now,
 	)
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
-	eventStore := eventsinfrastructure.NewPostgresStore(pool)
+	claimStore := jobsinfrastructure.NewPostgresStore(platformPool)
+	eventStore := eventsinfrastructure.NewPostgresStore(platformPool)
 	aiStore := aiinfrastructure.NewPostgresStore(pool)
 	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, configuration.AI.ModelVersion)
 	aiService := aiapplication.NewService(aiStore, generator, time.Now, aiapplication.DefaultLease).
@@ -121,6 +128,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		riskStates, riskStates, jobStore, followUpEvaluator, followUpPolicy, generator, time.Now,
 	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
+	deliveryRepository := notificationinfrastructure.NewPostgresRepository(platformPool)
 	var notificationTransport notificationapplication.Transport
 	var controlTransport notificationinfrastructure.TelegramControlTransport
 	telegramEnabled := configuration.Notifications.TelegramBotToken != ""
@@ -142,6 +150,9 @@ func run(ctx context.Context, configuration config.Config) error {
 	).WithPolicy(notificationRepository, jobStore).WithEscalation(notificationdomain.EscalationPolicy{
 		Enabled: configuration.Notifications.OwnerEscalationEnabled, After: configuration.Notifications.OwnerEscalationAfter,
 	})
+	deliveryService := notificationapplication.NewService(
+		deliveryRepository, deliveryRepository, notificationTransport, generator, time.Now,
+	)
 	linker := notificationapplication.NewLinker(notificationRepository, generator, time.Now)
 	callbackExecutor := notificationapplication.NewSafeCallbackExecutor(
 		notificationRepository, riskRadar, generator, time.Now,
@@ -173,7 +184,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		time.Now, eventsapplication.DefaultLease,
 	)
 	worker := jobsapplication.NewWorker(
-		jobStore, ownerID+":jobs",
+		claimStore, ownerID+":jobs",
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
@@ -198,8 +209,8 @@ func run(ctx context.Context, configuration config.Config) error {
 	for {
 		now := time.Now().UTC()
 		if !now.Before(nextDiagnostics) {
-			logQueueStats(ctx, logger, jobStore, now)
-			logNotificationStats(ctx, logger, notificationRepository, now)
+			logQueueStats(ctx, logger, claimStore, now)
+			logNotificationStats(ctx, logger, deliveryRepository, now)
 			nextDiagnostics = now.Add(diagnosticInterval)
 		}
 		dispatched, dispatchErr := dispatcher.RunOne(ctx)
@@ -210,7 +221,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		if processErr != nil && ctx.Err() == nil {
 			logger.Error("Ошибка фонового задания", "event", "job.failed", "error", processErr)
 		}
-		delivered, deliveryErr := notificationService.DispatchOne(
+		delivered, deliveryErr := deliveryService.DispatchOne(
 			ctx, ownerID+":notifications", notificationapplication.DefaultDeliveryLease, deliveryChannels...,
 		)
 		if deliveryErr != nil && ctx.Err() == nil {

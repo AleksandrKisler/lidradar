@@ -13,6 +13,8 @@ import (
 	"lidradar/backend/internal/connector/application"
 	"lidradar/backend/internal/connector/domain"
 	httpplatform "lidradar/backend/platform/http"
+	"lidradar/backend/platform/ids"
+	"lidradar/backend/platform/tenantctx"
 )
 
 const maxWebhookBody = 1 << 20
@@ -131,8 +133,12 @@ func (handler Handler) receive(w http.ResponseWriter, request *http.Request) {
 		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
 		return
 	}
+	ctx := request.Context()
+	if tenantID := chi.URLParam(request, "tenantID"); ids.Valid(tenantID) {
+		ctx = tenantctx.WithTenant(ctx, tenantID)
+	}
 	receipt, err := handler.service.Receive(
-		request.Context(), chi.URLParam(request, "provider"), chi.URLParam(request, "tenantID"),
+		ctx, chi.URLParam(request, "provider"), chi.URLParam(request, "tenantID"),
 		chi.URLParam(request, "connectionID"), payload, request.Header,
 	)
 	if handleError(w, request, err) {

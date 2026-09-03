@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"lidradar/backend/platform/tenantctx"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func TestConversationCoreExitGateThroughWebhookWorkerAndReadAPI(t *testing.T) {
 	tenantID := createOrganization(t, fixture, owner, "Организация переписок")
 	locationID := createLocation(t, fixture, owner, tenantID, "Основная точка")
 	manager := register(t, fixture.handler, "conversation-manager@example.com", "Менеджер переписок")
-	if _, err := fixture.tenantService.AddMember(context.Background(), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
+	if _, err := fixture.tenantService.AddMember(tenantctx.WithTenant(context.Background(), tenantID), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
 		t.Fatal(err)
 	}
 

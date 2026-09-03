@@ -16,9 +16,27 @@ import (
 	platformpostgres "lidradar/backend/platform/postgres"
 )
 
+// Pools — пулы одной испытательной схемы под разными ролями ADR 0034: владелец
+// схемы (миграции, прямые проверки) и рабочие роли с принудительным RLS.
+type Pools struct {
+	Owner, App, Worker, Platform *pgxpool.Pool
+}
+
 // Postgres creates a private schema, applies all migrations and removes the
 // schema after the test. Tests skip when no integration DSN is configured.
 func Postgres(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	return schemaPools(t, false).Owner
+}
+
+// PostgresRoles дополнительно открывает пулы под ролями lidradar_app,
+// lidradar_worker и lidradar_platform той же схемы.
+func PostgresRoles(t testing.TB) Pools {
+	t.Helper()
+	return schemaPools(t, true)
+}
+
+func schemaPools(t testing.TB, withRoles bool) Pools {
 	t.Helper()
 	databaseURL := os.Getenv("LIDRADAR_DATABASE_URL")
 	if databaseURL == "" {
@@ -39,16 +57,22 @@ func Postgres(t testing.TB) *pgxpool.Pool {
 		admin.Close()
 		t.Fatalf("create integration schema: %v", err)
 	}
-
-	configuration, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		t.Fatalf("parse integration PostgreSQL: %v", err)
+	openPool := func(role string) *pgxpool.Pool {
+		configuration, err := pgxpool.ParseConfig(databaseURL)
+		if err != nil {
+			t.Fatalf("parse integration PostgreSQL: %v", err)
+		}
+		configuration.ConnConfig.RuntimeParams["search_path"] = schema
+		if role != "" {
+			platformpostgres.ConfigureRole(configuration, role)
+		}
+		pool, err := pgxpool.NewWithConfig(ctx, configuration)
+		if err != nil {
+			t.Fatalf("connect integration schema: %v", err)
+		}
+		return pool
 	}
-	configuration.ConnConfig.RuntimeParams["search_path"] = schema
-	pool, err := pgxpool.NewWithConfig(ctx, configuration)
-	if err != nil {
-		t.Fatalf("connect integration schema: %v", err)
-	}
+	pool := openPool("")
 	if err := platformpostgres.Migrate(ctx, pool); err != nil {
 		pool.Close()
 		_, _ = admin.Exec(ctx, "DROP SCHEMA "+identifier+" CASCADE")
@@ -61,14 +85,25 @@ func Postgres(t testing.TB) *pgxpool.Pool {
 		admin.Close()
 		t.Fatalf("repeat integration migration: %v", err)
 	}
+	pools := Pools{Owner: pool}
+	if withRoles {
+		pools.App = openPool(platformpostgres.RoleApp)
+		pools.Worker = openPool(platformpostgres.RoleWorker)
+		pools.Platform = openPool(platformpostgres.RolePlatform)
+	}
 	t.Cleanup(func() {
+		for _, item := range []*pgxpool.Pool{pools.App, pools.Worker, pools.Platform} {
+			if item != nil {
+				item.Close()
+			}
+		}
 		pool.Close()
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, _ = admin.Exec(cleanupContext, "DROP SCHEMA "+identifier+" CASCADE")
 		admin.Close()
 	})
-	return pool
+	return pools
 }
 
 type TenantFixture struct {

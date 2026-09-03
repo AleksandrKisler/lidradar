@@ -288,7 +288,8 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 			(SELECT count(*) FROM outcomes WHERE tenant_id = $1 AND opportunity_id = $3),
 			(SELECT count(*) FROM revenue_events WHERE tenant_id = $1 AND opportunity_id = $3),
 			(SELECT count(*) FROM revenue_attributions WHERE tenant_id = $1 AND opportunity_id = $3),
-			(SELECT count(*) FROM audit_log WHERE tenant_id = $1),
+			(SELECT count(*) FROM audit_log WHERE tenant_id = $1
+			   AND (operation IN ('ACTION_RECORDED', 'OUTCOME_RECORDED') OR operation LIKE 'REVENUE%')),
 			(SELECT count(*) FROM idempotency_keys WHERE tenant_id = $1)`,
 		tenantID, riskID, opportunityID,
 	).Scan(&actionCount, &outcomeCount, &revenueEventCount, &attributionCount, &auditCount, &keyCount); err != nil {

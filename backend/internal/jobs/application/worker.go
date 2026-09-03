@@ -8,6 +8,7 @@ import (
 
 	"lidradar/backend/internal/jobs/domain"
 	"lidradar/backend/platform/observability"
+	"lidradar/backend/platform/tenantctx"
 )
 
 const DefaultLease = 30 * time.Second
@@ -58,7 +59,8 @@ func (worker Worker) RunOne(ctx context.Context) (bool, error) {
 	if handler == nil {
 		handleErr = domain.Permanent("UNSUPPORTED_JOB_TYPE", errors.New("обработчик задания не зарегистрирован"))
 	} else {
-		handleErr = handler(ctx, job)
+		// Обработчик работает в контексте организации задания (RLS, ADR 0034).
+		handleErr = handler(tenantctx.WithTenant(ctx, job.TenantID), job)
 	}
 	finishedAt := worker.now().UTC()
 	logger := observability.Logger(ctx).With(

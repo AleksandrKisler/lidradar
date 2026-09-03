@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	auditapplication "lidradar/backend/internal/audit/application"
 	"lidradar/backend/internal/identity/domain"
 )
 
@@ -64,6 +65,13 @@ type Service struct {
 	tokens     Tokens
 	now        func() time.Time
 	sessionTTL time.Duration
+	auditor    auditapplication.Recorder
+}
+
+// WithAuditor включает аудит входа, выхода и регистрации (ТЗ §65).
+func (s Service) WithAuditor(auditor auditapplication.Recorder) Service {
+	s.auditor = auditor
+	return s
 }
 
 func NewService(repository domain.Repository, limiter RateLimiter, passwords Passwords, ids IDs, tokens Tokens, now func() time.Time, sessionTTL time.Duration) Service {
@@ -105,6 +113,9 @@ func (s Service) Register(ctx context.Context, email, password, displayName stri
 		if errors.Is(err, domain.ErrConflict) {
 			return Authenticated{}, ErrEmailConflict
 		}
+		return Authenticated{}, err
+	}
+	if err := s.auditAuth(ctx, user.ID, "USER_REGISTERED", client, s.now().UTC()); err != nil {
 		return Authenticated{}, err
 	}
 	return Authenticated{User: user, Token: token}, nil
@@ -158,7 +169,17 @@ func (s Service) Login(ctx context.Context, email, password string, client Clien
 	if err := s.repository.CreateSession(ctx, session); err != nil {
 		return Authenticated{}, err
 	}
+	if err := s.auditAuth(ctx, user.ID, "USER_LOGGED_IN", client, now); err != nil {
+		return Authenticated{}, err
+	}
 	return Authenticated{User: user, Token: token}, nil
+}
+
+func (s Service) auditAuth(ctx context.Context, userID, operation string, client Client, at time.Time) error {
+	if s.auditor == nil {
+		return nil
+	}
+	return s.auditor.Auth(ctx, auditapplication.AuthEvent(userID, operation, client.IPAddress, at))
 }
 
 func (s Service) Authenticate(ctx context.Context, token string) (domain.User, error) {
@@ -179,7 +200,19 @@ func (s Service) Logout(ctx context.Context, token string) error {
 	if s.repository == nil || s.tokens == nil || s.now == nil || strings.TrimSpace(token) == "" {
 		return nil
 	}
-	return s.repository.RevokeSession(ctx, s.tokens.HashToken(token), s.now().UTC())
+	now := s.now().UTC()
+	// Пользователь определяется до отзыва: запись аудита выхода нуждается в нём.
+	user, found, err := s.repository.UserBySessionHash(ctx, s.tokens.HashToken(token), now)
+	if err != nil {
+		return err
+	}
+	if err := s.repository.RevokeSession(ctx, s.tokens.HashToken(token), now); err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	return s.auditAuth(ctx, user.ID, "USER_LOGGED_OUT", Client{}, now)
 }
 
 func (s Service) Refresh(ctx context.Context, currentToken string, client Client) (Authenticated, error) {

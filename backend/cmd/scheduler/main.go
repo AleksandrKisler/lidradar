@@ -29,7 +29,7 @@ func main() {
 }
 
 func run(ctx context.Context, configuration config.Config) error {
-	pool, err := postgres.Open(ctx, configuration.Database)
+	pool, err := postgres.OpenAs(ctx, configuration.Database, postgres.RolePlatform)
 	if err != nil {
 		return err
 	}

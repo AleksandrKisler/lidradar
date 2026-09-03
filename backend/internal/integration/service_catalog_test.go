@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"lidradar/backend/platform/tenantctx"
 	"net/http"
 	"strings"
 	"testing"
@@ -73,7 +74,7 @@ func TestServiceCatalogOwnerCRUDMoneyPermissionsAndIsolation(t *testing.T) {
 	}
 
 	manager := register(t, fixture.handler, "catalog-manager@example.com", "Catalog Manager")
-	if _, err := fixture.tenantService.AddMember(context.Background(), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
+	if _, err := fixture.tenantService.AddMember(tenantctx.WithTenant(context.Background(), tenantID), owner.ID, tenantID, manager.ID, domain.RoleManager); err != nil {
 		t.Fatalf("AddMember() error = %v", err)
 	}
 	requireStatus(t, request(t, fixture.handler, http.MethodPost, "/api/v1/services", `{"name":"Forbidden"}`, manager.Cookie, tenantID), http.StatusForbidden)

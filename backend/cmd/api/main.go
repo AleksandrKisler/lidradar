@@ -17,6 +17,7 @@ import (
 	analyticsapplication "lidradar/backend/internal/analytics/application"
 	analyticsinfrastructure "lidradar/backend/internal/analytics/infrastructure"
 	analyticstransport "lidradar/backend/internal/analytics/transport"
+	auditinfrastructure "lidradar/backend/internal/audit/infrastructure"
 	catalogapplication "lidradar/backend/internal/catalog/application"
 	cataloginfrastructure "lidradar/backend/internal/catalog/infrastructure"
 	catalogtransport "lidradar/backend/internal/catalog/transport"
@@ -63,14 +64,21 @@ func main() {
 }
 
 func run(ctx context.Context, configuration config.Config) error {
-	pool, err := postgres.Open(ctx, configuration.Database)
+	pool, err := postgres.OpenAs(ctx, configuration.Database, postgres.RoleApp)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	// Узлы AI и администрирование работают вне контекста организации (ADR 0034).
+	platformPool, err := postgres.OpenAs(ctx, configuration.Database, postgres.RolePlatform)
+	if err != nil {
+		return err
+	}
+	defer platformPool.Close()
 	logger := bootstrap.Logger(ctx)
 	logger.Info("PostgreSQL готов", "event", "postgres.ready")
 
+	auditRecorder := auditinfrastructure.NewPostgresRecorder(pool, ids.Generator{})
 	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
 	tenantRepository := tenantinfrastructure.NewPostgresRepository(pool)
 	catalogRepository := cataloginfrastructure.NewPostgresRepository(pool)
@@ -78,10 +86,10 @@ func run(ctx context.Context, configuration config.Config) error {
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
 	opportunityRepository := opportunityinfrastructure.NewPostgresRepository(pool)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
-	aiStore := aiinfrastructure.NewPostgresStore(pool)
+	aiStore := aiinfrastructure.NewPostgresStore(platformPool)
 	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).
 		WithSignatureWindow(configuration.AI.SignatureWindow).
-		WithStaleJobBuilder(aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, configuration.AI.ModelVersion))
+		WithStaleJobBuilder(aiinfrastructure.NewPostgresAnalysisJobBuilder(platformPool, configuration.AI.ModelVersion))
 	connectorRegistry := connectorinfrastructure.NewRegistry()
 	connectorOptions := make([]connectorapplication.Option, 0, 1)
 	if configuration.Integrations.PublicBaseURL != "" {
@@ -98,16 +106,16 @@ func run(ctx context.Context, configuration config.Config) error {
 	riskStore := riskinfrastructure.NewPostgresRadarStore(pool)
 	riskInvalidator := riskinfrastructure.NewPostgresInvalidator(pool)
 	riskEvents := risktransport.NewHub()
-	riskRadar := riskapplication.NewRadar(riskStore, permissionService, riskInvalidator, time.Now)
-	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now)
+	riskRadar := riskapplication.NewRadar(riskStore, permissionService, riskInvalidator, time.Now).WithAuditor(auditRecorder)
+	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now).WithAuditor(auditRecorder)
 	catalogService := catalogapplication.NewService(catalogRepository, permissionService, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
 		connectorRepository, permissionService, connectorRegistry, ids.Generator{}, time.Now, connectorOptions...,
-	)
+	).WithAuditor(auditRecorder)
 	conversationService := conversationapplication.NewService(conversationRepository, permissionService, ids.Generator{})
 	opportunityService := opportunityapplication.NewService(
 		opportunityRepository, permissionService, ids.Generator{}, time.Now,
-	)
+	).WithAuditor(auditRecorder)
 	correctiveService := correctiveapplication.NewService(
 		correctiveinfrastructure.NewPostgresStore(pool), permissionService, ids.Generator{}, time.Now,
 	).WithInvalidator(riskInvalidator)
@@ -122,7 +130,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		identityinfrastructure.SessionTokens{},
 		time.Now,
 		configuration.Auth.SessionTTL,
-	)
+	).WithAuditor(auditRecorder)
 	principalResolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),
@@ -130,12 +138,17 @@ func run(ctx context.Context, configuration config.Config) error {
 	)
 	notificationPreferences := notificationapplication.NewPreferenceService(
 		notificationRepository, permissionService, ids.Generator{}, time.Now,
-	)
+	).WithAuditor(auditRecorder)
 	go runRiskInvalidationRelay(ctx, logger, riskInvalidator, riskEvents)
 
 	router := httpplatform.NewRouter(
 		"lidradar-api", logger, postgres.NewSchemaReadiness(pool),
 		httpplatform.WithAllowedOrigins(configuration.HTTP.AllowedOrigins),
+		httpplatform.WithStrictTransport(configuration.Auth.CookieSecure),
+		httpplatform.WithRateLimit(httpplatform.RateLimit{
+			Requests: int(configuration.HTTP.RateLimitPerMinute), Window: time.Minute,
+			Prefixes: []string{"/api/v1/auth/", "/api/v1/webhooks/"},
+		}),
 	)
 	router.Mount("/api/v1/auth", identitytransport.NewHandler(
 		identityService,
@@ -148,7 +161,7 @@ func run(ctx context.Context, configuration config.Config) error {
 	router.Mount("/api/v1/opportunities", opportunitytransport.NewHandler(opportunityService, principalResolver).Router())
 	router.Mount("/api/v1/notifications", notificationtransport.NewHandler(notificationLinks, notificationPreferences, principalResolver).Router())
 	router.Mount("/api/v1/admin", admintransport.NewHandler(
-		adminapplication.NewService(admininfrastructure.NewPostgresStore(pool), ids.Generator{}, time.Now), principalResolver,
+		adminapplication.NewService(admininfrastructure.NewPostgresStore(platformPool), ids.Generator{}, time.Now), principalResolver,
 	).Router())
 	router.Mount("/api/v1/analytics", analyticstransport.NewHandler(
 		analyticsapplication.NewService(analyticsinfrastructure.NewPostgresStore(pool), permissionService, time.Now), principalResolver,
