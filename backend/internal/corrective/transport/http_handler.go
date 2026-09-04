@@ -139,7 +139,7 @@ func handle(w http.ResponseWriter, r *http.Request, err error) bool {
 	case errors.Is(err, application.ErrInvalid), errors.Is(err, domain.ErrInvalid):
 		writeError(w, r, 400, "INVALID_ARGUMENT", "некорректный запрос")
 	default:
-		writeError(w, r, 500, "INTERNAL", "внутренняя ошибка")
+		writeError(w, r, 500, "INTERNAL_ERROR", "внутренняя ошибка")
 	}
 	return true
 }

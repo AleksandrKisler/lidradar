@@ -10,8 +10,8 @@ fail() {
 dotenv_token() {
 	file=${LIDRADAR_ENV_FILE:-.env}
 	[ -r "$file" ] || return 0
-	awk '
-		/^[[:space:]]*LIDAR_TELEGRAM_TOKEN[[:space:]]*=/ {
+	awk -v key="$1" '
+		$0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
 			value = $0
 			sub(/^[^=]*=/, "", value)
 			sub(/\r$/, "", value)
@@ -29,9 +29,10 @@ dotenv_token() {
 command -v curl >/dev/null 2>&1 || fail "Для подключения требуется curl"
 command -v openssl >/dev/null 2>&1 || fail "Для подключения требуется openssl"
 
-token=${LIDAR_TELEGRAM_TOKEN:-}
-[ -n "$token" ] || token=$(dotenv_token)
-[ -n "$token" ] || fail "LIDAR_TELEGRAM_TOKEN не найден в окружении или .env"
+token=${LIDRADAR_TELEGRAM_TOKEN:-${LIDAR_TELEGRAM_TOKEN:-}}
+[ -n "$token" ] || token=$(dotenv_token LIDRADAR_TELEGRAM_TOKEN)
+[ -n "$token" ] || token=$(dotenv_token LIDAR_TELEGRAM_TOKEN)
+[ -n "$token" ] || fail "LIDRADAR_TELEGRAM_TOKEN не найден в окружении или .env"
 
 tenant_id=${LIDRADAR_TENANT_ID:-}
 session=${LIDRADAR_SESSION:-}
@@ -46,7 +47,7 @@ webhook_secret=${LIDRADAR_TELEGRAM_WEBHOOK_SECRET:-}
 case "$tenant_id" in *[!0-9A-Fa-f-]*|'') fail "LIDRADAR_TENANT_ID имеет неверный формат" ;; esac
 case "$location_id" in *[!0-9A-Fa-f-]*) fail "LIDRADAR_TELEGRAM_LOCATION_ID имеет неверный формат" ;; esac
 case "$session" in *[!A-Za-z0-9_-]*|'') fail "LIDRADAR_SESSION имеет неверный формат" ;; esac
-case "$token" in *[!A-Za-z0-9_:-]*|'') fail "LIDAR_TELEGRAM_TOKEN имеет неверный формат" ;; esac
+case "$token" in *[!A-Za-z0-9_:-]*|'') fail "LIDRADAR_TELEGRAM_TOKEN имеет неверный формат" ;; esac
 case "$webhook_secret" in *[!A-Za-z0-9_-]*|'') fail "Секрет webhook имеет неверный формат" ;; esac
 case "$api_base" in http://*|https://*) ;; *) fail "LIDRADAR_API_BASE_URL должен быть HTTP(S)-адресом" ;; esac
 case "$api_base" in *'"'*|*'\'*|*[[:space:]]*) fail "LIDRADAR_API_BASE_URL содержит недопустимые символы" ;; esac

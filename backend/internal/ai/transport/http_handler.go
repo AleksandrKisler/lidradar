@@ -207,7 +207,7 @@ func jobID(path, suffix string) string {
 
 func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 	status := http.StatusInternalServerError
-	code := "INTERNAL"
+	code := "INTERNAL_ERROR"
 	message := "Internal server error"
 	if errors.Is(err, application.ErrUnauthorized) || errors.Is(err, application.ErrReplay) {
 		status = http.StatusUnauthorized

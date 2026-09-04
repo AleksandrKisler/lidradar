@@ -93,7 +93,7 @@ func (notifier *PostgresInvalidator) Listen(
 
 func validInvalidationType(eventType string) bool {
 	switch eventType {
-	case "risk.changed", "risk.acknowledged", "risk.resolved":
+	case "risk.changed", "risk.acknowledged", "risk.resolved", "risk.false_positive":
 		return true
 	default:
 		return false

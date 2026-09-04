@@ -42,7 +42,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0032: Ограничивать попытки аутентификации через PostgreSQL](0032-persistent-auth-throttling.md) | Accepted |
 | [0033: Ограничивать AI-узлы явным списком организаций](0033-ai-node-tenant-allowlist.md) | Accepted |
 | [0034: Роли PostgreSQL и fail-closed контекст для RLS](0034-rls-roles-fail-closed.md) | Accepted |
-| [0035: Явная единица порога риска](0035-risk-threshold-unit.md) | Proposed |
+| [0035: Явная единица порога риска](0035-risk-threshold-unit.md) | Superseded by 0043 |
 | [0036: Одно ожидающее AI-задание на переписку и дебаунс анализа](0036-ai-queue-single-queued-job.md) | Accepted |
 | [0037: Политика уведомлений: получатели, тихие часы и сводки](0037-notification-policy-delivery.md) | Accepted |
 | [0038: Обратная связь по рискам, окно точности и граница ML-согласия](0038-risk-feedback-precision-consent.md) | Accepted |
@@ -50,6 +50,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0040: Платформенное администрирование читает все модули и правит очереди](0040-platform-admin-observability.md) | Accepted |
 | [0041: Реализация RLS через роли пула и усиление периметра](0041-rls-enforcement-and-hardening.md) | Accepted |
 | [0042: Нагрузочное испытание в процессе на синтетическом наборе](0042-capacity-test-method.md) | Accepted |
+| [0043: Пороги правил риска в бизнес-времени без таблицы конфигурации](0043-risk-thresholds-in-code.md) | Accepted |
 
 ## Workflow
 

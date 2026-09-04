@@ -14,21 +14,25 @@ import (
 )
 
 const (
-	environmentKey              = "LIDRADAR_ENV"
-	httpAddressKey              = "LIDRADAR_HTTP_ADDRESS"
-	httpRateLimitKey            = "LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE"
-	httpWebhookRateLimitKey     = "LIDRADAR_HTTP_WEBHOOK_RATE_LIMIT_PER_MINUTE"
-	databaseURLKey              = "LIDRADAR_DATABASE_URL"
-	shutdownTimeoutKey          = "LIDRADAR_SHUTDOWN_TIMEOUT"
-	databaseMaxConnsKey         = "LIDRADAR_DATABASE_MAX_CONNS"
-	databaseMinConnsKey         = "LIDRADAR_DATABASE_MIN_CONNS"
-	databaseTimeoutKey          = "LIDRADAR_DATABASE_TIMEOUT"
-	allowedOriginsKey           = "LIDRADAR_ALLOWED_ORIGINS"
-	sessionTTLKey               = "LIDRADAR_SESSION_TTL"
-	cookieSecureKey             = "LIDRADAR_COOKIE_SECURE"
-	publicBaseURLKey            = "LIDRADAR_PUBLIC_BASE_URL"
-	credentialKeyKey            = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
-	telegramTokenKey            = "LIDAR_TELEGRAM_TOKEN"
+	environmentKey          = "LIDRADAR_ENV"
+	httpAddressKey          = "LIDRADAR_HTTP_ADDRESS"
+	httpRateLimitKey        = "LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE"
+	httpWebhookRateLimitKey = "LIDRADAR_HTTP_WEBHOOK_RATE_LIMIT_PER_MINUTE"
+	httpAINodeRateLimitKey  = "LIDRADAR_HTTP_AI_NODE_RATE_LIMIT_PER_MINUTE"
+	databaseURLKey          = "LIDRADAR_DATABASE_URL"
+	shutdownTimeoutKey      = "LIDRADAR_SHUTDOWN_TIMEOUT"
+	databaseMaxConnsKey     = "LIDRADAR_DATABASE_MAX_CONNS"
+	databaseMinConnsKey     = "LIDRADAR_DATABASE_MIN_CONNS"
+	databaseTimeoutKey      = "LIDRADAR_DATABASE_TIMEOUT"
+	allowedOriginsKey       = "LIDRADAR_ALLOWED_ORIGINS"
+	sessionTTLKey           = "LIDRADAR_SESSION_TTL"
+	cookieSecureKey         = "LIDRADAR_COOKIE_SECURE"
+	publicBaseURLKey        = "LIDRADAR_PUBLIC_BASE_URL"
+	credentialKeyKey        = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
+	telegramTokenKey        = "LIDRADAR_TELEGRAM_TOKEN"
+	// telegramTokenLegacyKey — прежнее имя без «RA»; принимается, чтобы не
+	// ломать уже настроенные окружения, новое имя имеет приоритет.
+	telegramTokenLegacyKey      = "LIDAR_TELEGRAM_TOKEN"
 	telegramUsernameKey         = "LIDRADAR_TELEGRAM_BOT_USERNAME"
 	ownerEscalationKey          = "LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION"
 	ownerEscalationAfterKey     = "LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION_AFTER"
@@ -44,6 +48,7 @@ const (
 	defaultHTTPAddress          = ":8080"
 	defaultHTTPRateLimit        = int32(120)
 	defaultHTTPWebhookRateLimit = int32(1200)
+	defaultHTTPAINodeRateLimit  = int32(600)
 	defaultDatabaseURL          = "postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable"
 	defaultShutdown             = 10 * time.Second
 	defaultDatabaseWait         = 5 * time.Second
@@ -99,6 +104,11 @@ type HTTP struct {
 	// шлют события всех организаций с общих адресов, поэтому предел выше
 	// (нагрузочный тест этапа 25); ноль отключает ограничение.
 	WebhookRateLimitPerMinute int32
+	// AINodeRateLimitPerMinute — предел для API домашнего AI-узла
+	// (/internal/v1/ai/*): узел опрашивает очередь раз в секунду и шлёт
+	// heartbeat раз в десять секунд, поэтому 600 в минуту на адрес оставляет
+	// запас нескольким узлам за одним адресом; ноль отключает ограничение.
+	AINodeRateLimitPerMinute int32
 }
 
 // Auth contains server-side session and cookie settings.
@@ -172,7 +182,7 @@ func Load(lookup LookupEnv) (Config, error) {
 			PublicBaseURL: strings.TrimRight(strings.TrimSpace(valueOrDefault(lookup, publicBaseURLKey, "")), "/"),
 		},
 		Notifications: Notifications{
-			TelegramBotToken: valueOrDefault(lookup, telegramTokenKey, ""),
+			TelegramBotToken: firstConfigured(lookup, telegramTokenKey, telegramTokenLegacyKey),
 			TelegramUsername: strings.TrimPrefix(strings.TrimSpace(valueOrDefault(lookup, telegramUsernameKey, defaultTelegramBot)), "@"),
 		},
 		AI: AI{
@@ -198,6 +208,9 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if configuration.HTTP.WebhookRateLimitPerMinute, err = int32Value(lookup, httpWebhookRateLimitKey, defaultHTTPWebhookRateLimit); err != nil {
+		return Config{}, err
+	}
+	if configuration.HTTP.AINodeRateLimitPerMinute, err = int32Value(lookup, httpAINodeRateLimitKey, defaultHTTPAINodeRateLimit); err != nil {
 		return Config{}, err
 	}
 	if configuration.Database.ConnectTimeout, err = durationValue(lookup, databaseTimeoutKey, defaultDatabaseWait); err != nil {
@@ -263,6 +276,9 @@ func (c Config) Validate() error {
 	}
 	if c.HTTP.WebhookRateLimitPerMinute < 0 {
 		return fmt.Errorf("%s must not be negative", httpWebhookRateLimitKey)
+	}
+	if c.HTTP.AINodeRateLimitPerMinute < 0 {
+		return fmt.Errorf("%s must not be negative", httpAINodeRateLimitKey)
 	}
 	if c.Database.ConnectTimeout <= 0 {
 		return fmt.Errorf("%s must be positive", databaseTimeoutKey)
@@ -334,7 +350,8 @@ func (c Config) Validate() error {
 
 var (
 	telegramUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`)
-	telegramTokenPattern    = regexp.MustCompile(`^[0-9]{5,20}:[A-Za-z0-9_-]{20,100}$`)
+	// Формат совпадает с проверкой токена канала в модуле connector.
+	telegramTokenPattern = regexp.MustCompile(`^[0-9]{5,20}:[A-Za-z0-9_-]{20,128}$`)
 )
 
 func valueOrDefault(lookup LookupEnv, key, fallback string) string {
@@ -411,4 +428,16 @@ func encryptionKeyValue(lookup LookupEnv, key string) ([]byte, error) {
 		return nil, fmt.Errorf("%s must contain exactly 32 base64-encoded bytes", key)
 	}
 	return decoded, nil
+}
+
+// firstConfigured возвращает первое непустое значение из перечисленных ключей:
+// переименованная переменная принимает и прежнее имя без прерывания уже
+// настроенных окружений, при этом новое имя имеет приоритет.
+func firstConfigured(lookup LookupEnv, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := lookup(key); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

@@ -35,7 +35,7 @@ func (h *Hub) Publish(tenantID, eventType, resourceID string) {
 
 func validSignalType(eventType string) bool {
 	switch eventType {
-	case "risk.changed", "risk.acknowledged", "risk.resolved":
+	case "risk.changed", "risk.acknowledged", "risk.resolved", "risk.false_positive":
 		return true
 	default:
 		return false
@@ -77,7 +77,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, r, 500, "INTERNAL", "streaming unsupported")
+		writeError(w, r, 500, "INTERNAL_ERROR", "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")

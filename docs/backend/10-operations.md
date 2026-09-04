@@ -18,6 +18,7 @@
 | `LIDRADAR_HTTP_ADDRESS` | `:8080` | непустой | `api` |
 | `LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE` | `120` | ≥ 0, 0 выключает | `api`: `/api/v1/auth/*` |
 | `LIDRADAR_HTTP_WEBHOOK_RATE_LIMIT_PER_MINUTE` | `1200` | ≥ 0 | `api`: `/api/v1/webhooks/*` |
+| `LIDRADAR_HTTP_AI_NODE_RATE_LIMIT_PER_MINUTE` | `600` | ≥ 0 | `api`: `/internal/v1/ai/*` |
 | `LIDRADAR_SHUTDOWN_TIMEOUT` | `10s` | > 0 | `api` |
 | `LIDRADAR_DATABASE_URL` | в `development`/`test` — `postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable`, иначе пусто | проверяется при открытии пула | все с базой |
 | `LIDRADAR_DATABASE_MAX_CONNS` | `10` | > 0, ≥ min | все с базой (на каждый пул) |
@@ -28,7 +29,7 @@
 | `LIDRADAR_COOKIE_SECURE` | `true` в `staging`/`production`, иначе `false` | **обязан быть `true`** в `staging`/`production` | `api` (cookie и HSTS) |
 | `LIDRADAR_PUBLIC_BASE_URL` | пусто | `https://host` без пути; только вместе с ключом шифрования | `api` (webhook Telegram) |
 | `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` | пусто | base64 ровно 32 байт; только вместе с URL | `api` |
-| `LIDAR_TELEGRAM_TOKEN` (имя без `RA`) | пусто | `^[0-9]{5,20}:[A-Za-z0-9_-]{20,100}$` | `worker` (уведомления), помощник подключения |
+| `LIDRADAR_TELEGRAM_TOKEN` (прежнее имя `LIDAR_TELEGRAM_TOKEN` принимается, новое приоритетнее) | пусто | `^[0-9]{5,20}:[A-Za-z0-9_-]{20,128}$` | `worker` (уведомления), помощник подключения |
 | `LIDRADAR_TELEGRAM_BOT_USERNAME` | `LidRadarDevBot` | `^[A-Za-z0-9_]{5,32}$` | `api` (ссылка `/start`) |
 | `LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION` | `false` | bool | `worker` |
 | `LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION_AFTER` | `30m` | > 0 | `worker` |
@@ -69,7 +70,7 @@
 | `postgres` | `postgres:18-alpine`, том `lidradar-postgres` | — | `5432`; `pg_isready` каждые 2 с |
 | `migrate` | `COMMAND=migrate`, `restart: "no"` | `postgres` здоров | однократно |
 | `api` | `COMMAND=api` | `migrate` завершился успешно | `8080`; `wget /health/ready` каждые 3 с |
-| `worker` | `COMMAND=worker` (`LIDAR_TELEGRAM_TOKEN`, флаг эскалации, имя бота) | `migrate` | без портов и healthcheck |
+| `worker` | `COMMAND=worker` (`LIDRADAR_TELEGRAM_TOKEN`, флаг эскалации, имя бота) | `migrate` | без портов и healthcheck |
 | `scheduler` | `COMMAND=scheduler` | `migrate` | без портов |
 | `ai-agent` | профиль `ai`, `fake`-провайдер, `LIDRADAR_AI_CLOUD_URL=http://api:8080`, реквизиты из `./runtime/ai-node.json` | `api` здоров | локальная разработка |
 
@@ -96,7 +97,7 @@ Core, файл реквизитов переносится на узел вру�
 1. Задать `LIDRADAR_ENV`, `LIDRADAR_DATABASE_URL`, `LIDRADAR_COOKIE_SECURE=true`
    (вне development), при необходимости `LIDRADAR_PUBLIC_BASE_URL` +
    `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` (`openssl rand -base64 32`),
-   `LIDAR_TELEGRAM_TOKEN`, `LIDRADAR_ALLOWED_ORIGINS` для фронтенда.
+   `LIDRADAR_TELEGRAM_TOKEN`, `LIDRADAR_ALLOWED_ORIGINS` для фронтенда.
 2. `go run ./backend/cmd/migrate` (или сервис `migrate`).
 3. Запустить `api`, `worker`, `scheduler`; убедиться, что `/health/ready`
    возвращает ожидаемую последнюю миграцию.

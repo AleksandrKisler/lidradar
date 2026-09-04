@@ -64,9 +64,11 @@ func NewRouter(service string, logger *slog.Logger, readiness health.Checker, op
 	}
 	router := chi.NewRouter()
 	router.Use(correlation)
+	// recovery стоит сразу за correlation: паника в любом следующем слое
+	// превращается в 500 с корреляцией, а не обрывает соединение.
+	router.Use(recovery(logger))
 	router.Use(securityHeaders(configuration.strictTransport))
 	router.Use(validTenantSelector)
-	router.Use(recovery(logger))
 	router.Use(requestLogging(logger))
 	router.Use(originProtection(configuration.allowedOrigins))
 	limiters := make([]*rateLimiter, 0, len(configuration.rateLimits))

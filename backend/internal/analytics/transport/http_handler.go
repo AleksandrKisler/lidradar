@@ -57,6 +57,6 @@ func (handler Handler) summary(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, application.ErrInvalid):
 		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid period", nil)
 	default:
-		httpplatform.WriteError(w, r, http.StatusInternalServerError, "INTERNAL", "internal error", nil)
+		httpplatform.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error", nil)
 	}
 }

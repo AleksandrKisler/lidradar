@@ -696,11 +696,16 @@ API AI-узла, администрирование) создаются мигр
 `admin_audit_log`. Ответы API несут заголовки `X-Content-Type-Options`,
 `X-Frame-Options`, `Referrer-Policy`, `Cache-Control: no-store`,
 `Content-Security-Policy`, а HSTS — при Secure cookie или TLS. Маршруты без
-сессии ограничены по адресу двумя независимыми правилами: вход и регистрация
-(`/api/v1/auth/*`, `LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE`, по умолчанию 120) и
+сессии ограничены по адресу тремя независимыми правилами: вход и регистрация
+(`/api/v1/auth/*`, `LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE`, по умолчанию 120),
 вебхуки (`/api/v1/webhooks/*`, `LIDRADAR_HTTP_WEBHOOK_RATE_LIMIT_PER_MINUTE`,
 по умолчанию 1200 — провайдеры шлют события всех организаций с общих
-адресов); ограничение входа по учётной записи хранится в PostgreSQL. Резервные копии и учение восстановления описаны в
+адресов) и API домашнего AI-узла (`/internal/v1/ai/*`,
+`LIDRADAR_HTTP_AI_NODE_RATE_LIMIT_PER_MINUTE`, по умолчанию 600 — узел
+опрашивает очередь раз в секунду); ограничение входа по учётной записи
+хранится в PostgreSQL. Сигналы `/api/v1/events` включают
+`risk.false_positive` после вердикта о ложном срабатывании, чтобы клиент
+перечитал Radar. Резервные копии и учение восстановления описаны в
 [`../runbooks/backup-restore.md`](../runbooks/backup-restore.md).
 
 ### Базовая ёмкость и пороги нагрузки

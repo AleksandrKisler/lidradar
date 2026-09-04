@@ -122,4 +122,16 @@ func TestSSEPublishesTenantInvalidation(t *testing.T) {
 	if err != nil || !strings.Contains(line, `"resourceId":"risk-1"`) {
 		t.Fatalf("data line=%q err=%v", line, err)
 	}
+	_, _ = reader.ReadString('\n')
+	// Вердикт о ложном срабатывании закрывает риск: клиент обязан получить
+	// сигнал и перечитать Radar (ADR 0038).
+	hub.Publish("tenant", "risk.false_positive", "risk-2")
+	line, err = reader.ReadString('\n')
+	if err != nil || line != "event: risk.false_positive\n" {
+		t.Fatalf("false positive event line=%q err=%v", line, err)
+	}
+	line, err = reader.ReadString('\n')
+	if err != nil || !strings.Contains(line, `"resourceId":"risk-2"`) {
+		t.Fatalf("false positive data line=%q err=%v", line, err)
+	}
 }

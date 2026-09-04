@@ -217,7 +217,7 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case errors.Is(err, application.ErrInvalidCommand):
 		writeError(w, r, 400, "INVALID_ARGUMENT", "invalid request")
 	default:
-		writeError(w, r, 500, "INTERNAL", "internal error")
+		writeError(w, r, 500, "INTERNAL_ERROR", "internal error")
 	}
 	return true
 }

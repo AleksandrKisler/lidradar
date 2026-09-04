@@ -1023,7 +1023,7 @@ paths:
       operationId: streamInvalidations
       description: Временные сигналы в границах организации без бизнес-состояния; после сигнала клиент перечитывает авторитетный REST-ресурс.
       responses:
-        '200': { description: "Поток text/event-stream с событиями risk.changed, risk.acknowledged и risk.resolved." }
+        '200': { description: "Поток text/event-stream с событиями risk.changed, risk.acknowledged, risk.resolved и risk.false_positive." }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/opportunities/{opportunityId}/revenue:

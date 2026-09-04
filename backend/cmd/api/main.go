@@ -154,6 +154,10 @@ func run(ctx context.Context, configuration config.Config) error {
 				Requests: int(configuration.HTTP.WebhookRateLimitPerMinute), Window: time.Minute,
 				Prefixes: []string{"/api/v1/webhooks/"},
 			},
+			httpplatform.RateLimit{
+				Requests: int(configuration.HTTP.AINodeRateLimitPerMinute), Window: time.Minute,
+				Prefixes: []string{"/internal/v1/ai/"},
+			},
 		),
 	)
 	router.Mount("/api/v1/auth", identitytransport.NewHandler(

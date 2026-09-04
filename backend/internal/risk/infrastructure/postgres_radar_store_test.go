@@ -302,18 +302,26 @@ func TestPostgresInvalidatorDeliversBetweenConnections(t *testing.T) {
 	}
 	notifier.Publish(tenants.A.TenantID, "risk.changed\ninjected", riskID)
 	notifier.Publish(tenants.A.TenantID, "risk.changed", riskID)
+	// Сигнал вердикта о ложном срабатывании проходит тот же путь (ADR 0038).
+	notifier.Publish(tenants.A.TenantID, "risk.false_positive", riskID)
 
+	expected := map[string]bool{"risk.changed": false, "risk.false_positive": false}
 delivery:
 	for {
 		select {
 		case signal := <-capture:
 			// Канал PostgreSQL общий для локальной базы; параллельный ручной
 			// запуск может публиковать свои корректные сигналы.
-			if signal.tenantID == tenants.A.TenantID && signal.eventType == "risk.changed" && signal.resourceID == riskID {
+			if signal.tenantID == tenants.A.TenantID && signal.resourceID == riskID {
+				if _, wanted := expected[signal.eventType]; wanted {
+					expected[signal.eventType] = true
+				}
+			}
+			if expected["risk.changed"] && expected["risk.false_positive"] {
 				break delivery
 			}
 		case <-ctx.Done():
-			t.Fatal("сигнал PostgreSQL не доставлен")
+			t.Fatalf("сигналы PostgreSQL не доставлены: %v", expected)
 		}
 	}
 	cancel()

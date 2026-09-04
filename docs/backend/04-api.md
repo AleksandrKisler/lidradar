@@ -75,7 +75,7 @@
 | 429 | `RATE_LIMITED` | превышен предел по адресу или по учётной записи; есть `Retry-After` |
 | 503 | `SERVICE_NOT_READY` | `/health/ready`: база или миграции не совпали |
 | 503 | `CONNECTOR_UNAVAILABLE` | Telegram не настроен или недоступен, подключение отключено |
-| 500 | `INTERNAL_ERROR` / `INTERNAL` | необработанная ошибка; `INTERNAL` отдают модули risk, corrective, revenue, analytics и API узла, остальные — `INTERNAL_ERROR` |
+| 500 | `INTERNAL_ERROR` | необработанная ошибка, единый код во всех модулях; текст без деталей |
 
 `message` никогда не содержит секретов, текста сообщений и деталей исключений.
 
@@ -116,15 +116,16 @@
   иначе `403 ORIGIN_NOT_ALLOWED`. Это защита от CSRF в дополнение к
   `SameSite=Strict`.
 - Ограничение по адресу соединения (заголовки прокси не читаются):
-  `/api/v1/auth/*` — 120 запросов в минуту, `/api/v1/webhooks/*` — 1200;
-  ответ `429` с `Retry-After`. Отдельно вход ограничивается по учётной записи
+  `/api/v1/auth/*` — 120 запросов в минуту, `/api/v1/webhooks/*` — 1200,
+  `/internal/v1/ai/*` — 600; правила независимы, ответ `429` с `Retry-After`. Отдельно вход ограничивается по учётной записи
   (5 неудач за 15 минут) и по адресу (20 в минуту) в PostgreSQL.
 
 ### 1.7. SSE
 
 `GET /api/v1/events` (`text/event-stream`, право `risks.read`) — только
 сигнал «перечитай REST» (ADR 0028). События `risk.changed`,
-`risk.acknowledged`, `risk.resolved` с телом `{"resourceId":"<uuid риска>"}`,
+`risk.acknowledged`, `risk.resolved`, `risk.false_positive` с телом
+`{"resourceId":"<uuid риска>"}`,
 комментарий-heartbeat каждые 20 с, без `id:`/`retry:` и `Last-Event-ID`:
 после разрыва клиент переподключается и перечитывает `GET /api/v1/radar`
 и списки. Буфер подписчика 16 сигналов, переполнение сбрасывает сигнал.

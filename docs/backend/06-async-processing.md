@@ -125,7 +125,7 @@ Payload заданий риска содержит только идентифи
 | аренда | 30 с везде |
 | пауза | 500 мс без работы, 1 с после ошибки, иначе без паузы |
 | диагностика | раз в минуту события `background.queue.status` (`jobs_pending/processing/retry/dead`, `jobs_expired_leases`, `scheduled_checks_overdue`) и `notification.queue.status` (`deliveries_*`) — без содержимого заданий |
-| Telegram | транспорт включается только при `LIDAR_TELEGRAM_TOKEN`; иначе предупреждение `notification.telegram.disabled`, доставки `TELEGRAM` не захватываются |
+| Telegram | транспорт включается только при `LIDRADAR_TELEGRAM_TOKEN` (прежнее имя `LIDAR_TELEGRAM_TOKEN` принимается); иначе предупреждение `notification.telegram.disabled`, доставки `TELEGRAM` не захватываются |
 
 Зарегистрированные обработчики событий:
 
@@ -216,11 +216,12 @@ worker: DispatchOne → Telegram / IN_APP
   данных (потеря сигнала допустима — источник истины остаётся в базе).
 - Приём: `cmd/api` держит отдельное соединение `LISTEN`, при разрыве
   переподключается через 1 с; валидные сигналы (`risk.changed`,
-  `risk.acknowledged`, `risk.resolved`, UUID организации и ресурса) уходят в
+  `risk.acknowledged`, `risk.resolved`, `risk.false_positive`, UUID
+  организации и ресурса) уходят в
   `Hub` и далее подписчикам `GET /api/v1/events` (буфер 16, heartbeat 20 с).
-- Расхождение с ADR 0038: модуль обратной связи публикует `risk.false_positive`,
-  но фильтры типов его отбрасывают; клиенту после вердикта нужно перечитать
-  REST по собственной инициативе.
+- После вердикта о ложном срабатывании модуль обратной связи публикует
+  `risk.false_positive` (ADR 0038): клиент перечитывает Radar так же, как
+  после закрытия риска.
 
 ## 9. Мёртвые элементы и вмешательство администратора
 

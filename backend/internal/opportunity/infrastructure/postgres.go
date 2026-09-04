@@ -427,7 +427,7 @@ func mapPostgresError(operation string, err error) error {
 			return domain.ErrConflict
 		case "23503":
 			return domain.ErrNotFound
-		case "23514", "22P02", "22003":
+		case "23514", "22P02", "22001", "22003":
 			return domain.ErrInvalid
 		}
 	}

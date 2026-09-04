@@ -1,6 +1,6 @@
 # 0035: Явная единица порога риска
 
-- Status: Proposed
+- Status: Superseded by ADR 0043
 - Date: 2026-09-02
 - Baseline: Tasks.md v1.1, ЭТАП R (LR-BE-RM-014)
 

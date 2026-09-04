@@ -83,6 +83,35 @@ func TestLoadRejectsInvalidRuntimeSettings(t *testing.T) {
 	if _, err := Load(mapLookup(values)); err == nil || !strings.Contains(err.Error(), httpWebhookRateLimitKey) {
 		t.Fatalf("Load() error = %v, want webhook rate limit error", err)
 	}
+	values = map[string]string{environmentKey: string(EnvironmentTest), httpAINodeRateLimitKey: "-1"}
+	if _, err := Load(mapLookup(values)); err == nil || !strings.Contains(err.Error(), httpAINodeRateLimitKey) {
+		t.Fatalf("Load() error = %v, want AI node rate limit error", err)
+	}
+}
+
+// Переменная токена Telegram переименована в LIDRADAR_TELEGRAM_TOKEN; прежнее
+// имя LIDAR_TELEGRAM_TOKEN принимается, новое имеет приоритет.
+func TestLoadAcceptsLegacyTelegramTokenKeyAndAINodeRateLimitDefault(t *testing.T) {
+	const legacyToken = "12345:abcdefghijklmnopqrstuvwxyzABCDE"
+	const currentToken = "12345:abcdefghijklmnopqrstuvwxyzABCDEF"
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey:         string(EnvironmentDevelopment),
+		telegramTokenLegacyKey: legacyToken,
+	}))
+	if err != nil || configuration.Notifications.TelegramBotToken != legacyToken {
+		t.Fatalf("прежнее имя переменной токена не принято: %v", err)
+	}
+	configuration, err = Load(mapLookup(map[string]string{
+		environmentKey:         string(EnvironmentDevelopment),
+		telegramTokenKey:       currentToken,
+		telegramTokenLegacyKey: legacyToken,
+	}))
+	if err != nil || configuration.Notifications.TelegramBotToken != currentToken {
+		t.Fatalf("новое имя переменной должно иметь приоритет: %v", err)
+	}
+	if configuration.HTTP.AINodeRateLimitPerMinute != 600 {
+		t.Fatalf("предел частоты API узла по умолчанию = %d, нужно 600", configuration.HTTP.AINodeRateLimitPerMinute)
+	}
 }
 
 func TestLoadAuthAndOriginConfiguration(t *testing.T) {
