@@ -8,3 +8,6 @@
 
 # Локальные резервные копии PostgreSQL (scripts/backup.sh)
 backups/
+
+# Notion import package is built by docs/notion/build.py
+docs/notion/*.zip

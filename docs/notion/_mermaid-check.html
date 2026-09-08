@@ -1,0 +1,62 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Mermaid check</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; }
+  .ok { color: #006300; }
+  .bad { color: #b00020; white-space: pre-wrap; }
+  .diagram { border: 1px solid #ddd; margin: 8px 0; padding: 8px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; }
+</style>
+<h1 id="summary">Проверка Mermaid…</h1>
+<div id="report"></div>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+  const pages = [
+    "LidRadar Backend.md",
+    "01 Обзор системы.md",
+    "02 Глоссарий.md",
+    "03 Архитектура.md",
+    "04 Модули и зоны ответственности.md",
+    "05 HTTP API.md",
+    "06 Модель данных.md",
+    "07 Фоновая обработка.md",
+    "08 AI-контур.md",
+    "09 Защищённость.md",
+    "10 Отказоустойчивость.md",
+    "11 Эксплуатация и ёмкость.md",
+    "12 Тестирование и качество.md",
+    "13 Архитектурные решения ADR.md",
+  ];
+  const report = document.getElementById("report");
+  let total = 0, failed = 0;
+  const failures = [];
+  for (const page of pages) {
+    const text = await (await fetch(encodeURIComponent(page))).text();
+    const blocks = [...text.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]);
+    const h = document.createElement("h2");
+    h.textContent = `${page} — блоков: ${blocks.length}`;
+    report.appendChild(h);
+    for (const [index, code] of blocks.entries()) {
+      total += 1;
+      const box = document.createElement("div");
+      box.className = "diagram";
+      try {
+        await mermaid.parse(code);
+        const { svg } = await mermaid.render(`d${total}`, code);
+        box.innerHTML = `<div class="ok">OK #${index + 1}</div>` + svg;
+      } catch (error) {
+        failed += 1;
+        failures.push(`${page} #${index + 1}: ${String(error && error.message || error).slice(0, 300)}`);
+        box.innerHTML = `<div class="bad">FAIL #${index + 1}: ${String(error && error.message || error)}</div><pre>${code.replace(/</g, "&lt;")}</pre>`;
+      }
+      report.appendChild(box);
+    }
+  }
+  const summary = document.getElementById("summary");
+  summary.textContent = `Mermaid: ${total} блоков, ошибок: ${failed}`;
+  summary.dataset.total = String(total);
+  summary.dataset.failed = String(failed);
+  window.__mermaidFailures = failures;
+</script>
