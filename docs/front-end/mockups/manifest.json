@@ -1,0 +1,146 @@
+[
+  {
+    "id": "01-vhod",
+    "title": "Вход в LidRadar",
+    "description": "Вход по электронной почте и паролю без неподдерживаемого восстановления пароля.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/01-vhod.svg",
+    "preview": "preview/01-vhod.png"
+  },
+  {
+    "id": "02-nastroika-kompanii",
+    "title": "Первоначальная настройка · Компания",
+    "description": "Организация, валюта, часовой пояс и первая точка.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/02-nastroika-kompanii.svg",
+    "preview": "preview/02-nastroika-kompanii.png"
+  },
+  {
+    "id": "03-rabochee-vremia",
+    "title": "Первоначальная настройка · Рабочее время",
+    "description": "Полное расписание на семь дней, часовой пояс и порог ответа 45 минут.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/03-rabochee-vremia.svg",
+    "preview": "preview/03-rabochee-vremia.png"
+  },
+  {
+    "id": "04-uslugi-i-ceny",
+    "title": "Первоначальная настройка · Услуги",
+    "description": "Цены точные, диапазон или неизвестны; неизвестная сумма не равна нулю.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/04-uslugi-i-ceny.svg",
+    "preview": "preview/04-uslugi-i-ceny.png"
+  },
+  {
+    "id": "05-podkliuchenie-telegram",
+    "title": "Первоначальная настройка · Telegram",
+    "description": "Источник переписки и личные оповещения подключаются независимо.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/05-podkliuchenie-telegram.svg",
+    "preview": "preview/05-podkliuchenie-telegram.png"
+  },
+  {
+    "id": "06-dialogi",
+    "title": "Диалоги",
+    "description": "Список переписок и контекст выбранного диалога; ответы отправляются в Telegram.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/06-dialogi.svg",
+    "preview": "preview/06-dialogi.png"
+  },
+  {
+    "id": "07-analitika",
+    "title": "Аналитика",
+    "description": "Подтверждённая возвращённая выручка отделена от потенциальной и органической.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/07-analitika.svg",
+    "preview": "preview/07-analitika.png"
+  },
+  {
+    "id": "08-integracii",
+    "title": "Интеграции",
+    "description": "Разделение источника данных и уведомлений, состояние соединения и безопасное восстановление.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/08-integracii.svg",
+    "preview": "preview/08-integracii.png"
+  },
+  {
+    "id": "09-nastroiki-kompanii",
+    "title": "Настройки · Компания и график",
+    "description": "Данные компании, часовой пояс, часы работы точки и порог ответа.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/09-nastroiki-kompanii.svg",
+    "preview": "preview/09-nastroiki-kompanii.png"
+  },
+  {
+    "id": "10-nastroiki-uslug",
+    "title": "Настройки · Услуги",
+    "description": "Каталог, активные и отключённые услуги; точная цена, диапазон и неизвестная сумма.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/10-nastroiki-uslug.svg",
+    "preview": "preview/10-nastroiki-uslug.png"
+  },
+  {
+    "id": "11-nastroiki-uvedomlenii",
+    "title": "Настройки · Уведомления",
+    "description": "Целевой экран предпочтений уведомлений: каналы, минимальная важность, тихие часы.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/11-nastroiki-uvedomlenii.svg",
+    "preview": "preview/11-nastroiki-uvedomlenii.png"
+  },
+  {
+    "id": "12-komanda",
+    "title": "Настройки · Команда",
+    "description": "Владелец управляет доступом; менеджер работает с рисками и результатами.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/12-komanda.svg",
+    "preview": "preview/12-komanda.png"
+  },
+  {
+    "id": "13-podtverzhdenie-oplaty",
+    "title": "Результат · Подтверждение оплаты",
+    "description": "Отдельный ввод суммы и связи с риском; действие и результат не смешаны с выручкой.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/13-podtverzhdenie-oplaty.svg",
+    "preview": "preview/13-podtverzhdenie-oplaty.png"
+  },
+  {
+    "id": "14-radar-bez-riskov",
+    "title": "Radar · Нет активных рисков",
+    "description": "Пустое состояние после подключения источника, не смешанное с ошибкой загрузки.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/14-radar-bez-riskov.svg",
+    "preview": "preview/14-radar-bez-riskov.png"
+  },
+  {
+    "id": "15-sostoianiia",
+    "title": "Состояния интерфейса",
+    "description": "Ошибка загрузки, истёкшая привязка, ограничение входа и отсутствие доступа.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/15-sostoianiia.svg",
+    "preview": "preview/15-sostoianiia.png"
+  },
+  {
+    "id": "16-osnovy-interfeisa",
+    "title": "Основы интерфейса",
+    "description": "Цвета, типографика, элементы управления и варианты состояния для ручной сборки.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/16-osnovy-interfeisa.svg",
+    "preview": "preview/16-osnovy-interfeisa.png"
+  }
+]

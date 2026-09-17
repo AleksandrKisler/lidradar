@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" fill="none" role="img" aria-labelledby="title desc"><title id="title">Первоначальная настройка · Компания</title><desc id="desc">Организация, валюта, часовой пояс и первая точка. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1024" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<rect x="0" y="0" width="380" height="1024" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(48 38) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="82" y="57" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="48" y="126" font-family="Inter" font-size="11" font-weight="650" fill="#8D99B0" text-anchor="start" data-max-width="270">НАЧАЛО РАБОТЫ</text>
+<circle cx="64" cy="174" r="16" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-4" x="64" y="179" font-family="Inter" font-size="12" font-weight="650" fill="#FFFFFF" text-anchor="middle" data-max-width="24">1</text>
+<text id="text-5" x="98" y="179" font-family="Inter" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="210">Компания</text>
+<line x1="64" y1="200" x2="64" y2="232" stroke="#35405A" stroke-width="1"/>
+<circle cx="64" cy="258" r="16" fill="#253048" stroke="none" stroke-width="1"/>
+<text id="text-6" x="64" y="263" font-family="Inter" font-size="12" font-weight="650" fill="#FFFFFF" text-anchor="middle" data-max-width="24">2</text>
+<text id="text-7" x="98" y="263" font-family="Inter" font-size="15" font-weight="600" fill="#9AA7BE" text-anchor="start" data-max-width="210">Рабочее время</text>
+<line x1="64" y1="284" x2="64" y2="316" stroke="#35405A" stroke-width="1"/>
+<circle cx="64" cy="342" r="16" fill="#253048" stroke="none" stroke-width="1"/>
+<text id="text-8" x="64" y="347" font-family="Inter" font-size="12" font-weight="650" fill="#FFFFFF" text-anchor="middle" data-max-width="24">3</text>
+<text id="text-9" x="98" y="347" font-family="Inter" font-size="15" font-weight="600" fill="#9AA7BE" text-anchor="start" data-max-width="210">Услуги и цены</text>
+<line x1="64" y1="368" x2="64" y2="400" stroke="#35405A" stroke-width="1"/>
+<circle cx="64" cy="426" r="16" fill="#253048" stroke="none" stroke-width="1"/>
+<text id="text-10" x="64" y="431" font-family="Inter" font-size="12" font-weight="650" fill="#FFFFFF" text-anchor="middle" data-max-width="24">4</text>
+<text id="text-11" x="98" y="431" font-family="Inter" font-size="15" font-weight="600" fill="#9AA7BE" text-anchor="start" data-max-width="210">Telegram</text>
+<rect x="40" y="758" width="300" height="182" rx="16" fill="#1B2436" stroke="none" stroke-width="1"/>
+<g id="icon-shield-check-12" transform="translate(62 780) scale(0.9583333333333334)" fill="none" stroke="#AFA4FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g>
+<text id="text-13" x="62" y="829" font-family="Inter" font-size="14" font-weight="500" fill="#E0E4EE" text-anchor="start" data-max-width="258">Вы управляете действиями.</text>
+<text id="text-14" x="62" y="852" font-family="Inter" font-size="14" font-weight="500" fill="#E0E4EE" text-anchor="start" data-max-width="258">LidRadar помогает заметить</text>
+<text id="text-15" x="62" y="875" font-family="Inter" font-size="14" font-weight="500" fill="#E0E4EE" text-anchor="start" data-max-width="258">риск и выбрать следующий шаг.</text>
+<text id="text-16" x="62" y="914" font-family="Inter" font-size="11" font-weight="400" fill="#A4B0C6" text-anchor="start" data-max-width="258">Самостоятельно клиентам не пишет.</text>
+<text id="text-17" x="460" y="72" font-family="Inter" font-size="12" font-weight="600" fill="#5640D8" text-anchor="start" data-max-width="650">Шаг 1 из 4</text>
+<text id="text-18" x="460" y="132" font-family="Inter" font-size="30" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="872">Расскажите о компании</text>
+<text id="text-19" x="460" y="162" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="870">Это поможет показывать риски в нужном контексте</text>
+<text id="text-20" x="460" y="185" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="870">и считать показатели в одной валюте.</text>
+<rect x="460" y="225" width="888" height="510" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-21" x="484" y="259" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="840">Основные сведения</text>
+<text id="text-22" x="484" y="282" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="840">Первую точку создадим вместе с рабочим пространством.</text>
+<text id="text-23" x="484" y="323" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="840">Название компании</text>
+<rect x="484" y="335" width="840" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-24" x="498" y="364" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="812">Detail Lab</text>
+<text id="text-25" x="484" y="424" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="408">Название точки</text>
+<rect x="484" y="436" width="408" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-26" x="498" y="465" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="380">Студия на Пресне</text>
+<text id="text-27" x="916" y="424" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="408">Часовой пояс</text>
+<rect x="916" y="436" width="408" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-28" x="930" y="465" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="358">Москва · UTC+3</text>
+<g id="icon-chevron-down-29" transform="translate(1293 450) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+<text id="text-30" x="484" y="525" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="408">Основная валюта</text>
+<rect x="484" y="537" width="408" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-31" x="498" y="566" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="358">Российский рубль · ₽</text>
+<g id="icon-chevron-down-32" transform="translate(861 551) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+<rect x="484" y="626" width="840" height="82" rx="12" fill="#EDF6FF" stroke="none" stroke-width="1"/>
+<g id="icon-circle-help-33" transform="translate(500 644) scale(0.8333333333333334)" fill="none" stroke="#1768C6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></g>
+<text id="text-34" x="532" y="656" font-family="Inter" font-size="13" font-weight="600" fill="#1768C6" text-anchor="start" data-max-width="774">Точка — место, где вы работаете</text>
+<text id="text-35" x="532" y="679" font-family="Inter" font-size="12" font-weight="400" fill="#1768C6" text-anchor="start" data-max-width="774">Для неё задаются отдельные часы работы и порог ожидания ответа.</text>
+<line x1="460" y1="905" x2="1348" y2="905" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-36" x="460" y="958" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="410">Настройки можно изменить позже</text>
+<g id="button-37">
+<rect x="1146" y="930" width="202" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-arrow-right-38" transform="translate(1162 943) scale(0.75)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
+<text id="text-39" x="1189" y="956.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="146">Продолжить</text>
+</g></svg>

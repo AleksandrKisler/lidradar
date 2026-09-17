@@ -1,0 +1,188 @@
+{
+  "checkedAt": "2026-09-02T23:54:06.780Z",
+  "screens": [
+    {
+      "id": "01-vhod",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 23,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "02-nastroika-kompanii",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 32,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "03-rabochee-vremia",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 55,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "04-uslugi-i-ceny",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 35,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "05-podkliuchenie-telegram",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 33,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "06-dialogi",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 64,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "07-analitika",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 65,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "08-integracii",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 36,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "09-nastroiki-kompanii",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 57,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "10-nastroiki-uslug",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 49,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "11-nastroiki-uvedomlenii",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 43,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "12-komanda",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 46,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "13-podtverzhdenie-oplaty",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 36,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "14-radar-bez-riskov",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1024,
+      "textLayers": 26,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "15-sostoianiia",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1180,
+      "textLayers": 27,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    },
+    {
+      "id": "16-osnovy-interfeisa",
+      "xmlValid": true,
+      "width": 1440,
+      "height": 1180,
+      "textLayers": 50,
+      "rasterImages": 0,
+      "externalReferences": 0,
+      "fontLoaded": true,
+      "errors": []
+    }
+  ],
+  "totalTextLayers": 677,
+  "errors": 0,
+  "notes": [
+    "Импорт в Figma намеренно не выполнялся: пользователь импортирует вручную.",
+    "PNG получены браузером с комплектным Inter.",
+    "Автоматическая проверка текста дополнена визуальным просмотром."
+  ]
+}

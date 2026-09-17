@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" fill="none" role="img" aria-labelledby="title desc"><title id="title">Диалоги</title><desc id="desc">Список переписок и контекст выбранного диалога; ответы отправляются в Telegram. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1024" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="Sidebar">
+<rect x="0" y="0" width="232" height="1024" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(24 30) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="58" y="49" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="24" y="99" font-family="Inter" font-size="10" font-weight="650" fill="#7E8BA5" text-anchor="start" data-max-width="190">РАБОЧЕЕ ПРОСТРАНСТВО</text>
+<g id="icon-radar-4" transform="translate(32 132) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-5" x="64" y="148" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Radar</text>
+<rect x="16" y="174" width="200" height="44" rx="12" fill="#1C2435" stroke="none" stroke-width="1"/>
+<rect x="16" y="184" width="3" height="24" rx="2" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-messages-square-6" transform="translate(32 186) scale(0.8333333333333334)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></g>
+<text id="text-7" x="64" y="202" font-family="Inter" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Диалоги</text>
+<g id="icon-chart-no-axes-combined-8" transform="translate(32 240) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16v5"/><path d="M16 14v7"/><path d="M20 10v11"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/><path d="M4 18v3"/><path d="M8 14v7"/></g>
+<text id="text-9" x="64" y="256" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Аналитика</text>
+<g id="icon-plug-10" transform="translate(32 294) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></g>
+<text id="text-11" x="64" y="310" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Интеграции</text>
+<g id="icon-settings-12" transform="translate(32 348) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g>
+<text id="text-13" x="64" y="364" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Настройки</text>
+<line x1="24" y1="925" x2="208" y2="925" stroke="#263047" stroke-width="1"/>
+<circle cx="42" cy="966" r="18" fill="#293347" stroke="none" stroke-width="1"/>
+<text id="text-14" x="42" y="970" font-family="Inter" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle" data-max-width="30">DL</text>
+<text id="text-15" x="70" y="963" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Detail Lab</text>
+<text id="text-16" x="70" y="983" font-family="Inter" font-size="11" font-weight="400" fill="#8996AE" text-anchor="start" data-max-width="130">Владелец</text>
+<g id="icon-chevron-down-17" transform="translate(190 960) scale(0.6666666666666666)" fill="none" stroke="#8996AE" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+</g>
+<g id="Header">
+<rect x="232" y="0" width="1208" height="80" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-18" x="280" y="35" font-family="Inter" font-size="21" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="600">Диалоги</text>
+<text id="text-19" x="280" y="59" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="680">Переписка и связанные риски — без отдельной CRM-воронки</text>
+<rect x="1190" y="24" width="202" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-20" x="1291" y="42" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="186">Telegram подключён</text>
+</g>
+<text id="text-21" x="280" y="136" font-family="Inter" font-size="29" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="1050">Контекст для следующего шага</text>
+<text id="text-22" x="280" y="164" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1070">Откройте диалог, чтобы понять ситуацию перед ответом.</text>
+<rect x="280" y="205" width="340" height="755" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-23" x="300" y="245" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="300">Поиск по имени</text>
+<rect x="300" y="257" width="300" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-search-24" transform="translate(314 270) scale(0.75)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></g>
+<text id="text-25" x="342" y="286" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="246">Дмитрий или Елена</text>
+<rect x="300" y="328" width="140" height="28" rx="14" fill="#F0EDFF" stroke="none" stroke-width="1"/>
+<text id="text-26" x="370" y="346" font-family="Inter" font-size="11" font-weight="600" fill="#5640D8" text-anchor="middle" data-max-width="124">Все диалоги</text>
+<rect x="448" y="328" width="124" height="28" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-27" x="510" y="346" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="108">С риском</text>
+<rect x="292" y="375" width="316" height="98" rx="12" fill="#F0EDFF" stroke="none" stroke-width="1"/>
+<circle cx="319" cy="403" r="17" fill="#DDD6FF" stroke="none" stroke-width="1"/>
+<text id="text-28" x="319" y="407" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="30">ДС</text>
+<text id="text-29" x="348" y="396" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="203">Дмитрий Соколов</text>
+<text id="text-30" x="594" y="396" font-family="Inter" font-size="10" font-weight="500" fill="#63718A" text-anchor="end" data-max-width="42">13:02</text>
+<text id="text-31" x="310" y="427" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="287">А на какое время можно завтра?</text>
+<text id="text-32" x="310" y="455" font-family="Inter" font-size="10" font-weight="550" fill="#D22A25" text-anchor="start" data-max-width="290">Критичный риск</text>
+<circle cx="319" cy="511" r="17" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-33" x="319" y="515" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="30">ЕВ</text>
+<text id="text-34" x="348" y="504" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="203">Елена Волкова</text>
+<text id="text-35" x="594" y="504" font-family="Inter" font-size="10" font-weight="500" fill="#63718A" text-anchor="end" data-max-width="42">12:44</text>
+<text id="text-36" x="310" y="535" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="287">Спасибо, а что входит в комплекс?</text>
+<text id="text-37" x="310" y="563" font-family="Inter" font-size="10" font-weight="550" fill="#D22A25" text-anchor="start" data-max-width="290">Критичный риск</text>
+<circle cx="319" cy="619" r="17" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-38" x="319" y="623" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="30">МК</text>
+<text id="text-39" x="348" y="612" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="203">Мария К.</text>
+<text id="text-40" x="594" y="612" font-family="Inter" font-size="10" font-weight="500" fill="#63718A" text-anchor="end" data-max-width="42">12:26</text>
+<text id="text-41" x="310" y="643" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="287">Жду ваш расчёт по плёнке</text>
+<text id="text-42" x="310" y="671" font-family="Inter" font-size="10" font-weight="550" fill="#AD5B11" text-anchor="start" data-max-width="290">Высокий риск</text>
+<circle cx="319" cy="727" r="17" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-43" x="319" y="731" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="30">НП</text>
+<text id="text-44" x="348" y="720" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="203">Никита Петров</text>
+<text id="text-45" x="594" y="720" font-family="Inter" font-size="10" font-weight="500" fill="#63718A" text-anchor="end" data-max-width="42">11:51</text>
+<text id="text-46" x="310" y="751" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="287">Хорошо, подумаю. Спасибо!</text>
+<text id="text-47" x="310" y="779" font-family="Inter" font-size="10" font-weight="550" fill="#63718A" text-anchor="start" data-max-width="290">Ожидает ответа</text>
+<circle cx="319" cy="835" r="17" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-48" x="319" y="839" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="30">ОК</text>
+<text id="text-49" x="348" y="828" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="203">Ольга Кузнецова</text>
+<text id="text-50" x="594" y="828" font-family="Inter" font-size="10" font-weight="500" fill="#63718A" text-anchor="end" data-max-width="42">10:32</text>
+<text id="text-51" x="310" y="859" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="287">Оплатила, чек отправила</text>
+<text id="text-52" x="310" y="887" font-family="Inter" font-size="10" font-weight="550" fill="#63718A" text-anchor="start" data-max-width="290">Без активных рисков</text>
+<rect x="640" y="205" width="752" height="755" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-53" x="664" y="244" font-family="Inter" font-size="19" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="560">Дмитрий Соколов</text>
+<text id="text-54" x="664" y="270" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="550">Telegram · Полировка кузова · Audi A6</text>
+<g id="button-55">
+<rect x="1218" y="229" width="150" height="38" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-external-link-56" transform="translate(1234 239) scale(0.75)" fill="none" stroke="#191E2B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></g>
+<text id="text-57" x="1261" y="252.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="94">В Telegram</text>
+</g>
+<line x1="664" y1="293" x2="1368" y2="293" stroke="#E1E7F0" stroke-width="1"/>
+<rect x="664" y="313" width="704" height="82" rx="12" fill="#FFF3F2" stroke="none" stroke-width="1"/>
+<g id="icon-circle-alert-58" transform="translate(680 331) scale(0.8333333333333334)" fill="none" stroke="#D22A25" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></g>
+<text id="text-59" x="712" y="343" font-family="Inter" font-size="13" font-weight="600" fill="#D22A25" text-anchor="start" data-max-width="638">Запись не подтверждена</text>
+<text id="text-60" x="712" y="366" font-family="Inter" font-size="12" font-weight="400" fill="#D22A25" text-anchor="start" data-max-width="638">Клиент ждёт 38 минут. Потенциальная выручка — 31 000 ₽.</text>
+<text id="text-61" x="1016" y="438" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="middle" data-max-width="350">Сегодня, 21 августа</text>
+<rect x="664" y="459" width="430" height="76" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-62" x="680" y="480" font-family="Inter" font-size="10" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="370">Дмитрий</text>
+<text id="text-63" x="680" y="507" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="395">Сколько стоит полировка Audi A6?</text>
+<text id="text-64" x="1078" y="525" font-family="Inter" font-size="9" font-weight="400" fill="#63718A" text-anchor="end" data-max-width="70">12:56</text>
+<rect x="901" y="551" width="467" height="98" rx="14" fill="#F0EDFF" stroke="none" stroke-width="1"/>
+<text id="text-65" x="917" y="573" font-family="Inter" font-size="10" font-weight="600" fill="#5640D8" text-anchor="start" data-max-width="410">Менеджер</text>
+<text id="text-66" x="917" y="601" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="410">Полный комплекс — 31 000 ₽.</text>
+<text id="text-67" x="917" y="623" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="410">На завтра есть несколько окон.</text>
+<text id="text-68" x="1352" y="638" font-family="Inter" font-size="9" font-weight="400" fill="#5640D8" text-anchor="end" data-max-width="70">13:00</text>
+<rect x="664" y="668" width="474" height="99" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-69" x="680" y="690" font-family="Inter" font-size="10" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="424">Дмитрий</text>
+<text id="text-70" x="680" y="719" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="424">А на какое время можно завтра?</text>
+<text id="text-71" x="680" y="741" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="424">Давайте ближе к вечеру.</text>
+<text id="text-72" x="1122" y="757" font-family="Inter" font-size="9" font-weight="400" fill="#63718A" text-anchor="end" data-max-width="60">13:02</text>
+<line x1="664" y1="808" x2="1368" y2="808" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-73" x="664" y="840" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="660">Ответа после этого сообщения пока нет</text>
+<g id="button-74">
+<rect x="664" y="874" width="278" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-arrow-right-75" transform="translate(680 887) scale(0.75)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
+<text id="text-76" x="707" y="900.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="222">Открыть связанный риск</text>
+</g>
+<text id="text-77" x="968" y="901" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="395">Ответ клиенту — только в Telegram</text></svg>

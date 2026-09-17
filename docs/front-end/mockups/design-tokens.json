@@ -1,0 +1,36 @@
+{
+  "font": "Inter",
+  "colors": {
+    "bg": "#F5F7FB",
+    "paper": "#FFFFFF",
+    "ink": "#191E2B",
+    "muted": "#63718A",
+    "faint": "#63718A",
+    "line": "#E1E7F0",
+    "nav": "#0E1422",
+    "navActive": "#1C2435",
+    "navText": "#BAC2D2",
+    "brand": "#6C55FF",
+    "brandDark": "#5640D8",
+    "brandPale": "#F0EDFF",
+    "green": "#087D50",
+    "greenPale": "#ECFBF3",
+    "red": "#D22A25",
+    "redPale": "#FFF3F2",
+    "amber": "#AD5B11",
+    "amberPale": "#FFF6E8",
+    "blue": "#1768C6",
+    "bluePale": "#EDF6FF"
+  },
+  "desktopWidth": 1440,
+  "sidebarWidth": 232,
+  "contentPadding": 48,
+  "spacingUnit": 8,
+  "radii": [
+    10,
+    12,
+    18
+  ],
+  "buttonHeight": 44,
+  "inputHeight": 46
+}

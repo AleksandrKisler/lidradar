@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" fill="none" role="img" aria-labelledby="title desc"><title id="title">Radar · Нет активных рисков</title><desc id="desc">Пустое состояние после подключения источника, не смешанное с ошибкой загрузки. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1024" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="Sidebar">
+<rect x="0" y="0" width="232" height="1024" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(24 30) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="58" y="49" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="24" y="99" font-family="Inter" font-size="10" font-weight="650" fill="#7E8BA5" text-anchor="start" data-max-width="190">РАБОЧЕЕ ПРОСТРАНСТВО</text>
+<rect x="16" y="120" width="200" height="44" rx="12" fill="#1C2435" stroke="none" stroke-width="1"/>
+<rect x="16" y="130" width="3" height="24" rx="2" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-radar-4" transform="translate(32 132) scale(0.8333333333333334)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-5" x="64" y="148" font-family="Inter" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Radar</text>
+<g id="icon-messages-square-6" transform="translate(32 186) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></g>
+<text id="text-7" x="64" y="202" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Диалоги</text>
+<g id="icon-chart-no-axes-combined-8" transform="translate(32 240) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16v5"/><path d="M16 14v7"/><path d="M20 10v11"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/><path d="M4 18v3"/><path d="M8 14v7"/></g>
+<text id="text-9" x="64" y="256" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Аналитика</text>
+<g id="icon-plug-10" transform="translate(32 294) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></g>
+<text id="text-11" x="64" y="310" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Интеграции</text>
+<g id="icon-settings-12" transform="translate(32 348) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g>
+<text id="text-13" x="64" y="364" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Настройки</text>
+<line x1="24" y1="925" x2="208" y2="925" stroke="#263047" stroke-width="1"/>
+<circle cx="42" cy="966" r="18" fill="#293347" stroke="none" stroke-width="1"/>
+<text id="text-14" x="42" y="970" font-family="Inter" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle" data-max-width="30">DL</text>
+<text id="text-15" x="70" y="963" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Detail Lab</text>
+<text id="text-16" x="70" y="983" font-family="Inter" font-size="11" font-weight="400" fill="#8996AE" text-anchor="start" data-max-width="130">Владелец</text>
+<g id="icon-chevron-down-17" transform="translate(190 960) scale(0.6666666666666666)" fill="none" stroke="#8996AE" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+</g>
+<g id="Header">
+<rect x="232" y="0" width="1208" height="80" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-18" x="280" y="35" font-family="Inter" font-size="21" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="600">Radar</text>
+<text id="text-19" x="280" y="59" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="680">Ситуации, где деньги можно вернуть прямо сейчас</text>
+<rect x="1190" y="24" width="202" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-20" x="1291" y="42" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="186">Telegram подключён</text>
+</g>
+<text id="text-21" x="280" y="136" font-family="Inter" font-size="29" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="1050">Сейчас всё под контролем</text>
+<text id="text-22" x="280" y="164" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1070">Активных рисков нет. Новые ситуации появятся здесь автоматически.</text>
+<rect x="280" y="205" width="724" height="161" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-23" x="304" y="244" font-family="Inter" font-size="11" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="665">СЕЙЧАС ПОД РИСКОМ</text>
+<text id="text-24" x="304" y="304" font-family="Inter" font-size="36" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="320">0 клиентов</text>
+<text id="text-25" x="779" y="304" font-family="Inter" font-size="36" font-weight="700" fill="#191E2B" text-anchor="end" data-max-width="199">0 ₽</text>
+<rect x="1028" y="205" width="364" height="161" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-26" x="1052" y="244" font-family="Inter" font-size="10" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="315">ВОЗВРАЩЕНО СЕГОДНЯ</text>
+<text id="text-27" x="1052" y="296" font-family="Inter" font-size="32" font-weight="700" fill="#087D50" text-anchor="start" data-max-width="315">47 000 ₽</text>
+<text id="text-28" x="1052" y="334" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="315">Подтверждено оплатами</text>
+<rect x="280" y="390" width="1112" height="519" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<circle cx="836" cy="506" r="56" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<g id="icon-shield-check-29" transform="translate(808 478) scale(2.3333333333333335)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g>
+<text id="text-30" x="836" y="611" font-family="Inter" font-size="27" font-weight="650" fill="#191E2B" text-anchor="middle" data-max-width="960">Не требуется срочных действий</text>
+<text id="text-31" x="836" y="656" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="middle" data-max-width="940">Мы продолжаем проверять переписку.</text>
+<text id="text-32" x="836" y="682" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="middle" data-max-width="940">Это не означает, что диалогов нет — только то, что сейчас нет активных рисков.</text>
+<g id="button-33">
+<rect x="710" y="749" width="252" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-messages-square-34" transform="translate(726 762) scale(0.75)" fill="none" stroke="#191E2B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></g>
+<text id="text-35" x="753" y="775.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="196">Посмотреть диалоги</text>
+</g>
+<text id="text-36" x="836" y="858" font-family="Inter" font-size="12" font-weight="500" fill="#087D50" text-anchor="middle" data-max-width="950">Источник работает · последнее сообщение сегодня, 13:41</text></svg>
