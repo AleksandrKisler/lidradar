@@ -10,23 +10,32 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	connectordomain "lidradar/backend/internal/connector/domain"
 	"lidradar/backend/internal/risk/application"
 	"lidradar/backend/internal/risk/domain"
 	"lidradar/backend/platform/ids"
 )
 
 // PostgresRadarStore собирает проекцию Radar из авторитетных таблиц Risk,
-// Opportunity, Conversation, корректирующих фактов и подтверждённой выручки.
+// Opportunity, Conversation (контакт, канал, последнее сообщение, внешняя
+// личность), каталога услуг, корректирующих фактов и подтверждённой выручки
+// (ADR 0044). Обогащение выполняется только для строк уже отобранной
+// страницы, поэтому стоимость запроса не зависит от числа рисков организации.
 type PostgresRadarStore struct{ pool *pgxpool.Pool }
 
 func NewPostgresRadarStore(pool *pgxpool.Pool) *PostgresRadarStore {
 	return &PostgresRadarStore{pool: pool}
 }
+
+// MessagePreviewLimit — максимальная длина превью последнего сообщения в
+// символах; полный текст доступен в сообщениях переписки.
+const MessagePreviewLimit = 140
 
 type radarCursor struct {
 	SeverityRank int       `json:"s"`
@@ -45,22 +54,55 @@ type rankedDetail struct {
 	RevenueSort  string
 }
 
+// radarRanking вычисляет порядок Radar только по таблицам риска и сделки.
+const radarRanking = `
+	SELECT r.id AS risk_id, r.due_at, r.detected_at,
+	       CASE r.severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END AS severity_rank,
+	       CASE WHEN o.stage = 'BOOKING_INTENT' THEN 1 ELSE 0 END AS booking_rank,
+	       COALESCE(o.estimated_amount, -1::numeric) AS revenue_sort
+	FROM risk_signals AS r
+	JOIN opportunities AS o ON o.tenant_id = r.tenant_id AND o.id = r.opportunity_id`
+
+// radarProjection читает риск и его контекст одной строкой; ранги подставляет
+// вызывающий запрос (из страницы либо вычисленные на месте).
 const radarProjection = `
 	r.id AS risk_id, r.tenant_id, r.opportunity_id, r.location_id, r.type, r.severity, r.status,
 	r.source, r.confidence, r.ai_run_id, r.risk_engine_version, r.trigger_message_id, r.reason_code,
 	r.reason_text, r.detected_at, r.due_at, r.updated_at,
 	r.acknowledged_at, r.acted_at, r.resolved_at,
-	o.id AS radar_opportunity_id, o.stage, COALESCE(o.estimated_amount::text, '') AS potential_revenue,
+	o.id AS radar_opportunity_id, o.stage, o.service_id, COALESCE(o.estimated_amount::text, '') AS potential_revenue,
 	o.currency,
 	c.id AS radar_conversation_id, c.contact_id,
-	CASE r.severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END AS severity_rank,
-	CASE WHEN o.stage = 'BOOKING_INTENT' THEN 1 ELSE 0 END AS booking_rank,
-	COALESCE(o.estimated_amount, -1::numeric)::text AS revenue_sort`
+	ct.display_name,
+	s.id AS service_id, COALESCE(s.name, '') AS service_name, COALESCE(s.active, false) AS service_active,
+	cc.id AS connection_id, cc.provider, cc.name AS connection_name, cc.status AS connection_status,
+	lm.id AS last_message_id, COALESCE(lm.direction, '') AS last_message_direction,
+	COALESCE(lm.type, '') AS last_message_type, lm.text AS last_message_text, lm.sent_at AS last_message_sent_at,
+	ei.external_id AS contact_external_id`
 
-const radarJoins = `
-	FROM risk_signals AS r
+const radarContextJoins = `
 	JOIN opportunities AS o ON o.tenant_id = r.tenant_id AND o.id = r.opportunity_id
-	JOIN conversations AS c ON c.tenant_id = o.tenant_id AND c.id = o.conversation_id`
+	JOIN conversations AS c ON c.tenant_id = o.tenant_id AND c.id = o.conversation_id
+	JOIN contacts AS ct ON ct.tenant_id = c.tenant_id AND ct.id = c.contact_id
+	JOIN channel_connections AS cc ON cc.tenant_id = c.tenant_id AND cc.id = c.connection_id
+	LEFT JOIN service_catalog_items AS s ON s.tenant_id = o.tenant_id AND s.id = o.service_id
+	LEFT JOIN LATERAL (
+		SELECT m.id, m.direction, m.type, m.text, m.sent_at
+		FROM messages AS m
+		WHERE m.tenant_id = c.tenant_id AND m.conversation_id = c.id AND m.provider_deleted_at IS NULL
+		ORDER BY m.sent_at DESC, m.id DESC
+		LIMIT 1
+	) AS lm ON true
+	LEFT JOIN LATERAL (
+		SELECT identity.external_id
+		FROM external_identities AS identity
+		WHERE identity.tenant_id = c.tenant_id AND identity.contact_id = c.contact_id
+		  AND identity.connection_id = c.connection_id
+		ORDER BY identity.created_at DESC, identity.id DESC
+		LIMIT 1
+	) AS ei ON true`
+
+const radarOrder = ` ORDER BY severity_rank DESC, booking_rank DESC, revenue_sort DESC, due_at ASC, detected_at ASC, risk_id ASC`
 
 func (store *PostgresRadarStore) List(
 	ctx context.Context,
@@ -70,25 +112,22 @@ func (store *PostgresRadarStore) List(
 	if store == nil || store.pool == nil || tenantID == "" || query.Limit < 1 || query.Limit > 100 {
 		return application.Page{}, application.ErrInvalidCommand
 	}
+	query.Filters = query.Filters.Normalized()
 	arguments := []any{tenantID}
 	where := []string{"r.tenant_id = $1"}
 	appendRadarFilters(&where, &arguments, query.Filters)
-	if query.Status != "" {
-		arguments = append(arguments, query.Status)
-		where = append(where, fmt.Sprintf("r.status = $%d", len(arguments)))
-	}
 
 	var cursor *radarCursor
 	if query.After != "" {
-		decoded, err := decodeRadarCursor(query.After, filterKey(query))
+		decoded, err := decodeRadarCursor(query.After, filterKey(query.Filters))
 		if err != nil {
 			return application.Page{}, application.ErrInvalidCommand
 		}
 		cursor = &decoded
 	}
 
-	sql := `WITH ranked AS (SELECT ` + radarProjection + radarJoins + ` WHERE ` + strings.Join(where, " AND ") + `)
-		SELECT * FROM ranked`
+	sql := `WITH ranked AS (` + radarRanking + ` WHERE ` + strings.Join(where, " AND ") + `),
+		page AS (SELECT * FROM ranked`
 	if cursor != nil {
 		start := len(arguments) + 1
 		arguments = append(arguments, cursor.SeverityRank, cursor.BookingRank,
@@ -96,15 +135,20 @@ func (store *PostgresRadarStore) List(
 		sql += fmt.Sprintf(` WHERE
 			severity_rank < $%[1]d
 			OR (severity_rank = $%[1]d AND booking_rank < $%[2]d)
-			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric < $%[3]d::numeric)
-			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric = $%[3]d::numeric AND due_at > $%[4]d)
-			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric = $%[3]d::numeric AND due_at = $%[4]d AND detected_at > $%[5]d)
-			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort::numeric = $%[3]d::numeric AND due_at = $%[4]d AND detected_at = $%[5]d AND risk_id > $%[6]d)`,
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort < $%[3]d::numeric)
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort = $%[3]d::numeric AND due_at > $%[4]d)
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort = $%[3]d::numeric AND due_at = $%[4]d AND detected_at > $%[5]d)
+			OR (severity_rank = $%[1]d AND booking_rank = $%[2]d AND revenue_sort = $%[3]d::numeric AND due_at = $%[4]d AND detected_at = $%[5]d AND risk_id > $%[6]d)`,
 			start, start+1, start+2, start+3, start+4, start+5)
 	}
 	arguments = append(arguments, query.Limit+1)
-	sql += fmt.Sprintf(` ORDER BY severity_rank DESC, booking_rank DESC,
-		revenue_sort::numeric DESC, due_at ASC, detected_at ASC, risk_id ASC LIMIT $%d`, len(arguments))
+	sql += radarOrder + fmt.Sprintf(` LIMIT $%d)
+		SELECT `+radarProjection+`,
+		       page.severity_rank, page.booking_rank, page.revenue_sort::text
+		FROM page
+		JOIN risk_signals AS r ON r.tenant_id = $1 AND r.id = page.risk_id`+radarContextJoins+
+		` ORDER BY page.severity_rank DESC, page.booking_rank DESC, page.revenue_sort DESC,
+		         page.due_at ASC, page.detected_at ASC, page.risk_id ASC`, len(arguments))
 
 	rows, err := store.pool.Query(ctx, sql, arguments...)
 	if err != nil {
@@ -122,6 +166,7 @@ func (store *PostgresRadarStore) List(
 	if err := rows.Err(); err != nil {
 		return application.Page{}, fmt.Errorf("обход Radar: %w", err)
 	}
+	rows.Close()
 	if err := store.loadCorrective(ctx, tenantID, items); err != nil {
 		return application.Page{}, err
 	}
@@ -134,7 +179,7 @@ func (store *PostgresRadarStore) List(
 		page.NextCursor, err = encodeRadarCursor(radarCursor{
 			SeverityRank: last.SeverityRank, BookingRank: last.BookingRank,
 			RevenueSort: last.RevenueSort, DueAt: last.Detail.Risk.DueAt,
-			DetectedAt: last.Detail.Risk.DetectedAt, RiskID: last.Detail.Risk.ID, FilterKey: filterKey(query),
+			DetectedAt: last.Detail.Risk.DetectedAt, RiskID: last.Detail.Risk.ID, FilterKey: filterKey(query.Filters),
 		})
 		if err != nil {
 			return application.Page{}, err
@@ -150,7 +195,11 @@ func (store *PostgresRadarStore) Get(
 	if store == nil || store.pool == nil || tenantID == "" || !ids.Valid(riskID) {
 		return application.Detail{}, false, application.ErrInvalidCommand
 	}
-	row := store.pool.QueryRow(ctx, `SELECT `+radarProjection+radarJoins+` WHERE r.tenant_id = $1 AND r.id = $2`, tenantID, riskID)
+	row := store.pool.QueryRow(ctx, `SELECT `+radarProjection+`,
+		       CASE r.severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END AS severity_rank,
+		       CASE WHEN o.stage = 'BOOKING_INTENT' THEN 1 ELSE 0 END AS booking_rank,
+		       COALESCE(o.estimated_amount, -1::numeric)::text AS revenue_sort
+		FROM risk_signals AS r`+radarContextJoins+` WHERE r.tenant_id = $1 AND r.id = $2`, tenantID, riskID)
 	item, err := scanRankedDetail(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return application.Detail{}, false, nil
@@ -334,7 +383,7 @@ func (store *PostgresRadarStore) Summary(
 	}
 	arguments := []any{tenantID}
 	where := []string{"r.tenant_id = $1"}
-	appendRadarFilters(&where, &arguments, filters)
+	appendRadarFilters(&where, &arguments, filters.Normalized())
 	// `selected` применяет только запрошенные фильтры. Счётчики и незакрытые
 	// деньги дополнительно сужаются до активных рисков, а возвращённая выручка —
 	// нет: по ТЗ §39 это сумма подтверждённых событий с атрибуцией RECOVERED, и
@@ -466,6 +515,14 @@ func appendRadarFilters(where *[]string, arguments *[]any, filters application.F
 		*arguments = append(*arguments, filters.RiskType)
 		*where = append(*where, fmt.Sprintf("r.type = $%d", len(*arguments)))
 	}
+	if len(filters.Statuses) > 0 {
+		statuses := make([]string, 0, len(filters.Statuses))
+		for _, status := range filters.Statuses {
+			statuses = append(statuses, string(status))
+		}
+		*arguments = append(*arguments, statuses)
+		*where = append(*where, fmt.Sprintf("r.status = ANY($%d::text[])", len(*arguments)))
+	}
 }
 
 func scanRankedDetail(row riskRow) (rankedDetail, error) {
@@ -473,15 +530,30 @@ func scanRankedDetail(row riskRow) (rankedDetail, error) {
 	var risk domain.Risk
 	var opportunity application.Opportunity
 	var conversation application.Conversation
+	var contact application.Contact
+	var channel application.Channel
 	var potentialRevenue string
+	var serviceID *string
+	var serviceName string
+	var serviceActive bool
+	var lastMessageID *string
+	var lastMessageDirection, lastMessageType string
+	var lastMessageText *string
+	var lastMessageSentAt *time.Time
+	var contactExternalID *string
 	if err := row.Scan(
 		&risk.ID, &risk.TenantID, &risk.OpportunityID, &risk.LocationID,
 		&risk.Type, &risk.Severity, &risk.Status, &risk.Source, &risk.Confidence,
 		&risk.AIRunID, &risk.PolicyVersion,
 		&risk.TriggerMessageID, &risk.ReasonCode, &risk.Reason, &risk.DetectedAt,
 		&risk.DueAt, &risk.UpdatedAt, &risk.AcknowledgedAt, &risk.ActedAt, &risk.ResolvedAt,
-		&opportunity.ID, &opportunity.Stage, &potentialRevenue, &opportunity.Currency,
+		&opportunity.ID, &opportunity.Stage, &opportunity.ServiceID, &potentialRevenue, &opportunity.Currency,
 		&conversation.ID, &conversation.ContactID,
+		&contact.DisplayName,
+		&serviceID, &serviceName, &serviceActive,
+		&channel.ConnectionID, &channel.Provider, &channel.Name, &channel.Status,
+		&lastMessageID, &lastMessageDirection, &lastMessageType, &lastMessageText, &lastMessageSentAt,
+		&contactExternalID,
 		&result.SeverityRank, &result.BookingRank, &result.RevenueSort,
 	); err != nil {
 		return rankedDetail{}, err
@@ -493,11 +565,55 @@ func scanRankedDetail(row riskRow) (rankedDetail, error) {
 	if potentialRevenue != "" {
 		opportunity.PotentialRevenue = &potentialRevenue
 	}
-	result.Detail = application.Detail{
-		Risk: risk, Opportunity: &opportunity, Conversation: &conversation,
-		Actions: []application.Action{},
+	contact.ID = conversation.ContactID
+	if lastMessageID != nil && lastMessageSentAt != nil {
+		conversation.LastMessage = &application.MessagePreview{
+			ID: *lastMessageID, Direction: lastMessageDirection, Type: lastMessageType,
+			Preview: PreviewText(lastMessageText, MessagePreviewLimit), SentAt: lastMessageSentAt.UTC(),
+		}
 	}
+	detail := application.Detail{
+		Risk: risk, Opportunity: &opportunity, Conversation: &conversation, Contact: &contact, Channel: &channel,
+		ExternalLink: ExternalLinkFor(channel.Provider, contactExternalID),
+		Actions:      []application.Action{},
+	}
+	if serviceID != nil {
+		detail.Service = &application.Service{ID: *serviceID, Name: serviceName, Active: serviceActive}
+	}
+	result.Detail = detail
 	return result, nil
+}
+
+// ExternalLinkFor строит поле внешней ссылки модели чтения из поставщика
+// канала и внешнего идентификатора контакта в этом канале.
+func ExternalLinkFor(provider string, contactExternalID *string) application.ExternalLink {
+	externalID := ""
+	if contactExternalID != nil {
+		externalID = *contactExternalID
+	}
+	link, reason := connectordomain.ContactDeepLink(connectordomain.Provider(provider), externalID)
+	if reason != "" {
+		return application.ExternalLink{UnavailableReason: &reason}
+	}
+	kind := string(link.Kind)
+	return application.ExternalLink{URL: &link.URL, Kind: &kind}
+}
+
+// PreviewText схлопывает пробелы и обрезает текст до limit символов; для
+// пустого текста возвращает nil.
+func PreviewText(text *string, limit int) *string {
+	if text == nil {
+		return nil
+	}
+	collapsed := strings.Join(strings.Fields(*text), " ")
+	if collapsed == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(collapsed) > limit {
+		runes := []rune(collapsed)
+		collapsed = strings.TrimSpace(string(runes[:limit]))
+	}
+	return &collapsed
 }
 
 func scanRadarMutation(row riskRow) (application.Mutation, error) {
@@ -520,9 +636,9 @@ func scanRadarMutation(row riskRow) (application.Mutation, error) {
 	return mutation, nil
 }
 
-func filterKey(query application.ListQuery) string {
+func filterKey(filters application.Filters) string {
 	return strings.Join([]string{
-		string(query.Status), query.LocationID, string(query.Severity), string(query.RiskType),
+		filters.StatusKey(), filters.LocationID, string(filters.Severity), string(filters.RiskType),
 	}, "\x00")
 }
 

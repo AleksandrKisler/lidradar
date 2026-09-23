@@ -13,6 +13,7 @@ import (
 	"lidradar/backend/internal/conversation/application"
 	"lidradar/backend/internal/conversation/domain"
 	httpplatform "lidradar/backend/platform/http"
+	"lidradar/backend/platform/ids"
 )
 
 // UserResolver получает пользователя из серверного сеанса.
@@ -22,7 +23,7 @@ type UserResolver interface {
 
 // ConversationService описывает доступные HTTP-обработчику операции чтения.
 type ConversationService interface {
-	List(context.Context, string, string, int, string) (application.ConversationPage, error)
+	List(context.Context, string, string, application.ListQuery) (application.ConversationPage, error)
 	Detail(context.Context, string, string, string) (domain.ConversationDetail, error)
 	Messages(context.Context, string, string, string, int, string) (application.MessagePage, error)
 }
@@ -56,11 +57,46 @@ func (handler Handler) list(writer http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	page, err := handler.service.List(request.Context(), actorID, tenantID, limit, request.URL.Query().Get("cursor"))
+	filter, ok := listFilter(writer, request)
+	if !ok {
+		return
+	}
+	page, err := handler.service.List(request.Context(), actorID, tenantID, application.ListQuery{
+		Filter: filter, Limit: limit, Cursor: request.URL.Query().Get("cursor"),
+	})
 	if handleError(writer, request, err) {
 		return
 	}
 	httpplatform.WriteJSON(writer, http.StatusOK, page)
+}
+
+// listFilter читает серверные фильтры списка: search (имя, телефон или почта
+// контакта), withRisk (только переписки с активным риском), locationId,
+// connectionId и status.
+func listFilter(writer http.ResponseWriter, request *http.Request) (domain.ListFilter, bool) {
+	query := request.URL.Query()
+	filter := domain.ListFilter{
+		Search:       strings.TrimSpace(query.Get("search")),
+		LocationID:   strings.TrimSpace(query.Get("locationId")),
+		ConnectionID: strings.TrimSpace(query.Get("connectionId")),
+		Status:       domain.ConversationStatus(strings.TrimSpace(query.Get("status"))),
+	}
+	switch query.Get("withRisk") {
+	case "":
+	case "true":
+		filter.WithRisk = true
+	case "false":
+	default:
+		writeError(writer, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Некорректный withRisk")
+		return domain.ListFilter{}, false
+	}
+	for _, value := range []string{filter.LocationID, filter.ConnectionID} {
+		if value != "" && !ids.Valid(value) {
+			writeError(writer, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Некорректный идентификатор фильтра")
+			return domain.ListFilter{}, false
+		}
+	}
+	return filter, true
 }
 
 func (handler Handler) detail(writer http.ResponseWriter, request *http.Request) {

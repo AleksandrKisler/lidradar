@@ -3,7 +3,13 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -439,4 +445,255 @@ func (service Service) requirePermission(ctx context.Context, actorID, tenantID,
 		return ErrForbidden
 	}
 	return nil
+}
+
+// Команда организации и приглашения (ADR 0045).
+
+var (
+	ErrLastOwner         = errors.New("the last active owner cannot be demoted or revoked")
+	ErrMemberDisabled    = errors.New("membership is disabled")
+	ErrInvitationExpired = errors.New("invitation has expired")
+	ErrInvitationRevoked = errors.New("invitation was revoked")
+	ErrInvitationUsed    = errors.New("invitation was already accepted")
+	ErrAlreadyMember     = errors.New("user is already an active member")
+)
+
+// invitationCodeBytes задаёт энтропию кода приглашения: 256 бит, base64url
+// без дополнения — 43 символа из [A-Za-z0-9_-].
+const invitationCodeBytes = 32
+
+var invitationCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+
+// InvitationView — приглашение вместе с вычисленным состоянием.
+type InvitationView struct {
+	domain.Invitation
+	Status domain.InvitationStatus `json:"status"`
+}
+
+func (service Service) invitationView(invitation domain.Invitation) InvitationView {
+	return InvitationView{Invitation: invitation, Status: invitation.Status(service.now().UTC())}
+}
+
+// ListMembers перечисляет участников организации, включая отозванных; право
+// member.manage, так как список раскрывает адреса почты.
+func (service Service) ListMembers(ctx context.Context, actorID, tenantID string) ([]domain.Member, error) {
+	if !service.ready() {
+		return nil, ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionMemberManage); err != nil {
+		return nil, err
+	}
+	members, err := service.repository.ListMembers(ctx, tenantID)
+	if err != nil {
+		return nil, mapTeamError(err)
+	}
+	if members == nil {
+		members = []domain.Member{}
+	}
+	return members, nil
+}
+
+// ChangeMemberRole меняет роль активного участника. Последнего активного
+// владельца понизить нельзя; смена собственной роли подчиняется тому же правилу.
+func (service Service) ChangeMemberRole(ctx context.Context, actorID, tenantID, userID string, role domain.Role) (domain.Membership, error) {
+	if !service.ready() {
+		return domain.Membership{}, ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionMemberManage); err != nil {
+		return domain.Membership{}, err
+	}
+	if userID == "" || (role != domain.RoleOwner && role != domain.RoleManager) {
+		return domain.Membership{}, ErrInvalid
+	}
+	membership, err := service.repository.ChangeMemberRole(ctx, tenantID, userID, role, service.now().UTC())
+	if err != nil {
+		return domain.Membership{}, mapTeamError(err)
+	}
+	if err := service.audit(ctx, tenantID, actorID, "MEMBER_ROLE_CHANGED", "MEMBERSHIP", membership.ID); err != nil {
+		return domain.Membership{}, err
+	}
+	return membership, nil
+}
+
+// RevokeMember отзывает доступ участника (статус DISABLED, строка остаётся).
+// Повтор идемпотентен; последний активный владелец защищён.
+func (service Service) RevokeMember(ctx context.Context, actorID, tenantID, userID string) error {
+	if !service.ready() {
+		return ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionMemberManage); err != nil {
+		return err
+	}
+	if userID == "" {
+		return ErrInvalid
+	}
+	membership, changed, err := service.repository.RevokeMember(ctx, tenantID, userID, service.now().UTC())
+	if err != nil {
+		return mapTeamError(err)
+	}
+	if !changed {
+		return nil
+	}
+	return service.audit(ctx, tenantID, actorID, "MEMBER_REVOKED", "MEMBERSHIP", membership.ID)
+}
+
+// CreateInvitation выпускает одноразовый код с ролью. Открытый код
+// возвращается один раз и нигде не сохраняется; в базе остаётся SHA-256.
+func (service Service) CreateInvitation(ctx context.Context, actorID, tenantID string, role domain.Role, note *string) (InvitationView, string, error) {
+	if !service.ready() {
+		return InvitationView{}, "", ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionMemberManage); err != nil {
+		return InvitationView{}, "", err
+	}
+	code, err := newInvitationCode()
+	if err != nil {
+		return InvitationView{}, "", err
+	}
+	invitationID, err := service.ids.NewID()
+	if err != nil {
+		return InvitationView{}, "", err
+	}
+	auditID, err := service.ids.NewID()
+	if err != nil {
+		return InvitationView{}, "", err
+	}
+	now := service.now().UTC()
+	invitation, err := domain.NewInvitation(invitationID, tenantID, role, hashInvitationCode(code), note, actorID, now)
+	if err != nil {
+		return InvitationView{}, "", ErrInvalid
+	}
+	if err := service.repository.CreateInvitation(ctx, invitation, domain.AuditEntry{
+		ID: auditID, ActorID: actorID, Operation: "MEMBER_INVITED", EntityType: "INVITATION", EntityID: invitation.ID, At: now,
+	}); err != nil {
+		return InvitationView{}, "", mapTeamError(err)
+	}
+	return service.invitationView(invitation), code, nil
+}
+
+func (service Service) ListInvitations(ctx context.Context, actorID, tenantID string) ([]InvitationView, error) {
+	if !service.ready() {
+		return nil, ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionMemberManage); err != nil {
+		return nil, err
+	}
+	invitations, err := service.repository.ListInvitations(ctx, tenantID)
+	if err != nil {
+		return nil, mapTeamError(err)
+	}
+	views := make([]InvitationView, 0, len(invitations))
+	for _, invitation := range invitations {
+		views = append(views, service.invitationView(invitation))
+	}
+	return views, nil
+}
+
+// RevokeInvitation отзывает ожидающее приглашение; принятое отозвать нельзя,
+// повторный отзыв ничего не меняет.
+func (service Service) RevokeInvitation(ctx context.Context, actorID, tenantID, invitationID string) error {
+	if !service.ready() {
+		return ErrInvalid
+	}
+	if err := service.requirePermission(ctx, actorID, tenantID, PermissionMemberManage); err != nil {
+		return err
+	}
+	if invitationID == "" {
+		return ErrInvalid
+	}
+	auditID, err := service.ids.NewID()
+	if err != nil {
+		return err
+	}
+	now := service.now().UTC()
+	if _, err := service.repository.RevokeInvitation(ctx, tenantID, invitationID, actorID, now, domain.AuditEntry{
+		ID: auditID, ActorID: actorID, Operation: "INVITATION_REVOKED", EntityType: "INVITATION", EntityID: invitationID, At: now,
+	}); err != nil {
+		return mapTeamError(err)
+	}
+	return nil
+}
+
+// AcceptInvitation принимает код от имени вошедшего пользователя без выбора
+// организации: организация определяется приглашением. Отозванное ранее
+// членство восстанавливается с ролью приглашения.
+func (service Service) AcceptInvitation(ctx context.Context, userID, code string) (identityapplication.MembershipSummary, error) {
+	if !service.ready() || userID == "" {
+		return identityapplication.MembershipSummary{}, ErrInvalid
+	}
+	code = strings.TrimSpace(code)
+	if !invitationCodePattern.MatchString(code) {
+		return identityapplication.MembershipSummary{}, ErrInvalid
+	}
+	membershipID, err := service.ids.NewID()
+	if err != nil {
+		return identityapplication.MembershipSummary{}, err
+	}
+	auditID, err := service.ids.NewID()
+	if err != nil {
+		return identityapplication.MembershipSummary{}, err
+	}
+	account, err := service.repository.AcceptInvitation(ctx, domain.AcceptInvitationCommand{
+		CodeHash: hashInvitationCode(code), UserID: userID, MembershipID: membershipID, At: service.now().UTC(), AuditID: auditID,
+	})
+	if err != nil {
+		return identityapplication.MembershipSummary{}, mapTeamError(err)
+	}
+	return identityapplication.MembershipSummary{
+		TenantID: account.Organization.ID, OrganizationName: account.Organization.Name, Role: string(account.Membership.Role),
+	}, nil
+}
+
+// Onboarding выводит статус настройки организации из фактов; доступен любому
+// активному участнику.
+func (service Service) Onboarding(ctx context.Context, actorID, tenantID string) (domain.OnboardingStatus, error) {
+	if !service.ready() {
+		return domain.OnboardingStatus{}, ErrInvalid
+	}
+	if err := service.requireMember(ctx, actorID, tenantID); err != nil {
+		return domain.OnboardingStatus{}, err
+	}
+	facts, err := service.repository.OnboardingFacts(ctx, tenantID, actorID)
+	if err != nil {
+		return domain.OnboardingStatus{}, mapTeamError(err)
+	}
+	return domain.OnboardingFrom(facts, service.now()), nil
+}
+
+func newInvitationCode() (string, error) {
+	raw := make([]byte, invitationCodeBytes)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate invitation code: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func hashInvitationCode(code string) string {
+	digest := sha256.Sum256([]byte(code))
+	return hex.EncodeToString(digest[:])
+}
+
+func mapTeamError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return ErrNotFound
+	case errors.Is(err, domain.ErrConflict):
+		return ErrConflict
+	case errors.Is(err, domain.ErrInvalid):
+		return ErrInvalid
+	case errors.Is(err, domain.ErrLastOwner):
+		return ErrLastOwner
+	case errors.Is(err, domain.ErrMemberDisabled):
+		return ErrMemberDisabled
+	case errors.Is(err, domain.ErrInvitationExpired):
+		return ErrInvitationExpired
+	case errors.Is(err, domain.ErrInvitationRevoked):
+		return ErrInvitationRevoked
+	case errors.Is(err, domain.ErrInvitationUsed):
+		return ErrInvitationUsed
+	case errors.Is(err, domain.ErrAlreadyMember):
+		return ErrAlreadyMember
+	default:
+		return err
+	}
 }

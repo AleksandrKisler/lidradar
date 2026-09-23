@@ -3,8 +3,10 @@ package infrastructure
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -370,4 +372,138 @@ func storeRadarRisk(
 		t.Fatal(err)
 	}
 	return stored
+}
+
+// Обогащённая модель чтения (ADR 0044): контакт, канал, услуга, последнее
+// сообщение и внешняя ссылка собираются одним запросом; фильтр статусов и
+// курсор привязаны к набору статусов.
+func TestPostgresRadarEnrichedContextStatusesAndDeepLink(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	tenants := testsupport.TwoTenants(t, ctx, pool)
+	first := insertRiskFixture(t, pool, tenants.A.TenantID, tenants.A.LocationID, domain.DirectionIncoming)
+	second := insertRiskFixture(t, pool, tenants.A.TenantID, tenants.A.LocationID, domain.DirectionIncoming)
+	third := insertRiskFixture(t, pool, tenants.A.TenantID, tenants.A.LocationID, domain.DirectionIncoming)
+	serviceID, err := (ids.Generator{}).NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO service_catalog_items(id, tenant_id, location_id, name, normalized_name, price_from, price_to, currency, active, created_at, updated_at)
+		VALUES ($1, $2, $3, 'Полировка кузова', 'полировка кузова', 5000, 9000, 'RUB', true, $4, $4)`,
+		serviceID, tenants.A.TenantID, tenants.A.LocationID, first.messageAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE opportunities SET service_id = $3 WHERE tenant_id = $1 AND id = $2`,
+		tenants.A.TenantID, first.opportunityID, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	longText := strings.Repeat("слово ", 60)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages(id, tenant_id, conversation_id, connection_id, external_id, direction, type, text, sent_at, received_at, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, 'OUTGOING', 'TEXT', $6, $7, $7, '{}'::jsonb, $7)`,
+		newRadarID(t), tenants.A.TenantID, first.conversationID, first.connectionID, "message-late-"+first.conversationID,
+		"  Ответ\n\nвладельца  "+longText, first.messageAt.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages(id, tenant_id, conversation_id, connection_id, external_id, direction, type, text, sent_at, received_at, provider_deleted_at, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, 'INCOMING', 'TEXT', 'удалено у поставщика', $6, $6, $6, '{}'::jsonb, $6)`,
+		newRadarID(t), tenants.A.TenantID, first.conversationID, first.connectionID, "message-deleted-"+first.conversationID,
+		first.messageAt.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// Telegram-канал третьей переписки: внешняя личность контакта даёт ссылку tg://user.
+	if _, err := pool.Exec(ctx, `UPDATE channel_connections SET provider = 'CONNECTED_BUSINESS_BOT' WHERE tenant_id = $1 AND id = $2`,
+		tenants.A.TenantID, third.connectionID); err != nil {
+		t.Fatal(err)
+	}
+	var thirdContactID string
+	if err := pool.QueryRow(ctx, `SELECT contact_id FROM conversations WHERE tenant_id = $1 AND id = $2`, tenants.A.TenantID, third.conversationID).Scan(&thirdContactID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO external_identities(id, tenant_id, contact_id, provider, connection_id, external_id, metadata, created_at)
+		VALUES ($1, $2, $3, 'CONNECTED_BUSINESS_BOT', $4, '123456789', '{}'::jsonb, $5)`,
+		newRadarID(t), tenants.A.TenantID, thirdContactID, third.connectionID, third.messageAt); err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	firstRisk := storeRadarRisk(t, pool, first, domain.SeverityCritical, base.Add(-time.Hour), base)
+	secondRisk := storeRadarRisk(t, pool, second, domain.SeverityHigh, base.Add(-2*time.Hour), base.Add(time.Minute))
+	thirdRisk := storeRadarRisk(t, pool, third, domain.SeverityHigh, base.Add(-3*time.Hour), base.Add(2*time.Minute))
+	store := NewPostgresRadarStore(pool)
+	if _, err := store.Resolve(ctx, tenants.A.TenantID, secondRisk.ID, base.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	detail, found, err := store.Get(ctx, tenants.A.TenantID, firstRisk.ID)
+	if err != nil || !found {
+		t.Fatalf("Get() = %#v, %v, %v", detail, found, err)
+	}
+	if detail.Contact == nil || detail.Contact.DisplayName == nil || *detail.Contact.DisplayName != "Клиент" ||
+		detail.Channel == nil || detail.Channel.Provider != "TEST" || detail.Channel.Name != "Risk fixture" || detail.Channel.ConnectionID != first.connectionID ||
+		detail.Service == nil || detail.Service.ID != serviceID || detail.Service.Name != "Полировка кузова" || !detail.Service.Active ||
+		detail.Opportunity == nil || detail.Opportunity.ServiceID == nil || *detail.Opportunity.ServiceID != serviceID {
+		t.Fatalf("контекст карточки = %#v", detail)
+	}
+	preview := detail.Conversation.LastMessage
+	if preview == nil || preview.Direction != "OUTGOING" || preview.Preview == nil || !strings.HasPrefix(*preview.Preview, "Ответ владельца слово") ||
+		utf8.RuneCountInString(*preview.Preview) > MessagePreviewLimit || strings.Contains(*preview.Preview, "\n") ||
+		!preview.SentAt.Equal(first.messageAt.Add(time.Hour)) {
+		t.Fatalf("превью последнего сообщения = %#v", preview)
+	}
+	if detail.ExternalLink.URL != nil || detail.ExternalLink.UnavailableReason == nil || *detail.ExternalLink.UnavailableReason != "PROVIDER_UNSUPPORTED" {
+		t.Fatalf("ссылка для TEST-канала = %#v", detail.ExternalLink)
+	}
+	telegram, _, err := store.Get(ctx, tenants.A.TenantID, thirdRisk.ID)
+	if err != nil || telegram.ExternalLink.URL == nil || *telegram.ExternalLink.URL != "tg://user?id=123456789" ||
+		telegram.ExternalLink.Kind == nil || *telegram.ExternalLink.Kind != "TELEGRAM_USER" || telegram.ExternalLink.UnavailableReason != nil ||
+		telegram.Service != nil || telegram.Conversation.LastMessage == nil || telegram.Conversation.LastMessage.Type != "TEXT" {
+		t.Fatalf("Telegram-карточка = %#v, %v", telegram, err)
+	}
+
+	active, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{Filters: application.Filters{Statuses: domain.ActiveStatuses()}, Limit: 10})
+	if err != nil || len(active.Items) != 2 || active.Items[0].Risk.ID != firstRisk.ID || active.Items[1].Risk.ID != thirdRisk.ID {
+		t.Fatalf("активные риски = %#v, %v", active, err)
+	}
+	resolved, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{Filters: application.Filters{Statuses: []domain.Status{domain.StatusResolved}}, Limit: 10})
+	if err != nil || len(resolved.Items) != 1 || resolved.Items[0].Risk.ID != secondRisk.ID {
+		t.Fatalf("закрытые риски = %#v, %v", resolved, err)
+	}
+	everything, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{Limit: 10})
+	if err != nil || len(everything.Items) != 3 {
+		t.Fatalf("все риски = %#v, %v", everything, err)
+	}
+	page, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{
+		Filters: application.Filters{Statuses: []domain.Status{domain.StatusActed, domain.StatusOpen, domain.StatusAcknowledged}}, Limit: 1,
+	})
+	if err != nil || len(page.Items) != 1 || page.NextCursor == "" {
+		t.Fatalf("первая страница активных = %#v, %v", page, err)
+	}
+	next, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{Filters: application.Filters{Statuses: domain.ActiveStatuses()}, Limit: 1, After: page.NextCursor})
+	if err != nil || len(next.Items) != 1 || next.Items[0].Risk.ID != thirdRisk.ID || next.NextCursor != "" {
+		t.Fatalf("вторая страница активных (порядок статусов не важен) = %#v, %v", next, err)
+	}
+	if _, err := store.List(ctx, tenants.A.TenantID, application.ListQuery{Limit: 1, After: page.NextCursor}); !errors.Is(err, application.ErrInvalidCommand) {
+		t.Fatalf("курсор активных принят без фильтра статусов: %v", err)
+	}
+	summary, err := store.Summary(ctx, tenants.A.TenantID, application.Filters{Statuses: []domain.Status{domain.StatusResolved}})
+	if err != nil || summary.OpenRisks != 0 || summary.CriticalRisks != 0 {
+		t.Fatalf("сводка по закрытым = %#v, %v", summary, err)
+	}
+	summary, err = store.Summary(ctx, tenants.A.TenantID, application.Filters{Statuses: domain.ActiveStatuses()})
+	if err != nil || summary.OpenRisks != 2 || summary.CriticalRisks != 1 {
+		t.Fatalf("сводка по активным = %#v, %v", summary, err)
+	}
+}
+
+func newRadarID(t *testing.T) string {
+	t.Helper()
+	value, err := (ids.Generator{}).NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }

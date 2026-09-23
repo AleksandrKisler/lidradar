@@ -209,6 +209,43 @@ func TestPostgresAnalyticsSummaryCountsRawFactsInsidePeriod(t *testing.T) {
 	if summary.Revenue != (domain.Revenue{Currency: "RUB", Potential: "5000.00", Confirmed: "50000.00", ConfirmedRecovered: "47000.00", ConfirmedPayments: 2}) {
 		t.Fatalf("деньги = %#v", summary.Revenue)
 	}
+	// Дневной ряд и разбивка атрибуций (GAP-API-007): дни — по часовому поясу
+	// организации, деньги — только в её валюте.
+	series, err := domain.FillSeries(period, summary.Series)
+	if err != nil || len(series) != 31 || series[0].Date != "2026-08-01" || series[30].Date != "2026-08-31" {
+		t.Fatalf("дневной ряд = %d точек, %v", len(series), err)
+	}
+	byDate := map[string]domain.DailyPoint{}
+	for _, point := range series {
+		byDate[point.Date] = point
+	}
+	// 2026-08-31T20:30Z — ещё 31 августа по Москве; 2026-07-31T21:30Z — уже 1 августа.
+	if byDate["2026-08-31"].Outgoing != 1 || byDate["2026-08-01"].Incoming != 1 || byDate["2026-08-10"].Incoming != 0 ||
+		byDate["2026-08-05"].RisksDetected != 1 || byDate["2026-08-25"].RisksDetected != 1 ||
+		byDate["2026-08-08"] != (domain.DailyPoint{Date: "2026-08-08", RisksDetected: 0, Confirmed: "47000.00", ConfirmedRecovered: "47000.00", Payments: 1}) ||
+		byDate["2026-08-20"].Confirmed != "3000.00" || byDate["2026-08-20"].Payments != 1 || byDate["2026-08-21"].Payments != 0 ||
+		byDate["2026-08-02"] != (domain.DailyPoint{Date: "2026-08-02", Confirmed: "0.00", ConfirmedRecovered: "0.00"}) {
+		t.Fatalf("точки ряда = %#v", byDate)
+	}
+	attribution := domain.AttributionFromRows(summary.Attribution)
+	if len(attribution) != 3 || attribution[0] != (domain.AttributionSplit{Type: "RECOVERED", Amount: "47000.00", Count: 1}) ||
+		attribution[1] != (domain.AttributionSplit{Type: "ORGANIC", Amount: "3000.00", Count: 1}) ||
+		attribution[2] != (domain.AttributionSplit{Type: "UNKNOWN", Amount: "0.00", Count: 0}) {
+		t.Fatalf("разбивка атрибуций = %#v", attribution)
+	}
+	payments, more, err := store.Payments(ctx, pair.A.TenantID, period, 2, nil)
+	if err != nil || !more || len(payments) != 2 || payments[0].Attribution != "UNKNOWN" || payments[0].Currency != "EUR" ||
+		payments[0].Amount != "100.00" || payments[1].Attribution != "ORGANIC" || payments[1].ContactDisplayName == nil || *payments[1].ContactDisplayName != "Клиент" {
+		t.Fatalf("первая страница оплат = %#v, more=%v, %v", payments, more, err)
+	}
+	rest, more, err := store.Payments(ctx, pair.A.TenantID, period, 2, &domain.PaymentCursor{At: payments[1].ConfirmedAt, ID: payments[1].EventID})
+	if err != nil || more || len(rest) != 1 || rest[0].Attribution != "RECOVERED" || rest[0].RiskID == nil || *rest[0].RiskID != acted ||
+		rest[0].OpportunityID != active || rest[0].ConversationID != inside || rest[0].ConfirmedBy != pair.A.UserID {
+		t.Fatalf("вторая страница оплат = %#v, more=%v, %v", rest, more, err)
+	}
+	if foreign, _, err := store.Payments(ctx, pair.B.TenantID, period, 10, nil); err != nil || len(foreign) != 0 {
+		t.Fatalf("оплаты чужой организации = %#v, %v", foreign, err)
+	}
 	otherSummary, err := store.Summary(ctx, pair.B.TenantID, period, "RUB")
 	if err != nil || otherSummary.Messages.Total != 1 || otherSummary.Opportunities.Created != 1 || otherSummary.Revenue.Confirmed != "0.00" ||
 		len(otherSummary.Risks.ByType) != 0 {

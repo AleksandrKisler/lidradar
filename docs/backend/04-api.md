@@ -70,11 +70,16 @@
 | 409 | `INVALID_STAGE_TRANSITION` | недопустимый переход этапа сделки |
 | 409 | `IDEMPOTENCY_CONFLICT` | тот же `Idempotency-Key` с другим содержимым |
 | 409 | `RECOVERED_ALREADY_ATTRIBUTED` | вторая атрибуция `RECOVERED` на сделку |
+| 409 | `LAST_OWNER` | понижение или отзыв последнего активного владельца |
+| 409 | `MEMBER_DISABLED` | смена роли отозванного членства |
+| 409 | `INVITATION_EXPIRED` / `INVITATION_REVOKED` / `INVITATION_USED` | код приглашения больше не действует |
+| 409 | `ALREADY_MEMBER` | принимающий уже активный участник организации |
 | 409 | `LEASE_LOST` | API узла: аренда задания потеряна |
 | 413 | `PAYLOAD_TOO_LARGE` | вебхук больше 1 МиБ |
 | 429 | `RATE_LIMITED` | превышен предел по адресу или по учётной записи; есть `Retry-After` |
 | 503 | `SERVICE_NOT_READY` | `/health/ready`: база или миграции не совпали |
 | 503 | `CONNECTOR_UNAVAILABLE` | Telegram не настроен или недоступен, подключение отключено |
+| 503 | `UNAVAILABLE` | `GET /events`: шина сигналов не инициализирована в процессе |
 | 500 | `INTERNAL_ERROR` | необработанная ошибка, единый код во всех модулях; текст без деталей |
 
 `message` никогда не содержит секретов, текста сообщений и деталей исключений.
@@ -97,9 +102,11 @@
 
 Курсорная. `limit` 1…100 (по умолчанию 50), `cursor` — непрозрачная строка
 `base64url`. Переписки сортируются по `updated_at DESC, id DESC`, сообщения —
-по `sent_at DESC, id DESC`, риски — серверным порядком Radar; курсор рисков
-привязан к набору фильтров и с другими фильтрами отвергается. Нечисловой
-`limit` → `400`.
+по `sent_at DESC, id DESC`, риски — серверным порядком Radar, оплаты
+аналитики — по `confirmed_at DESC, id DESC`. Курсоры рисков и переписок
+несут отпечаток набора фильтров (у рисков — включая статусы), курсор оплат —
+окно дат; с другими фильтрами курсор отвергается `400`. Конец страницы всегда
+`nextCursor: null`. Нечисловой `limit` → `400`.
 
 ### 1.6. Корреляция, заголовки безопасности, ограничение частоты
 
@@ -128,7 +135,10 @@
 `{"resourceId":"<uuid риска>"}`,
 комментарий-heartbeat каждые 20 с, без `id:`/`retry:` и `Last-Event-ID`:
 после разрыва клиент переподключается и перечитывает `GET /api/v1/radar`
-и списки. Буфер подписчика 16 сигналов, переполнение сбрасывает сигнал.
+и списки. Буфер подписчика 16 сигналов; при переполнении накопленные сигналы
+отбрасываются и подписчику посылается одно событие `resync.required` с телом
+`{"reason":"BUFFER_OVERFLOW"}` — клиент перечитывает сводку и открытые списки
+целиком (ADR 0044). Без инициализированной шины — `503 UNAVAILABLE`.
 
 ## 2. Каталог конечных точек
 
@@ -160,12 +170,24 @@
 | GET | `/api/v1/organization` | 🍪+T, членство | `200 Organization` |
 | PATCH | `/api/v1/organization` | 🍪+T, `organization.manage` | частичное обновление имени, зоны, валюты → `200` |
 | GET | `/api/v1/locations` | 🍪+T, членство | `200 {"items":[Location]}` |
-| POST | `/api/v1/locations` | 🍪+T, `location.manage` | `{name,timezone,responseThresholdMinutes?,active?}` → `201 Location` |
+| POST | `/api/v1/locations` | 🍪+T, `location.manage` | `{name,timezone,responseThresholdMinutes?}` → `201 Location`; поле `active` отклоняется `400` (новая точка всегда активна, статус меняет только `PATCH`) |
 | PATCH | `/api/v1/locations/{locationId}` | 🍪+T, `location.manage` | `200 Location` |
 | PUT | `/api/v1/locations/{locationId}/business-hours` | 🍪+T, `location.manage` | `{timezone,days:[7×{weekday,closed,opensAt?,closesAt?}]}` → `200 Location` |
 | GET | `/api/v1/organization/ml-consent` | 🍪+T, членство | `200 {"scope":"DATASETS","active":bool,"consent":obj\|null}` |
 | POST | `/api/v1/organization/ml-consent` | 🍪+T, `organization.manage` | `201` при выдаче, `200` при повторе |
 | DELETE | `/api/v1/organization/ml-consent` | 🍪+T, `organization.manage` | `204` (и без действующего согласия) |
+| GET | `/api/v1/organization/onboarding` | 🍪+T, членство | `200 {"complete","nextStep","steps":[5×{key,required,done}],"facts","computedAt"}` — статус выводится из данных (ADR 0045) |
+| GET | `/api/v1/organization/members` | 🍪+T, `member.manage` | `200 {"items":[Member]}` с почтой и именем, включая `DISABLED` |
+| PATCH | `/api/v1/organization/members/{userId}` | 🍪+T, `member.manage` | `{"role"}` → `200 Membership`; `409 LAST_OWNER` / `MEMBER_DISABLED`; аудит `MEMBER_ROLE_CHANGED` |
+| DELETE | `/api/v1/organization/members/{userId}` | 🍪+T, `member.manage` | `204` (`DISABLED`, строка остаётся; повтор идемпотентен); `409 LAST_OWNER`; аудит `MEMBER_REVOKED` |
+| GET | `/api/v1/organization/invitations` | 🍪+T, `member.manage` | `200 {"items":[Invitation]}` со статусом `PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`; кода нет |
+| POST | `/api/v1/organization/invitations` | 🍪+T, `member.manage` | `{"role","note?"}` → `201 {"invitation","code"}`; код 43 символа показывается один раз, хранится SHA-256, срок 7 дней; аудит `MEMBER_INVITED` |
+| DELETE | `/api/v1/organization/invitations/{invitationId}` | 🍪+T, `member.manage` | `204` (повтор идемпотентен); принятое → `409 INVITATION_USED`; аудит `INVITATION_REVOKED` |
+| POST | `/api/v1/invitations/accept` | 🍪 (без `X-Tenant-ID`) | `{"code"}` → `200 {"membership":{tenantId,organizationName,role}}`; создаёт или восстанавливает членство; `404` неизвестный код, `409 INVITATION_EXPIRED`/`INVITATION_REVOKED`/`INVITATION_USED`/`ALREADY_MEMBER`; аудит `INVITATION_ACCEPTED` |
+
+Команда работает по одноразовым кодам, а не по адресам почты: у MVP нет
+почтовой инфраструктуры, а код без адреса не даёт поверхности для перебора
+учётных записей (ADR 0045).
 
 ### 2.4. Каталог услуг (`/api/v1/services`)
 
@@ -181,9 +203,10 @@
 | Метод | Путь | Доступ / право | Ответ |
 |---|---|---|---|
 | GET | `/api/v1/integrations` | 🍪+T, `integration.manage` | `200 {"items":[ChannelConnection]}` без хеша секрета и реквизитов |
-| POST | `/api/v1/integrations/{provider}/connect` | 🍪+T, `integration.manage` | `{name,locationId?,webhookSecret,botToken?}` → `201 ChannelConnection`; Telegram без `LIDRADAR_PUBLIC_BASE_URL`/ключа шифрования → `503 CONNECTOR_UNAVAILABLE`; ошибка Bot API → `201` со статусом `ERROR/TELEGRAM_WEBHOOK_SETUP_FAILED` |
+| POST | `/api/v1/integrations/{provider}/connect` | 🍪+T, `integration.manage` | `{name,locationId?,webhookSecret?,botToken?}` → `201 ChannelConnection + webhookSecret`; без `webhookSecret` сервер выпускает 256-битный секрет и возвращает его один раз (`null` для Telegram и для секрета клиента); Telegram без `LIDRADAR_PUBLIC_BASE_URL`/ключа шифрования → `503 CONNECTOR_UNAVAILABLE`; ошибка Bot API → `201` со статусом `ERROR/TELEGRAM_WEBHOOK_SETUP_FAILED` |
 | DELETE | `/api/v1/integrations/{connectionId}` | 🍪+T, `integration.manage` | `204`; удаляет webhook у Telegram после локального отключения |
-| GET | `/api/v1/integrations/{connectionId}/health` | 🍪+T, `integration.manage` | `200 ConnectionHealth` |
+| GET | `/api/v1/integrations/{connectionId}/health` | 🍪+T, `integration.manage` | `200 ConnectionHealth` — сохранённое состояние, `checkedAt` = время чтения |
+| POST | `/api/v1/integrations/{connectionId}/health/check` | 🍪+T, `integration.manage` | `200 {"health","verification":"REMOTE"\|"LOCAL"}`; Telegram — живой `getWebhookInfo` с сохранением результата (`ACTIVE`, `ERROR/TELEGRAM_WEBHOOK_MISMATCH`, `ERROR/TELEGRAM_WEBHOOK_CHECK_FAILED`); остальные провайдеры и `DISCONNECTED` — сохранённое состояние |
 | POST | `/api/v1/webhooks/{provider}/{tenantId}/{connectionId}` | 🔓 + секрет | `202 {"rawEventId","status":"RECEIVED"\|"FAILED","duplicate"}`; `401 WEBHOOK_UNAUTHENTICATED`, `404` (нет подключения или провайдер не совпал), `409` (тот же внешний id, другое тело), `413`, `503` (подключение `DISCONNECTED`) |
 
 Контракт вебхука по провайдерам:
@@ -201,8 +224,8 @@
 
 | Метод | Путь | Ответ |
 |---|---|---|
-| GET | `/` | `{"items":[Conversation],"nextCursor"}`; `limit`, `cursor` |
-| GET | `/{conversationId}` | `{"conversation","contact"}` |
+| GET | `/` | `{"items":[ConversationListItem],"nextCursor"}`; строка = `{conversation, contact{id,displayName}, channel{connectionId,provider,name,status}, lastMessage{id,direction,type,preview≤140,sentAt}\|null, activeRisks{count,maxSeverity\|null}, externalLink}`; фильтры `search` (имя, телефон по цифрам, почта; ≤ 100 символов), `withRisk=true`, `locationId`, `connectionId`, `status`; `limit`, `cursor` (привязан к фильтрам) |
+| GET | `/{conversationId}` | `{"conversation","contact","channel","externalLink"}` |
 | GET | `/{conversationId}/messages` | `{"items":[{"message","attachments":[]}],"nextCursor"}`; удалённые сообщения остаются с `providerDeletedAt` |
 
 ### 2.7. Сделки (`/api/v1/opportunities`)
@@ -211,20 +234,20 @@
 |---|---|---|---|
 | GET | `/{opportunityId}` | `opportunity.manage` | `{"opportunity","stageHistory":[]}` |
 | PATCH | `/{opportunityId}` | `opportunity.manage` | `{"stage"}` → `200 Opportunity` (и при повторе того же этапа); недопустимый переход → `409 INVALID_STAGE_TRANSITION` |
-| POST | `/{opportunityId}/outcomes` | `risks.manage`, `Idempotency-Key` | `{"status","note?"}` → `201`/`200 Outcome` |
+| POST | `/{opportunityId}/outcomes` | `outcome.manage`, `Idempotency-Key` | `{"status","note?"}` → `201`/`200 Outcome` |
 | POST | `/{opportunityId}/revenue` | `revenue.confirm`, `Idempotency-Key` | `{"amount","currency","attributionType","riskId?","actionId?","outcomeId?"}` → `201`/`200 {"revenue","attribution"}`; `409 RECOVERED_ALREADY_ATTRIBUTED`; нарушение окна 30 дней или чужая цепочка → `400` |
 
 ### 2.8. Radar и риски
 
 | Метод | Путь | Право | Ответ |
 |---|---|---|---|
-| GET | `/api/v1/radar` | `risks.read` | `{"openRisks","criticalRisks","potentialRevenue","confirmedRecoveredRevenue"}`; фильтры `locationId`, `severity`, `riskType` |
-| GET | `/api/v1/risks` | `risks.read` | `{"items":[RiskDetail],"nextCursor"}`; фильтры `status`, `locationId`, `severity`, `riskType`, `limit`, `cursor` |
-| GET | `/api/v1/risks/{riskId}` | `risks.read` | `RiskDetail` с рекомендацией, действиями, последним исходом |
+| GET | `/api/v1/radar` | `risks.read` | `{"openRisks","criticalRisks","potentialRevenue","confirmedRecoveredRevenue"}`; фильтры те же, что у списка: `status` (повторяемый или через запятую), `active=true\|false`, `locationId`, `severity`, `riskType`; деньги видны и менеджеру (ADR 0044) |
+| GET | `/api/v1/risks` | `risks.read` | `{"items":[RiskDetail],"nextCursor"}`; фильтры `status`/`active` (взаимоисключающие), `locationId`, `severity`, `riskType`, `limit`, `cursor` (привязан к фильтрам, включая статусы) |
+| GET | `/api/v1/risks/{riskId}` | `risks.read` | `RiskDetail` = `{risk, opportunity{…,serviceId}, conversation{id,contactId,lastMessage}, contact{id,displayName}, service{id,name,active}\|null, channel, externalLink{url,kind,unavailableReason}, recommendation\|null, actions[], outcome\|null, revenue\|null}` — все ключи присутствуют всегда |
 | POST | `/api/v1/risks/{riskId}/acknowledge` | `risks.manage` | `200 Risk`, идемпотентно |
 | POST | `/api/v1/risks/{riskId}/resolve` | `risks.manage` | `200 Risk`, идемпотентно |
 | POST | `/api/v1/risks/{riskId}/recommendation` | `risks.manage` | `200 Recommendation` (создать или вернуть существующую) |
-| POST | `/api/v1/risks/{riskId}/actions` | `risks.manage`, `Idempotency-Key` | `{"type","note?"}` → `201`/`200 Action`; риск → `ACTED` |
+| POST | `/api/v1/risks/{riskId}/actions` | `action.manage`, `Idempotency-Key` | `{"type","note?"}` → `201`/`200 Action`; риск → `ACTED`; переход по `externalLink` клиент фиксирует как `OPEN_CONVERSATION` |
 | POST | `/api/v1/risks/{riskId}/feedback` | `risks.manage` | `{"verdict","reason?","note?"}` → `201 Feedback` |
 | GET | `/api/v1/risks/precision` | `analytics.read` | `PrecisionReport` по пяти типам; `from`, `to` (RFC 3339, `from < to`) |
 | GET | `/api/v1/events` | `risks.read` | SSE (см. § 1.7) |
@@ -250,7 +273,8 @@
 
 | Метод | Путь | Право | Ответ |
 |---|---|---|---|
-| GET | `/api/v1/analytics/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` | `analytics.read` | `{"period","messages","opportunities","risks","outcomes","revenue"}`; период по умолчанию 30 дней, максимум 366 |
+| GET | `/api/v1/analytics/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` | `analytics.read` | `{"period","messages","opportunities","risks","outcomes","revenue","series":[по дню окна: incoming, outgoing, risksDetected, confirmed, confirmedRecovered, payments],"attribution":[RECOVERED, ORGANIC, UNKNOWN × {amount,count}]}`; период по умолчанию 30 дней, максимум 366; дни — по часовому поясу организации, нули заполнены |
+| GET | `/api/v1/analytics/payments?from&to&limit&cursor` | `analytics.read` | `{"period","items":[{eventId,opportunityId,conversationId,contactId,contactDisplayName,serviceName,amount,currency,attribution,riskId,confirmedBy,confirmedAt}],"nextCursor"}` — подтверждённые события окна во всех валютах, от новых к старым; возвратов в модели нет |
 
 ### 2.12. Администрирование (`/api/v1/admin`, 🍪, без `X-Tenant-ID`)
 
@@ -286,9 +310,15 @@
    /opportunities/{id}/outcomes` → при оплате `POST /opportunities/{id}/revenue`
    с `attributionType: RECOVERED` и тремя идентификаторами цепочки.
 4. **Подключение канала:** OWNER → `POST /integrations/GENERIC_WEBHOOK/connect`
-   с собственным секретом; для Telegram — через безопасный помощник
-   `scripts/telegram-connect-safe.sh` (токен не должен проходить через
-   браузер и логи).
+   без `webhookSecret` — сервер вернёт секрет один раз, его передают
+   отправителю; для Telegram интерфейс отправляет токен бота один раз по TLS
+   (write-only поле, токен шифруется и не возвращается; ADR 0045), либо
+   используется помощник `scripts/telegram-connect-safe.sh`. Кнопка
+   «Проверить связь» — `POST /integrations/{id}/health/check`.
+6. **Команда и онбординг:** `GET /organization/onboarding` определяет
+   следующий шаг настройки; OWNER выпускает код `POST
+   /organization/invitations`, сотрудник после входа принимает его `POST
+   /invitations/accept` и видит организацию в `/auth/me`.
 5. **Личные уведомления:** `POST /notifications/telegram-link-token` →
    открыть `startUrl` в Telegram → `GET /notifications/telegram-link` →
    настроить `PUT /notifications/preferences/{riskType}`.

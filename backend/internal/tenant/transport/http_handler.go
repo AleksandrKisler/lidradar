@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	identityapplication "lidradar/backend/internal/identity/application"
 	"lidradar/backend/internal/tenant/application"
 	"lidradar/backend/internal/tenant/domain"
 	httpplatform "lidradar/backend/platform/http"
@@ -29,6 +30,14 @@ type TenantService interface {
 	MLConsent(context.Context, string, string) (domain.MLConsent, bool, error)
 	GrantMLConsent(context.Context, string, string) (domain.MLConsent, bool, error)
 	RevokeMLConsent(context.Context, string, string) (domain.MLConsent, bool, error)
+	ListMembers(context.Context, string, string) ([]domain.Member, error)
+	ChangeMemberRole(context.Context, string, string, string, domain.Role) (domain.Membership, error)
+	RevokeMember(context.Context, string, string, string) error
+	CreateInvitation(context.Context, string, string, domain.Role, *string) (application.InvitationView, string, error)
+	ListInvitations(context.Context, string, string) ([]application.InvitationView, error)
+	RevokeInvitation(context.Context, string, string, string) error
+	AcceptInvitation(context.Context, string, string) (identityapplication.MembershipSummary, error)
+	Onboarding(context.Context, string, string) (domain.OnboardingStatus, error)
 }
 
 type Handler struct {
@@ -52,7 +61,147 @@ func (handler Handler) Router() http.Handler {
 	router.Get("/organization/ml-consent", handler.getMLConsent)
 	router.Post("/organization/ml-consent", handler.grantMLConsent)
 	router.Delete("/organization/ml-consent", handler.revokeMLConsent)
+	router.Get("/organization/onboarding", handler.onboarding)
+	router.Get("/organization/members", handler.listMembers)
+	router.Patch("/organization/members/{userID}", handler.changeMemberRole)
+	router.Delete("/organization/members/{userID}", handler.revokeMember)
+	router.Get("/organization/invitations", handler.listInvitations)
+	router.Post("/organization/invitations", handler.createInvitation)
+	router.Delete("/organization/invitations/{invitationID}", handler.revokeInvitation)
+	router.Post("/invitations/accept", handler.acceptInvitation)
 	return router
+}
+
+func (handler Handler) onboarding(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	status, err := handler.service.Onboarding(r.Context(), actorID, tenantID)
+	if handleError(w, r, err) {
+		return
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, status)
+}
+
+func (handler Handler) listMembers(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	members, err := handler.service.ListMembers(r.Context(), actorID, tenantID)
+	if handleError(w, r, err) {
+		return
+	}
+	if members == nil {
+		members = []domain.Member{}
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, map[string]any{"items": members})
+}
+
+type memberRoleRequest struct {
+	Role *string `json:"role"`
+}
+
+func (handler Handler) changeMemberRole(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	var request memberRoleRequest
+	if httpplatform.DecodeJSON(w, r, &request) != nil || request.Role == nil {
+		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
+		return
+	}
+	membership, err := handler.service.ChangeMemberRole(r.Context(), actorID, tenantID, chi.URLParam(r, "userID"), domain.Role(*request.Role))
+	if handleError(w, r, err) {
+		return
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, membership)
+}
+
+func (handler Handler) revokeMember(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	if handleError(w, r, handler.service.RevokeMember(r.Context(), actorID, tenantID, chi.URLParam(r, "userID"))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (handler Handler) listInvitations(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	invitations, err := handler.service.ListInvitations(r.Context(), actorID, tenantID)
+	if handleError(w, r, err) {
+		return
+	}
+	if invitations == nil {
+		invitations = []application.InvitationView{}
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, map[string]any{"items": invitations})
+}
+
+type invitationRequest struct {
+	Role *string `json:"role"`
+	Note *string `json:"note"`
+}
+
+// createInvitation возвращает открытый код ровно один раз: сервер хранит
+// только его хеш и повторно показать код не может.
+func (handler Handler) createInvitation(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	var request invitationRequest
+	if httpplatform.DecodeJSON(w, r, &request) != nil || request.Role == nil {
+		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
+		return
+	}
+	invitation, code, err := handler.service.CreateInvitation(r.Context(), actorID, tenantID, domain.Role(*request.Role), request.Note)
+	if handleError(w, r, err) {
+		return
+	}
+	httpplatform.WriteJSON(w, http.StatusCreated, map[string]any{"invitation": invitation, "code": code})
+}
+
+func (handler Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, r)
+	if !ok {
+		return
+	}
+	if handleError(w, r, handler.service.RevokeInvitation(r.Context(), actorID, tenantID, chi.URLParam(r, "invitationID"))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type acceptInvitationRequest struct {
+	Code *string `json:"code"`
+}
+
+// acceptInvitation принимает код от имени сеанса без X-Tenant-ID: организацию
+// определяет само приглашение.
+func (handler Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := handler.user(w, r)
+	if !ok {
+		return
+	}
+	var request acceptInvitationRequest
+	if httpplatform.DecodeJSON(w, r, &request) != nil || request.Code == nil {
+		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
+		return
+	}
+	membership, err := handler.service.AcceptInvitation(r.Context(), actorID, *request.Code)
+	if handleError(w, r, err) {
+		return
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, map[string]any{"membership": membership})
 }
 
 func mlConsentResponse(consent domain.MLConsent, active bool) map[string]any {
@@ -190,7 +339,9 @@ func (handler Handler) createLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request locationRequest
-	if httpplatform.DecodeJSON(w, r, &request) != nil || request.Name == nil || request.Timezone == nil {
+	// Новая точка всегда активна: поле active принимается только в PATCH,
+	// иначе клиентское ожидание молча игнорировалось бы (GAP-CONTRACT-019).
+	if httpplatform.DecodeJSON(w, r, &request) != nil || request.Name == nil || request.Timezone == nil || request.Active != nil {
 		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
 		return
 	}
@@ -301,6 +452,18 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "Resource not found")
 	case errors.Is(err, application.ErrConflict):
 		writeError(w, r, http.StatusConflict, "CONFLICT", "Resource already exists")
+	case errors.Is(err, application.ErrLastOwner):
+		writeError(w, r, http.StatusConflict, "LAST_OWNER", "The last active owner cannot be demoted or revoked")
+	case errors.Is(err, application.ErrMemberDisabled):
+		writeError(w, r, http.StatusConflict, "MEMBER_DISABLED", "Membership is disabled")
+	case errors.Is(err, application.ErrInvitationExpired):
+		writeError(w, r, http.StatusConflict, "INVITATION_EXPIRED", "Invitation has expired")
+	case errors.Is(err, application.ErrInvitationRevoked):
+		writeError(w, r, http.StatusConflict, "INVITATION_REVOKED", "Invitation was revoked")
+	case errors.Is(err, application.ErrInvitationUsed):
+		writeError(w, r, http.StatusConflict, "INVITATION_USED", "Invitation was already accepted")
+	case errors.Is(err, application.ErrAlreadyMember):
+		writeError(w, r, http.StatusConflict, "ALREADY_MEMBER", "User is already an active member")
 	default:
 		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
 	}

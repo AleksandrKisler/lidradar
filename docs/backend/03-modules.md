@@ -59,9 +59,12 @@
 
 ## 2. `tenant` — организации, членства, точки, ML-согласие
 
-**Владеет:** `organizations`, `memberships`, `locations`,
-`location_business_hours`, `ml_consents` и **единственной таблицей прав**
-(`PermissionService`), которой пользуются все модули.
+**Владеет:** `organizations`, `memberships`, `membership_invitations`,
+`locations`, `location_business_hours`, `ml_consents` и **единственной
+таблицей прав** (`PermissionService`), которой пользуются все модули. Для
+списка команды читает `users` (почта, имя), для статуса онбординга —
+`service_catalog_items`, `channel_connections`, `telegram_user_links`
+(ADR 0045).
 
 **Правила домена.** Организация: имя 1…200, валидная IANA-зона, валюта из трёх
 букв `A–Z` (по умолчанию `RUB`), статусы `ACTIVE`/`SUSPENDED`/`ARCHIVED`.
@@ -90,12 +93,36 @@
 вызывается из тестов), `MembershipsForUser`, `ListLocations`, `CreateLocation`,
 `UpdateLocation`, `ReplaceBusinessHours`, `MLConsent`, `GrantMLConsent`
 (аудит `ML_CONSENT_GRANTED` в той же транзакции), `RevokeMLConsent`
-(`ML_CONSENT_REVOKED`). Приглашений участников в модуле нет: статус `INVITED`
-объявлен, но не присваивается.
+(`ML_CONSENT_REVOKED`).
+
+**Команда и приглашения** (ADR 0045, право `member.manage`): `ListMembers`
+(членства с почтой и именем, включая `DISABLED`), `ChangeMemberRole` (аудит
+`MEMBER_ROLE_CHANGED`), `RevokeMember` (`DISABLED` + `revoked_at`, аудит
+`MEMBER_REVOKED`, повтор идемпотентен) — обе команды блокируют все членства
+организации `FOR UPDATE` и отклоняют понижение/отзыв последнего активного
+владельца (`ErrLastOwner`), включая собственное; `CreateInvitation` (256-битный
+код `base64url`, хранится SHA-256, срок 7 дней, аудит `MEMBER_INVITED` в той же
+транзакции), `ListInvitations` (статус `PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`
+выводится из отметок), `RevokeInvitation` (принятое → `ErrInvitationUsed`,
+аудит `INVITATION_REVOKED`), `AcceptInvitation` (сеанс без организации: строка
+находится по хешу кода через политику `invitation_by_code`, затем локальный
+контекст организации; создаёт членство или восстанавливает отозванное с ролью
+приглашения; активный участник → `ErrAlreadyMember`; аудит
+`INVITATION_ACCEPTED` от имени нового участника). Статус `INVITED` членства
+по-прежнему не присваивается: до приёма кода членства нет.
+
+**Онбординг:** `Onboarding` (активное членство) — `OnboardingFacts` одним
+запросом и детерминированное правило `OnboardingFrom`: обязательные шаги
+`ORGANIZATION`, `LOCATION` (активная точка с семью строками графика),
+`SERVICES` (активная услуга), `CHANNEL` (подключение не `DISCONNECTED`);
+`TELEGRAM_LINK` необязателен и считается по текущему пользователю.
 
 **Транспорт:** `/api/v1/organizations`, `/api/v1/organization`,
-`/api/v1/locations`, `/api/v1/organization/ml-consent` (монтируется на
-`/api/v1` последним, поэтому более специфичные префиксы имеют приоритет).
+`/api/v1/organization/onboarding`, `/api/v1/organization/members`,
+`/api/v1/organization/invitations`, `/api/v1/invitations/accept`,
+`/api/v1/locations` (поле `active` в `POST` отклоняется),
+`/api/v1/organization/ml-consent` (монтируется на `/api/v1` последним,
+поэтому более специфичные префиксы имеют приоритет).
 
 ## 3. `catalog` — каталог услуг
 
@@ -141,11 +168,18 @@ payload — валидный JSON с хешем, статусы `RECEIVED`/`PROC
 требует направление, тип сообщения, `sentAt` для всего, кроме удаления, и
 внешний идентификатор контакта для `message.received.v1`.
 
-**Сервис** (`application.Service`): `Connect` (секрет 16…256 байт; для
-Telegram — токен по маске, шифрование AES-256-GCM с AAD
+**Сервис** (`application.Service`): `Connect` (секрет 16…256 байт либо
+пустой — тогда сервер выпускает 256-битный `base64url`-секрет и возвращает его
+один раз в `ConnectResult.WebhookSecret` для провайдеров без удалённой
+регистрации; для Telegram — токен по маске, шифрование AES-256-GCM с AAD
 `lidradar:v1:{tenant}:{provider}:{connection}`, запись в базу до сетевого
 вызова, затем `setWebhook`; ошибка провижининга сохраняется как
-`ERROR/TELEGRAM_WEBHOOK_SETUP_FAILED`), `List`, `Health`, `Disconnect`
+`ERROR/TELEGRAM_WEBHOOK_SETUP_FAILED`), `List`, `Health` (сохранённое
+состояние), `CheckHealth` (живая проверка: `Provisioner.Verify` →
+`getWebhookInfo`, сравнение адреса, результат сохраняется — `ACTIVE`,
+`ERROR/TELEGRAM_WEBHOOK_MISMATCH` или `ERROR/TELEGRAM_WEBHOOK_CHECK_FAILED`,
+`verification: REMOTE`; провайдеры без регистрации и `DISCONNECTED` —
+сохранённое состояние, `LOCAL`; ADR 0045), `Disconnect`
 (сначала локальный статус и аудит, затем `deleteWebhook`; повтор допустим),
 `Receive` (persist-first: проверка секрета → внешний идентификатор → хеш →
 `RawEvent` + outbox в одной транзакции → `202`). Право `integration.manage`
@@ -169,8 +203,15 @@ Telegram — токен по маске, шифрование AES-256-GCM с AAD
 метаданные с `stub/telegram/{file_unique_id}`. `allowed_updates` при
 регистрации включает все шесть типов.
 
+**Внешняя ссылка на собеседника** (`domain.ContactDeepLink`, ADR 0044):
+единственная разрешённая схема — `tg://user?id=<число>` для
+`CONNECTED_BUSINESS_BOT` по внешнему идентификатору контакта в канале; иначе
+причины `PROVIDER_UNSUPPORTED` / `IDENTITY_UNKNOWN`. Правило используют модели
+чтения `risk` и `conversation`.
+
 **Прямые связи:** `conversation` читает `channel_connections` при приёме
-(`FOR UPDATE`), `notification` — служебные обновления через `ControlSink`.
+(`FOR UPDATE`) и в списке, `risk` — в карточке риска, `notification` —
+служебные обновления через `ControlSink`.
 
 ## 5. `conversation` — контакты, переписки, сообщения
 
@@ -196,8 +237,18 @@ JSON-объект; текст — валидный UTF-8 без `\x00`; внеш
 строку.
 
 **Чтение:** `List`, `Detail`, `Messages` — право `conversation.read`,
-курсорная пагинация (`base64url({"at","id"})`, `limit` 1…100, по умолчанию
-50). Страница сообщений вычитывается целиком, вложения загружаются одним
+курсорная пагинация (`base64url({"at","id","f"?})`, `limit` 1…100, по
+умолчанию 50; `f` — отпечаток фильтров списка, курсор с другими фильтрами
+отвергается). `List` отдаёт `ConversationListItem`: переписка, контакт
+(`id`, `displayName`), снимок канала, последнее не удалённое у поставщика
+сообщение с превью ≤ 140 символов, сводка активных рисков (`count`,
+`maxSeverity`) и внешняя ссылка — одним запросом с `LATERAL`-подзапросами
+(читает `channel_connections`, `external_identities`, `risk_signals`,
+`opportunities`; ADR 0044). Фильтры: `search` (имя, телефон по цифрам, почта;
+`ILIKE` с экранированием метасимволов, ≤ 100 символов), `withRisk`,
+`locationId`, `connectionId`, `status`. `Detail` дополняет контакт снимком
+канала и внешней ссылкой; каноническая `Conversation` от канала не зависит.
+Страница сообщений вычитывается целиком, вложения загружаются одним
 запросом `ANY($ids)` — вложенный запрос при открытом курсоре требовал второе
 соединение и блокировал пул при конкуренции, равной его размеру.
 `CommercialSnapshot` отдаёт `opportunity` последнее сообщение без проверки
@@ -242,10 +293,11 @@ JSON-объект; текст — валидный UTF-8 без `\x00`; внеш
 ## 7. `risk` — сигналы риска, правила, Radar, обратная связь
 
 **Владеет:** `risk_signals`, `risk_feedback`, read-моделью Radar и SSE-хабом.
-Читает только для чтения `opportunities`, `conversations`, `locations`,
-`location_business_hours`, `messages`, `conversation_summaries`, `outcomes`,
-`recommendations`, `actions`, `revenue_*`, `organizations` (ADR 0007, 0028,
-0035, 0038).
+Читает только для чтения `opportunities`, `conversations`, `contacts`,
+`channel_connections`, `external_identities`, `service_catalog_items`,
+`locations`, `location_business_hours`, `messages`, `conversation_summaries`,
+`outcomes`, `recommendations`, `actions`, `revenue_*`, `organizations`
+(ADR 0007, 0028, 0038, 0044).
 
 **Типы, важность, статусы.** Пять типов; важность по типу ограничена:
 `NO_RESPONSE` → `HIGH`/`CRITICAL`; `BOOKING_NOT_CONFIRMED` → `CRITICAL`;
@@ -277,11 +329,19 @@ JSON-объект; текст — валидный UTF-8 без `\x00`; внеш
 
 **Radar и команды:** `Summary` (активные риски, критические, потенциал в
 валюте организации, возвращённая выручка — последняя **не** сужается при
-закрытии рисков), `List` с фильтрами `status`, `locationId`, `severity`,
-`riskType`, курсор привязан к набору фильтров; порядок `severity DESC,
-booking_intent DESC, estimated_amount DESC, due_at, detected_at, id`.
-`Acknowledge`/`Resolve` — право `risks.manage`, аудит `RISK_ACKNOWLEDGED` /
-`RISK_RESOLVED`, сигналы `risk.acknowledged` / `risk.resolved`.
+закрытии рисков) и `List` с общими фильтрами `statuses` (несколько статусов;
+в HTTP — повторяемый `status` или `active=true|false`), `locationId`,
+`severity`, `riskType`; набор статусов нормализуется и входит в ключ курсора;
+порядок `severity DESC, booking_intent DESC, estimated_amount DESC, due_at,
+detected_at, id`. Модель чтения `Detail` обогащена одним запросом (ADR 0044):
+контакт, услуга сделки, канал, превью последнего сообщения и внешняя ссылка;
+ранжирование и курсор считаются только по `risk_signals` и `opportunities`,
+обогащение — для строк отобранной страницы, корректирующие факты — пакетно.
+Все связи в JSON присутствуют всегда (`null` при отсутствии). Денежные поля
+видны любому обладателю `risks.read`. `Acknowledge`/`Resolve` — право
+`risks.manage`, аудит `RISK_ACKNOWLEDGED` / `RISK_RESOLVED`, сигналы
+`risk.acknowledged` / `risk.resolved`. SSE-хаб при переполнении буфера
+подписчика (16) отбрасывает сигналы и посылает `resync.required`.
 
 **Обратная связь** (ADR 0038): вердикт `TRUE_POSITIVE`/`FALSE_POSITIVE`, для
 ложного обязательна причина (`CUSTOMER_ALREADY_BOOKED`,
@@ -311,8 +371,10 @@ booking_intent DESC, estimated_amount DESC, due_at, detected_at, id`.
 
 **Правила.** Действия `OPEN_CONVERSATION`, `COPY_REPLY`, `MARK_CONTACTED`,
 `CALL`, `SEND_MESSAGE`, `OTHER`; исходы `RESPONDED`, `BOOKED`, `PAID`, `LOST`,
-`THINKING`, `NOT_A_LEAD`; заметки ≤ 2000 рун. Право `risks.manage` на все три
-команды; активное членство дополнительно проверяется в самом SQL
+`THINKING`, `NOT_A_LEAD`; заметки ≤ 2000 рун. Права: рекомендация —
+`risks.manage`, действие — `action.manage`, исход — `outcome.manage` (у OWNER
+и MANAGER есть все три; ADR 0044); активное членство дополнительно
+проверяется в самом SQL
 (`EXISTS memberships … status='ACTIVE'`). `Idempotency-Key` обязателен для
 действий и исходов (≤ 255), хеш запроса — `sha256(actor, id, тип, заметка)`:
 точный повтор возвращает сохранённый ответ (`200`), другое содержимое —
@@ -436,8 +498,15 @@ id`, аренда 30 с; истёкшие аренды с исчерпанным
 Метрики: сообщения (всего, входящие, исходящие, переписки), сделки (созданы,
 `BOOKED`, `WON`, `LOST` по истории), риски (обнаружены, с действием,
 закрыты, ложные) по типам, исходы, деньги в валюте организации (потенциал
-активных сделок, подтверждённая выручка, из неё `RECOVERED`, число платежей).
-Все суммы — точные десятичные строки.
+активных сделок, подтверждённая выручка, из неё `RECOVERED`, число платежей),
+дневной ряд `series` (по каждой дате окна в часовом поясе организации:
+входящие, исходящие, обнаруженные риски, подтверждённые деньги, из них
+`RECOVERED`, число оплат; нули заполняются) и разбивка `attribution`
+(`RECOVERED`, `ORGANIC`, `UNKNOWN` — сумма и число). `Payments` — курсорный
+список подтверждённых событий окна во всех валютах с контактом, услугой и
+атрибуцией (`confirmed_at DESC, id DESC`; читает `contacts`,
+`conversations`, `service_catalog_items`). Все суммы — точные десятичные
+строки.
 
 ## 15. `admin` — платформенное администрирование
 
@@ -485,9 +554,10 @@ revenue (`REVENUE_CONFIRMED`), notification (`NOTIFICATION_POLICY_*`).
 
 | Модуль | Читает | Пишет | Основание |
 |---|---|---|---|
-| `conversation` | `channel_connections` (блокировка при приёме) | — | ADR 0025 |
+| `tenant` | `users` (список команды), `service_catalog_items`, `channel_connections`, `telegram_user_links` (факты онбординга) | — | ADR 0045 |
+| `conversation` | `channel_connections` (блокировка при приёме; снимок канала в списке), `external_identities`, `risk_signals`, `opportunities` (сводка активных рисков списка) | — | ADR 0025, 0044 |
 | `opportunity` | `conversation_summaries`, `messages` (доверенные факты) | — | ADR 0008 |
-| `risk` | таблицы переписок, сделок, точек, расписаний, фактов, исходов, действий, выручки | — | ADR 0007, 0038 |
+| `risk` | таблицы переписок, контактов, каналов, внешних личностей, каталога услуг, сделок, точек, расписаний, фактов, исходов, действий, выручки | — | ADR 0007, 0038, 0044 |
 | `corrective` | `risk_signals`, `opportunities`, `memberships` | `risk_signals.status → ACTED` | спецификация «Рекомендации, действия и исходы» |
 | `revenue` | `risk_signals`, `actions`, `outcomes`, `opportunities`, `memberships` | — | спецификация «Выручка и атрибуция» |
 | `notification` | `organizations`, `memberships`, `risk_signals`, `opportunities`, `conversations`, `contacts` | — | ADR 0029, 0037 |

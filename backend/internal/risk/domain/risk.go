@@ -171,7 +171,34 @@ func (r *Risk) Refresh(finding Finding, now time.Time) error {
 }
 
 func (r Risk) Active() bool {
-	return r.Status == StatusOpen || r.Status == StatusAcknowledged || r.Status == StatusActed
+	return r.Status.Active()
+}
+
+// Active сообщает, требует ли статус внимания: Radar считает активными OPEN,
+// ACKNOWLEDGED и ACTED; остальные статусы терминальные.
+func (status Status) Active() bool {
+	return status == StatusOpen || status == StatusAcknowledged || status == StatusActed
+}
+
+// Valid проверяет, что статус входит в закрытый перечень ТЗ §36.
+func (status Status) Valid() bool {
+	switch status {
+	case StatusOpen, StatusAcknowledged, StatusActed, StatusResolved,
+		StatusFalsePositive, StatusIgnored, StatusExpired:
+		return true
+	default:
+		return false
+	}
+}
+
+// ActiveStatuses перечисляет активные статусы в порядке жизненного цикла.
+func ActiveStatuses() []Status {
+	return []Status{StatusOpen, StatusAcknowledged, StatusActed}
+}
+
+// TerminalStatuses перечисляет статусы, после которых риск не меняется.
+func TerminalStatuses() []Status {
+	return []Status{StatusResolved, StatusFalsePositive, StatusIgnored, StatusExpired}
 }
 
 var reasonCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,99}$`)

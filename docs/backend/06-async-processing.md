@@ -218,7 +218,9 @@ worker: DispatchOne → Telegram / IN_APP
   переподключается через 1 с; валидные сигналы (`risk.changed`,
   `risk.acknowledged`, `risk.resolved`, `risk.false_positive`, UUID
   организации и ресурса) уходят в
-  `Hub` и далее подписчикам `GET /api/v1/events` (буфер 16, heartbeat 20 с).
+  `Hub` и далее подписчикам `GET /api/v1/events` (буфер 16, heartbeat 20 с;
+  при переполнении буфера подписчик получает одно событие `resync.required`
+  и перечитывает Radar целиком — ADR 0044).
 - После вердикта о ложном срабатывании модуль обратной связи публикует
   `risk.false_positive` (ADR 0038): клиент перечитывает Radar так же, как
   после закрытия риска.

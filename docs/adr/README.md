@@ -51,6 +51,8 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0041: Реализация RLS через роли пула и усиление периметра](0041-rls-enforcement-and-hardening.md) | Accepted |
 | [0042: Нагрузочное испытание в процессе на синтетическом наборе](0042-capacity-test-method.md) | Accepted |
 | [0043: Пороги правил риска в бизнес-времени без таблицы конфигурации](0043-risk-thresholds-in-code.md) | Accepted |
+| [0044: Обогащённые модели чтения Radar и переписок для интерфейса](0044-frontend-read-models.md) | Accepted |
+| [0045: Команда по одноразовым кодам, статус онбординга и безопасное подключение каналов](0045-team-onboarding-and-secure-connect.md) | Accepted |
 
 ## Workflow
 

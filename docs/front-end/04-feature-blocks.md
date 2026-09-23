@@ -78,9 +78,10 @@ organization-wide `locationId=null`; успешные строки остают�
 **Шаг 4 — Telegram.** Разделить подключение business source (OWNER) и личную
 привязку уведомлений (любой member). Это разные сущности, secrets и запросы.
 
-**Resume.** На каждом входе шаг вычисляется из GET-данных и подтверждённого
-backend onboarding status. Пока такого статуса нет, redirect после наличия
-организации/точки/услуги неоднозначен — [GAP-API-009](08-readiness-gaps.md#gap-api-009).
+**Resume.** На каждом входе шаг берётся из `GET /organization/onboarding`:
+`nextStep` и `steps[].done` — авторитетный статус, выведенный сервером из
+данных; localStorage не участвует ([GAP-API-009](08-readiness-gaps.md#gap-api-009)
+закрыт 2026-09-18).
 
 **Skip.** Пропуск необязательной личной Telegram-привязки допустим; нельзя
 объявлять готовым при обязательном источнике, пока source contract не
@@ -119,10 +120,15 @@ denied.
 **Запреты.** Не отфильтровывать terminal risks после каждой страницы: это
 ломает полноту/курсор. Не показывать нули при ошибке. Не складывать currencies.
 
-**Блокеры.** Active pagination — [GAP-API-003](08-readiness-gaps.md#gap-api-003),
-поля карточки — [GAP-API-004](08-readiness-gaps.md#gap-api-004), service access —
-[GAP-API-012](08-readiness-gaps.md#gap-api-012). Доступен только empty Radar
-[макет](mockups/svg/14-radar-bez-riskov.svg); основной лист v0.1 отсутствует.
+**Блокеры.** API-блокеры сняты 2026-09-18: active pagination —
+`GET /risks?active=true` с курсором, привязанным к фильтрам
+([GAP-API-003](08-readiness-gaps.md#gap-api-003) закрыт); поля карточки —
+`contact`, `service`, `channel`, `lastMessage`, `externalLink` в `RiskDetail`
+([GAP-API-004](08-readiness-gaps.md#gap-api-004) закрыт); имя услуги приходит в
+карточке и MANAGER не обращается к каталогу
+([GAP-API-012](08-readiness-gaps.md#gap-api-012) закрыт). Остаётся дизайн:
+доступен только empty Radar [макет](mockups/svg/14-radar-bez-riskov.svg);
+основной лист v0.1 отсутствует (GAP-DESIGN-014).
 
 <a id="block-risk-workspace"></a>
 ## 5. Risk Workspace
@@ -152,9 +158,11 @@ Revenue → отдельно подтвердить сумму и attribution. `
 После ответа/refetch кнопки пересчитываются. `404` — нейтральный not-found;
 terminal state сохраняет read-only history.
 
-**Блокеры.** Неполный detail read model и optional schema — GAP-API-004 и
-GAP-CONTRACT-002; внешний переход — GAP-API-006; утверждённый макет недоступен
-— GAP-DESIGN-014.
+**Блокеры.** API-блокеры сняты 2026-09-18: detail read model обогащён и все
+связи явно nullable (GAP-API-004, GAP-CONTRACT-002 закрыты); внешний переход
+— по `externalLink.url` из ответа с честным `unavailableReason`
+(GAP-API-006 закрыт). Остаётся дизайн: утверждённый макет недоступен —
+GAP-DESIGN-014.
 
 <a id="block-conversations"></a>
 ## 6. Диалоги
@@ -179,9 +187,11 @@ placeholder, attachment без download URL — unavailable state.
 conversation 404, messages empty/error, deleted message, unsupported type,
 missing attachment, no external link.
 
-**Блокеры.** [GAP-API-005](08-readiness-gaps.md#gap-api-005) и
-[GAP-API-006](08-readiness-gaps.md#gap-api-006). Макет:
-[Диалоги](mockups/svg/06-dialogi.svg).
+**Блокеры.** Сняты 2026-09-18: `ConversationListItem` с контактом, каналом,
+превью и `activeRisks`, фильтры `search`/`withRisk`
+([GAP-API-005](08-readiness-gaps.md#gap-api-005) закрыт); `externalLink` в
+списке и деталях ([GAP-API-006](08-readiness-gaps.md#gap-api-006) закрыт).
+Макет: [Диалоги](mockups/svg/06-dialogi.svg).
 
 <a id="block-integrations"></a>
 ## 7. Интеграции источников
@@ -201,11 +211,14 @@ capabilities, last event/success/error и safe error code.
 **Disconnect.** Confirmation показывает имя/provider. После любого ответа,
 включая `503`, list refetch обязателен: local disconnect мог состояться.
 
-**Health.** `checkedAt` подписывается «состояние прочитано», не «Telegram
-проверен». Кнопка live check запрещена до отдельного backend-контракта.
+**Health.** `GET …/health` подписывается «состояние прочитано»; кнопка
+«Проверить связь» вызывает `POST …/health/check` и различает `REMOTE`
+(Telegram опрошен) и `LOCAL` (сохранённый статус).
 
-**Блокер.** Передача bot token из browser и live probe требуют решения
-[GAP-API-010](08-readiness-gaps.md#gap-api-010). Макет:
+**Блокер.** Снят 2026-09-18 решением ADR 0045: секрет webhook выпускает сервер
+и показывает один раз; bot token передаётся один раз в write-only поле по TLS
+(шифруется, не возвращается); live probe — отдельный endpoint
+([GAP-API-010](08-readiness-gaps.md#gap-api-010) закрыт). Макет:
 [Интеграции](mockups/svg/08-integracii.svg).
 
 <a id="block-notifications"></a>
@@ -283,11 +296,16 @@ invited timestamps, кто изменил роль; команды list/invite-o
 revoke и определённая invitation lifecycle.
 
 **Текущее состояние.** В application layer существует AddMember, но публичных
-HTTP routes/schemas нет. Экран нельзя реализовать на production API. Не
-подменять его данными `/auth/me`: там только memberships текущего пользователя.
+HTTP API: `GET /organization/members`, `PATCH`/`DELETE …/members/{userId}`,
+`GET`/`POST /organization/invitations`, `DELETE …/invitations/{id}`,
+`POST /invitations/accept` (ADR 0045). Приглашение — одноразовый код, который
+UI показывает один раз с кнопкой копирования; принимает его сотрудник после
+входа без выбора tenant. Не подменять список данными `/auth/me`: там только
+memberships текущего пользователя.
 
-**Блокер.** [GAP-API-008](08-readiness-gaps.md#gap-api-008). Макет:
-[Команда](mockups/svg/12-komanda.svg).
+**Блокер.** Снят 2026-09-18 ([GAP-API-008](08-readiness-gaps.md#gap-api-008)
+закрыт); confirmations и last-owner protection ждут макетов (GAP-DESIGN-014).
+Макет: [Команда](mockups/svg/12-komanda.svg).
 
 <a id="block-privacy"></a>
 ## 12. Privacy / ML consent
@@ -325,8 +343,9 @@ potential/confirmed/confirmedRecovered/confirmedPayments; precision/coverage.
 valid zero dataset, stale snapshot, unsupported chart/list placeholders не
 рисуются как реальные данные.
 
-**Блокер.** Временной ряд, attribution split и последние оплаты —
-[GAP-API-007](08-readiness-gaps.md#gap-api-007). Макет:
+**Блокер.** Снят 2026-09-18: `series` и `attribution` в сводке,
+`GET /analytics/payments` для списка оплат
+([GAP-API-007](08-readiness-gaps.md#gap-api-007) закрыт). Макет:
 [Аналитика](mockups/svg/07-analitika.svg).
 
 <a id="block-revenue-dialog"></a>

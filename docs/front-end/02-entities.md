@@ -83,8 +83,8 @@ erDiagram
 
 Opaque session существует только в cookie `lidradar_session` (`HttpOnly`,
 `SameSite=Strict`). В модели нет access/refresh token. Пустой `memberships[]`
-означает, что авторизованный пользователь должен создать организацию; два и
-более membership требуют явного выбора tenant.
+означает, что авторизованный пользователь должен создать организацию или
+принять код приглашения; два и более membership требуют явного выбора tenant.
 
 ### 3.2. Auth requests
 
@@ -95,6 +95,32 @@ Opaque session существует только в cookie `lidradar_session` (`
 
 Пароль существует только в памяти формы до завершения запроса и никогда не
 попадает в URL, store, telemetry или storage.
+
+### 3.3. Команда и приглашения
+
+| Модель | Поля |
+|---|---|
+| `Membership` | `id`, `tenantId`, `userId`, `role`, `status: ACTIVE \| INVITED \| DISABLED`, `revokedAt?`, `createdAt`, `updatedAt` |
+| `Member` | `membershipId`, `userId`, `email`, `displayName`, `role`, `status`, `revokedAt: DateTime \| null`, `createdAt`, `updatedAt` |
+| `Invitation` | `id`, `role`, `note: string \| null`, `status: PENDING \| ACCEPTED \| REVOKED \| EXPIRED`, `createdBy`, `createdAt`, `expiresAt`, nullable `acceptedAt`, `acceptedBy`, `revokedAt`, `revokedBy` |
+| `IssuedInvitation` | `invitation`, `code` (43 символа `[A-Za-z0-9_-]`; показывается один раз) |
+| `UpdateMemberRoleRequest` | `role` |
+| `CreateInvitationRequest` | `role`, `note? \| null` (≤500, не раскрывается принимающему) |
+| `AcceptInvitationRequest` | `code` |
+| `AcceptedInvitation` | `membership: MembershipSummary` |
+
+Приглашение не привязано к email; код передаёт владелец. `DISABLED` участник
+остаётся в списке (на него ссылаются факты) и может быть восстановлен новым
+кодом. Последний активный OWNER не понижается и не отзывается.
+
+### 3.4. Onboarding
+
+`OnboardingStatus`: `complete`, `nextStep: ORGANIZATION | LOCATION | SERVICES |
+CHANNEL | TELEGRAM_LINK | null`, `steps[5] {key, required, done}`, `facts
+{activeLocations, locationsWithSchedule, activeServices, connections,
+liveConnections, telegramLinked}`, `computedAt`. Статус выводится сервером из
+данных и является источником истины для resume; `TELEGRAM_LINK` необязателен и
+считается по текущему пользователю.
 
 <a id="organization-location"></a>
 ## 4. Организация, точки и график
@@ -170,14 +196,19 @@ Enums:
 `status`, `capabilities[]`, nullable timestamps `lastEventAt`, `lastSuccessAt`,
 `lastErrorAt`, nullable `lastErrorCode`, `createdAt`, `updatedAt`.
 
-`ConnectionHealth`: тот же persisted health subset плюс `checkedAt`. Это время
-чтения сохранённого состояния, а не подтверждение live-probe.
+`ConnectionHealth`: тот же persisted health subset плюс `checkedAt`. У
+`GET …/health` это время чтения сохранённого состояния; `HealthCheck =
+{health, verification: REMOTE | LOCAL}` из `POST …/health/check` говорит, был
+ли выполнен живой опрос провайдера (`REMOTE`, результат сохранён) или показан
+сохранённый статус (`LOCAL`).
 
-`ConnectChannelRequest`: `name`, `webhookSecret` (16..256), optional
-`locationId | null`; `botToken?` допустим и обязателен только для
-`CONNECTED_BUSINESS_BOT`. Secrets write-only и после отправки должны быть
-удалены из формы. Безопасный production UX подключения требует решения
-[GAP-API-010](08-readiness-gaps.md#gap-api-010).
+`ConnectChannelRequest`: `name`, optional `webhookSecret?` (16..256; без него
+секрет выпускает сервер), optional `locationId | null`; `botToken?` допустим и
+обязателен только для `CONNECTED_BUSINESS_BOT`. Ответ connect —
+`ConnectedChannel = ChannelConnection + webhookSecret: string | null`: секрет
+присутствует один раз, только если его выпустил сервер для провайдера без
+удалённой регистрации. Secrets write-only и после отправки удаляются из формы
+(решение ADR 0045, GAP-API-010 закрыт).
 
 <a id="conversation"></a>
 ## 7. Контакт, переписка и сообщение
@@ -196,9 +227,21 @@ email → «Без имени»; полный телефон/email показы�
 - nullable `firstMessageAt`, `lastMessageAt`, `lastMessageDirection`;
 - `revision >= 0`, `createdAt`, `updatedAt`.
 
-`ConversationDetail` содержит `conversation` и `contact`. Страница списка
-содержит только `Conversation[]`, поэтому имя/preview/риск в текущем контракте
-не построить без N+1; см. [GAP-API-005](08-readiness-gaps.md#gap-api-005).
+`ConversationDetail` содержит `conversation`, `contact`, `channel`
+(`ChannelSummary`: `connectionId`, `provider`, `name`, `status`) и
+`externalLink`. Страница списка содержит `ConversationListItem[]`:
+
+| Поле | Содержимое |
+|---|---|
+| `conversation` | `Conversation` |
+| `contact` | `ContactSummary`: `id`, `displayName: string \| null` |
+| `channel` | `ChannelSummary` |
+| `lastMessage` | `MessagePreview \| null`: `id`, `direction`, `type`, `preview: string \| null` (≤140, пробелы нормализованы), `sentAt`; удалённые у поставщика сообщения не показываются |
+| `activeRisks` | `count`, `maxSeverity: RiskSeverity \| null` |
+| `externalLink` | `ExternalLink`: `url: string \| null`, `kind: TELEGRAM_USER \| null`, `unavailableReason: PROVIDER_UNSUPPORTED \| IDENTITY_UNKNOWN \| null` |
+
+`ExternalLink.url` строит только сервер по разрешённой схеме (`tg://user?id=…`);
+UI открывает его как есть и никогда не собирает ссылку из `externalId`.
 
 ### 7.2. Message и Attachment
 
@@ -267,29 +310,33 @@ Enums:
 Активные статусы: `OPEN`, `ACKNOWLEDGED`, `ACTED`; остальные терминальные.
 
 `Risk`: `id`, `opportunityId`, `locationId`, `type`, `severity`, `status`,
-`source`, optional `confidence`, optional `aiRunId`, `policyVersion`,
-`triggerMessageId`, `reasonCode`, `reason`, `detectedAt`, `dueAt`, `updatedAt`,
-optional timestamps `acknowledgedAt`, `actedAt`, `resolvedAt`.
+`source: RULE | HYBRID | MANUAL`, optional `confidence`, optional `aiRunId`,
+`policyVersion`, `triggerMessageId`, `reasonCode`, `reason`, `detectedAt`,
+`dueAt`, `updatedAt`, optional timestamps `acknowledgedAt`, `actedAt`,
+`resolvedAt`.
 
-Текущий OpenAPI ошибочно ограничивает `source` значениями `RULE | HYBRID`,
-тогда как runtime и fixtures возвращают `MANUAL`; generated type нельзя
-считать полным до [GAP-CONTRACT-002](08-readiness-gaps.md#gap-contract-002).
+`RiskDetail` — композиция; все ключи присутствуют всегда, `null` означает
+«связи нет» или «владеющий модуль ещё не создал запись» (GAP-CONTRACT-002 и
+GAP-API-004 закрыты, ADR 0044):
 
-`RiskDetail` — композиция:
-
-| Поле | Runtime | Содержимое |
+| Поле | Тип | Содержимое |
 |---|---|---|
-| `risk` | обязательно | `Risk` |
-| `opportunity` | может отсутствовать | `id`, `stage`, `locationId`, nullable `potentialRevenue`, `currency` |
-| `conversation` | может отсутствовать | `id`, `contactId` |
-| `recommendation` | может отсутствовать | `id`, `text` |
+| `risk` | `Risk` | обязательный |
+| `opportunity` | `RadarOpportunity \| null` | `id`, `stage`, `locationId`, `serviceId: UUID \| null`, `potentialRevenue: Money \| null`, `currency` |
+| `conversation` | `RadarConversation \| null` | `id`, `contactId`, `lastMessage: MessagePreview \| null` |
+| `contact` | `ContactSummary \| null` | `id`, `displayName: string \| null` |
+| `service` | `RadarService \| null` | `id`, `name`, `active` — снимок каталога, виден и MANAGER |
+| `channel` | `ChannelSummary \| null` | `connectionId`, `provider`, `name`, `status` |
+| `externalLink` | `ExternalLink` | `url`, `kind`, `unavailableReason` (см. § 7) |
+| `recommendation` | `RadarRecommendation \| null` | `id`, `text` |
 | `actions` | массив | сокращённые `id`, `type`, `createdAt` |
-| `outcome` | может отсутствовать | сокращённые `id`, `type`, `createdAt` |
-| `revenue` | может отсутствовать | `currency`, `potential`, `confirmedRecovered` |
+| `outcome` | `RadarOutcome \| null` | сокращённые `id`, `type`, `createdAt` |
+| `revenue` | `RadarRevenue \| null` | `currency`, `potential`, `confirmedRecovered` |
 
-OpenAPI сейчас помечает `opportunity` и `conversation` обязательными, хотя
-runtime собирает их как optional relations. Adapter обязан различать
-«связи нет» и «запрос упал», а исправление схемы входит в тот же contract gap.
+Денежные поля карточки видит любой обладатель `risks.read`, включая MANAGER;
+OWNER-only остаются только организационные итоги (`/revenue/confirmed-recovered`,
+`/analytics/*`). Vehicle/предмет обращения отдельным полем не моделируется:
+контекст даёт `service.name`, `reason` и `lastMessage.preview`.
 
 `RadarSummary`: `openRisks`, `criticalRisks`, `potentialRevenue`,
 `confirmedRecoveredRevenue`. Все четыре значения принадлежат одному snapshot;
@@ -397,8 +444,18 @@ Consent добровольный, отзыв не удаляет audit history. 
 
 Окно задаётся inclusive датами организации, но backend возвращает точные UTC
 границы `[from, to)`. `potential` — оценка открытых возможностей, не выручка.
-Текущая модель не содержит дневного ряда, списка оплат и полной разбивки
-атрибуций из макета; см. [GAP-API-007](08-readiness-gaps.md#gap-api-007).
+
+| Раздел | Поля |
+|---|---|
+| `series[]` | по одной `AnalyticsDailyPoint` на каждую дату окна: `date`, `incoming`, `outgoing`, `risksDetected`, `confirmed`, `confirmedRecovered`, `payments`; дни без данных заполнены нулями |
+| `attribution[3]` | `AnalyticsAttributionSplit`: `type: RECOVERED \| ORGANIC \| UNKNOWN`, `amount`, `count` — всегда три строки в этом порядке |
+
+`PaymentPage` (`GET /analytics/payments`): `period`, `items: Payment[]`,
+`nextCursor: string | null`. `Payment`: `eventId`, `opportunityId`,
+`conversationId`, `contactId`, nullable `contactDisplayName`, nullable
+`serviceName`, `amount`, `currency`, `attribution`, nullable `riskId`,
+`confirmedBy`, `confirmedAt`. Строки приходят во всех валютах — каждая
+форматируется со своей `currency`; возвратов в модели нет (GAP-API-007 закрыт).
 
 <a id="admin-entities"></a>
 ## 15. Platform admin read models
@@ -486,15 +543,15 @@ Admin trace намеренно не содержит текста сообщен
 |---|---|
 | Общая ошибка | `Error` |
 | Auth | `User`, `RegisterRequest`, `LoginRequest`, `AuthResponse`, `MembershipSummary`, `AuthMeResponse` |
-| Tenant | `Organization`, `CreateOrganizationRequest`, `UpdateOrganizationRequest`, `BusinessHour`, `Location`, `LocationList`, `CreateLocationRequest`, `UpdateLocationRequest`, `BusinessHoursRequest`, `MLConsent`, `MLConsentStatus` |
+| Tenant | `Organization`, `CreateOrganizationRequest`, `UpdateOrganizationRequest`, `BusinessHour`, `Location`, `LocationList`, `CreateLocationRequest`, `UpdateLocationRequest`, `BusinessHoursRequest`, `MLConsent`, `MLConsentStatus`, `Membership`, `Member`, `MemberList`, `UpdateMemberRoleRequest`, `InvitationStatus`, `Invitation`, `InvitationList`, `CreateInvitationRequest`, `IssuedInvitation`, `AcceptInvitationRequest`, `AcceptedInvitation`, `OnboardingStep`, `OnboardingFacts`, `OnboardingStatus` |
 | Catalog | `ServiceCatalogItem`, `ServiceCatalogList`, `NullableCatalogPrice`, `CreateServiceCatalogItemRequest`, `UpdateServiceCatalogItemRequest` |
-| Integrations | `ConnectorProvider`, `ConnectionStatus`, `ConnectorCapability`, `ChannelConnection`, `ChannelConnectionList`, `ConnectionHealth`, `ConnectChannelRequest` |
-| Conversations | `Contact`, `ConversationStatus`, `MessageDirection`, `MessageType`, `Conversation`, `ConversationDetail`, `ConversationPage`, `Message`, `Attachment`, `MessageView`, `MessagePage` |
+| Integrations | `ConnectorProvider`, `ConnectionStatus`, `ConnectorCapability`, `ChannelConnection`, `ChannelConnectionList`, `ConnectionHealth`, `ConnectChannelRequest`, `ConnectedChannel`, `HealthCheck` |
+| Conversations | `Contact`, `ContactSummary`, `ChannelSummary`, `ExternalLink`, `MessagePreview`, `ActiveRisks`, `ConversationStatus`, `MessageDirection`, `MessageType`, `Conversation`, `ConversationListItem`, `ConversationDetail`, `ConversationPage`, `Message`, `Attachment`, `MessageView`, `MessagePage` |
 | Opportunities | `OpportunityStage`, `OpportunityStageSource`, `Opportunity`, `OpportunityStageHistory`, `OpportunityDetail`, `ChangeOpportunityStageRequest` |
-| Risk/Radar | `RiskStatus`, `RiskSeverity`, `RiskType`, `Risk`, `RadarOpportunity`, `RadarConversation`, `RadarRecommendation`, `RadarAction`, `RadarOutcome`, `RadarRevenue`, `RiskDetail`, `RadarSummary` |
+| Risk/Radar | `RiskStatus`, `RiskSeverity`, `RiskType`, `Risk`, `RadarOpportunity`, `RadarConversation`, `RadarService`, `RadarRecommendation`, `RadarAction`, `RadarOutcome`, `RadarRevenue`, `RiskDetail`, `RadarSummary` |
 | Feedback | `RiskVerdict`, `RiskFeedbackReason`, `RiskFeedbackRequest`, `RiskFeedbackContext`, `RiskFeedback`, `RiskPrecisionItem`, `RiskPrecisionReport` |
 | Notifications | `TelegramLinkToken`, `TelegramLinkStatus`, `NotificationDeliveryMode`, `ClockTime`, `NotificationPreferenceRequest`, `NotificationPreference`, `NotificationPreferenceList` |
 | Corrective/Revenue | `ActionType`, `OutcomeStatus`, `Recommendation`, `Action`, `Outcome`, `Money`, `ConfirmRevenueRequest`, `RevenueEvent`, `RevenueAttribution`, `RevenueConfirmation` |
-| Analytics | `AnalyticsPeriod`, `AnalyticsMessages`, `AnalyticsOpportunities`, `AnalyticsRiskCounters`, `AnalyticsRiskType`, `AnalyticsRisks`, `AnalyticsOutcomes`, `AnalyticsRevenue`, `AnalyticsSummary` |
+| Analytics | `AnalyticsPeriod`, `AnalyticsMessages`, `AnalyticsOpportunities`, `AnalyticsRiskCounters`, `AnalyticsRiskType`, `AnalyticsRisks`, `AnalyticsOutcomes`, `AnalyticsRevenue`, `AnalyticsDailyPoint`, `AnalyticsAttributionSplit`, `AnalyticsSummary`, `Payment`, `PaymentPage` |
 | Admin | `PlatformAdmin`, `AdminOrganization`, `AdminConnection`, `AdminLifecycleCounts`, `AdminQueueStats`, `AdminJob`, `AdminOutboxEvent`, `AdminAIJob`, `AdminDelivery`, `AdminDeadLetters`, `AdminAINode`, `AdminAIRun`, `AdminSemanticFact`, `AdminConversationSummary`, `AdminTenantUsage`, `AdminUsageReport`, `AdminTrace` |
 | Machine-only, исключены | `WebhookReceipt`, `AINodeHeartbeatRequest`, `AIJobClaim`, `AIJobStarted`, `AIJobCompleteRequest`, `AIJobFailedRequest` |

@@ -4,6 +4,7 @@ package application
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -28,12 +29,14 @@ var (
 )
 
 const (
-	PermissionManage        = "integration.manage"
-	invalidPayloadErrorCode = "INVALID_PAYLOAD"
-	telegramPendingCode     = "TELEGRAM_WEBHOOK_PENDING"
-	telegramSetupFailedCode = "TELEGRAM_WEBHOOK_SETUP_FAILED"
-	minWebhookSecretBytes   = 16
-	maxWebhookSecretBytes   = 256
+	PermissionManage         = "integration.manage"
+	invalidPayloadErrorCode  = "INVALID_PAYLOAD"
+	telegramPendingCode      = "TELEGRAM_WEBHOOK_PENDING"
+	telegramSetupFailedCode  = "TELEGRAM_WEBHOOK_SETUP_FAILED"
+	telegramCheckFailedCode  = "TELEGRAM_WEBHOOK_CHECK_FAILED"
+	minWebhookSecretBytes    = 16
+	maxWebhookSecretBytes    = 256
+	generatedSecretByteCount = 32
 )
 
 var telegramSecretPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -100,6 +103,15 @@ func NewService(
 	return service
 }
 
+// ConnectResult — созданное подключение и, если секрет webhook выпустил
+// сервер, его открытое значение: оно показывается один раз и нужно только
+// поставщикам без удалённой регистрации (для Telegram сервер сам передаёт
+// секрет в setWebhook и клиенту его не возвращает).
+type ConnectResult struct {
+	Connection    domain.ChannelConnection
+	WebhookSecret string
+}
+
 type ConnectCommand struct {
 	Provider      string
 	Name          string
@@ -108,17 +120,50 @@ type ConnectCommand struct {
 	BotToken      string
 }
 
-func (service Service) Connect(ctx context.Context, actorID, tenantID string, command ConnectCommand) (domain.ChannelConnection, error) {
+// Connect создаёт подключение. Пустой WebhookSecret означает, что секрет
+// выпускает сервер (256 бит, base64url): так клиенту не нужно придумывать и
+// хранить секрет самому (ADR 0045).
+func (service Service) Connect(ctx context.Context, actorID, tenantID string, command ConnectCommand) (ConnectResult, error) {
 	if err := service.requireManage(ctx, actorID, tenantID); err != nil {
-		return domain.ChannelConnection{}, err
+		return ConnectResult{}, err
 	}
-	if !service.ready() || len(command.WebhookSecret) < minWebhookSecretBytes || len(command.WebhookSecret) > maxWebhookSecretBytes {
-		return domain.ChannelConnection{}, ErrInvalid
+	if !service.ready() {
+		return ConnectResult{}, ErrInvalid
+	}
+	generated := ""
+	if command.WebhookSecret == "" {
+		secret, err := newWebhookSecret()
+		if err != nil {
+			return ConnectResult{}, err
+		}
+		command.WebhookSecret, generated = secret, secret
+	}
+	if len(command.WebhookSecret) < minWebhookSecretBytes || len(command.WebhookSecret) > maxWebhookSecretBytes {
+		return ConnectResult{}, ErrInvalid
 	}
 	provider, err := domain.ParseProvider(command.Provider)
 	if err != nil {
-		return domain.ChannelConnection{}, ErrInvalid
+		return ConnectResult{}, ErrInvalid
 	}
+	connection, err := service.connect(ctx, actorID, tenantID, provider, command)
+	if err != nil {
+		return ConnectResult{}, err
+	}
+	if provider == domain.ProviderTelegramConnectedBusinessBot {
+		generated = ""
+	}
+	return ConnectResult{Connection: connection, WebhookSecret: generated}, nil
+}
+
+func newWebhookSecret() (string, error) {
+	raw := make([]byte, generatedSecretByteCount)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate webhook secret: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func (service Service) connect(ctx context.Context, actorID, tenantID string, provider domain.Provider, command ConnectCommand) (domain.ChannelConnection, error) {
 	if provider == domain.ProviderTelegramConnectedBusinessBot && !telegramSecretPattern.MatchString(command.WebhookSecret) {
 		return domain.ChannelConnection{}, ErrInvalid
 	}
@@ -207,6 +252,59 @@ func (service Service) List(ctx context.Context, actorID, tenantID string) ([]do
 		return nil, mapDomainError(err)
 	}
 	return connections, nil
+}
+
+// CheckHealth выполняет живую проверку связи для поставщиков с удалённой
+// регистрацией (Telegram: getWebhookInfo) и сохраняет результат; для
+// остальных возвращает сохранённое состояние с пометкой LOCAL. Отключённое
+// подключение не проверяется.
+func (service Service) CheckHealth(ctx context.Context, actorID, tenantID, connectionID string) (domain.HealthCheck, error) {
+	if err := service.requireManage(ctx, actorID, tenantID); err != nil {
+		return domain.HealthCheck{}, err
+	}
+	if strings.TrimSpace(connectionID) == "" || !service.ready() {
+		return domain.HealthCheck{}, ErrInvalid
+	}
+	connection, found, err := service.repository.Connection(ctx, tenantID, connectionID)
+	if err != nil {
+		return domain.HealthCheck{}, mapDomainError(err)
+	}
+	if !found {
+		return domain.HealthCheck{}, ErrNotFound
+	}
+	now := service.now().UTC()
+	registration, registered := service.registry.Lookup(connection.Provider)
+	if connection.Status == domain.ConnectionDisconnected || !registered || registration.Provisioner == nil ||
+		len(connection.EncryptedCredentials) == 0 {
+		return domain.HealthCheck{Health: connection.Health(now), Verification: domain.VerificationLocal}, nil
+	}
+	if service.cipher == nil {
+		return domain.HealthCheck{}, ErrUnavailable
+	}
+	credentials, err := service.cipher.Decrypt(connection.EncryptedCredentials, credentialAAD(connection))
+	if err != nil {
+		return domain.HealthCheck{}, ErrUnavailable
+	}
+	defer clear(credentials)
+	health, verifyErr := registration.Provisioner.Verify(ctx, connection, credentials)
+	if verifyErr != nil {
+		code := telegramCheckFailedCode
+		health = domain.ConnectionHealth{Status: domain.ConnectionError, LastErrorAt: &now, LastErrorCode: &code, CheckedAt: now}
+	}
+	health.CheckedAt = now
+	if health.Status == domain.ConnectionActive {
+		// Живая проверка подтверждает регистрацию, но не приносит событий:
+		// время последнего события остаётся прежним.
+		health.LastEventAt = connection.LastEventAt
+	}
+	updated, found, err := service.repository.UpdateConnectionHealth(ctx, tenantID, connectionID, health)
+	if err != nil {
+		return domain.HealthCheck{}, mapDomainError(err)
+	}
+	if !found {
+		return domain.HealthCheck{}, ErrNotFound
+	}
+	return domain.HealthCheck{Health: updated.Health(now), Verification: domain.VerificationRemote}, nil
 }
 
 func (service Service) Health(ctx context.Context, actorID, tenantID, connectionID string) (domain.ConnectionHealth, error) {

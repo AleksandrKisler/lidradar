@@ -20,7 +20,14 @@ var (
 	ErrConflict  = errors.New("конфликт ключа идемпотентности")
 )
 
-const PermissionManage = "risks.manage"
+// Права корректирующих операций: рекомендация остаётся частью работы с
+// риском, действие и исход имеют собственные именованные права из карты ролей
+// (GAP-CONTRACT-021). Сегодня OWNER и MANAGER обладают всеми тремя.
+const (
+	PermissionManage        = "risks.manage"
+	PermissionActionManage  = "action.manage"
+	PermissionOutcomeManage = "outcome.manage"
+)
 
 type Authorizer interface {
 	Allowed(context.Context, string, string, string) (bool, error)
@@ -68,11 +75,11 @@ func (s Service) WithInvalidator(events Invalidator) Service {
 	return s
 }
 
-func (s Service) permit(ctx context.Context, actor, tenant string) error {
+func (s Service) permit(ctx context.Context, actor, tenant, permission string) error {
 	if actor == "" || tenant == "" || s.auth == nil {
 		return ErrForbidden
 	}
-	ok, err := s.auth.Allowed(ctx, actor, tenant, PermissionManage)
+	ok, err := s.auth.Allowed(ctx, actor, tenant, permission)
 	if err != nil {
 		return err
 	}
@@ -93,7 +100,7 @@ var templates = map[string]string{
 // EnsureRecommendation создаёт полезную шаблонную рекомендацию и никогда не
 // обращается к AI. Тип риска читается из авторитетной записи, а не от клиента.
 func (s Service) EnsureRecommendation(ctx context.Context, actor, tenant, riskID string) (domain.Recommendation, error) {
-	if err := s.permit(ctx, actor, tenant); err != nil {
+	if err := s.permit(ctx, actor, tenant, PermissionManage); err != nil {
 		return domain.Recommendation{}, err
 	}
 	if riskID == "" || s.store == nil || s.ids == nil || s.now == nil {
@@ -123,7 +130,7 @@ func (s Service) EnsureRecommendation(ctx context.Context, actor, tenant, riskID
 }
 
 func (s Service) AddAction(ctx context.Context, actor, tenant, riskID, key string, kind domain.ActionType, note string) (domain.Action, bool, error) {
-	if err := s.permit(ctx, actor, tenant); err != nil {
+	if err := s.permit(ctx, actor, tenant, PermissionActionManage); err != nil {
 		return domain.Action{}, false, err
 	}
 	if !validIdempotencyKey(key) || s.store == nil || s.ids == nil || s.now == nil {
@@ -158,7 +165,7 @@ func (s Service) AddAction(ctx context.Context, actor, tenant, riskID, key strin
 }
 
 func (s Service) AddOutcome(ctx context.Context, actor, tenant, opportunityID, key string, status domain.OutcomeStatus, note string) (domain.Outcome, bool, error) {
-	if err := s.permit(ctx, actor, tenant); err != nil {
+	if err := s.permit(ctx, actor, tenant, PermissionOutcomeManage); err != nil {
 		return domain.Outcome{}, false, err
 	}
 	if !validIdempotencyKey(key) || s.store == nil || s.ids == nil || s.now == nil {

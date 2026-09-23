@@ -40,6 +40,31 @@ type analyticsSummary struct {
 		ConfirmedRecovered string `json:"confirmedRecovered"`
 		ConfirmedPayments  int    `json:"confirmedPayments"`
 	} `json:"revenue"`
+	Series []struct {
+		Date               string `json:"date"`
+		Incoming           int    `json:"incoming"`
+		ConfirmedRecovered string `json:"confirmedRecovered"`
+		Payments           int    `json:"payments"`
+	} `json:"series"`
+	Attribution []struct {
+		Type   string `json:"type"`
+		Amount string `json:"amount"`
+		Count  int    `json:"count"`
+	} `json:"attribution"`
+}
+
+type paymentPage struct {
+	Items []struct {
+		EventID            string  `json:"eventId"`
+		OpportunityID      string  `json:"opportunityId"`
+		ContactDisplayName *string `json:"contactDisplayName"`
+		ServiceName        *string `json:"serviceName"`
+		Amount             string  `json:"amount"`
+		Currency           string  `json:"currency"`
+		Attribution        string  `json:"attribution"`
+		RiskID             *string `json:"riskId"`
+	} `json:"items"`
+	NextCursor *string `json:"nextCursor"`
 }
 
 func fetchAnalytics(t *testing.T, fixture apiFixture, cookie *http.Cookie, tenantID, query string) analyticsSummary {
@@ -135,6 +160,35 @@ func TestAnalyticsSummaryMatchesRawDomainData(t *testing.T) {
 		after.Revenue.ConfirmedRecovered != "47000.00" || after.Revenue.ConfirmedPayments != 1 || after.Opportunities.Created != 1 {
 		t.Fatalf("сводка после денежного контура = %+v", after)
 	}
+	if len(after.Series) != 30 || len(after.Attribution) != 3 || after.Attribution[0].Type != "RECOVERED" || after.Attribution[0].Amount != "47000.00" ||
+		after.Attribution[0].Count != 1 || after.Attribution[1].Amount != "0.00" {
+		t.Fatalf("ряд и атрибуции сводки = %+v", after)
+	}
+	var recoveredToday, payments int
+	for _, point := range after.Series {
+		if point.ConfirmedRecovered == "47000.00" {
+			recoveredToday++
+		}
+		payments += point.Payments
+	}
+	if recoveredToday != 1 || payments != 1 {
+		t.Fatalf("дневной ряд не содержит подтверждённую оплату: %+v", after.Series)
+	}
+	paymentsResponse := request(t, fixture.handler, http.MethodGet, "/api/v1/analytics/payments?limit=10", "", owner.Cookie, tenantID)
+	requireStatus(t, paymentsResponse, http.StatusOK)
+	var page paymentPage
+	if err := json.Unmarshal(paymentsResponse.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.NextCursor != nil || page.Items[0].Attribution != "RECOVERED" || page.Items[0].Amount != "47000.00" ||
+		page.Items[0].Currency != "RUB" || page.Items[0].OpportunityID != opportunityID || page.Items[0].RiskID == nil || *page.Items[0].RiskID != riskID ||
+		page.Items[0].ServiceName == nil || *page.Items[0].ServiceName != "Полировка" || page.Items[0].ContactDisplayName == nil {
+		t.Fatalf("список оплат = %s", paymentsResponse.Body.String())
+	}
+	requireStatus(t, request(t, fixture.handler, http.MethodGet, "/api/v1/analytics/payments", "", stranger.Cookie, tenantID), http.StatusForbidden)
+	requireStatus(t, request(t, fixture.handler, http.MethodGet, "/api/v1/analytics/payments?cursor=broken", "", owner.Cookie, tenantID), http.StatusBadRequest)
+	requireStatus(t, request(t, fixture.handler, http.MethodGet, "/api/v1/analytics/payments?limit=0", "", owner.Cookie, tenantID), http.StatusOK)
+	requireStatus(t, request(t, fixture.handler, http.MethodGet, "/api/v1/analytics/payments?limit=101", "", owner.Cookie, tenantID), http.StatusBadRequest)
 	radar := request(t, fixture.handler, http.MethodGet, "/api/v1/radar", "", owner.Cookie, tenantID)
 	requireStatus(t, radar, http.StatusOK)
 	recovered := request(t, fixture.handler, http.MethodGet, "/api/v1/revenue/confirmed-recovered?currency=RUB", "", owner.Cookie, tenantID)

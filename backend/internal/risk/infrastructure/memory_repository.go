@@ -110,10 +110,7 @@ func (r *MemoryRepository) List(ctx context.Context, tenantID string, q applicat
 	items := r.allForTenant(tenantID)
 	filtered := items[:0]
 	for _, item := range items {
-		if (q.Status == "" || item.Status == q.Status) &&
-			(q.LocationID == "" || item.LocationID == q.LocationID) &&
-			(q.Severity == "" || item.Severity == q.Severity) &&
-			(q.RiskType == "" || item.Type == q.RiskType) {
+		if q.Filters.Matches(item) {
 			filtered = append(filtered, item)
 		}
 	}
@@ -171,10 +168,7 @@ func (r *MemoryRepository) Summary(ctx context.Context, tenantID string, filters
 	defer r.mu.RUnlock()
 	summary := application.Summary{PotentialRevenue: "0.00", ConfirmedRecoveredRevenue: "0.00"}
 	for _, risk := range r.items {
-		if risk.TenantID == tenantID && risk.Active() &&
-			(filters.LocationID == "" || risk.LocationID == filters.LocationID) &&
-			(filters.Severity == "" || risk.Severity == filters.Severity) &&
-			(filters.RiskType == "" || risk.Type == filters.RiskType) {
+		if risk.TenantID == tenantID && risk.Active() && filters.Matches(risk) {
 			summary.OpenRisks++
 			if risk.Severity == domain.SeverityCritical {
 				summary.CriticalRisks++

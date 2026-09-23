@@ -492,6 +492,26 @@ type Connector interface {
 type ConnectionProvisioner interface {
 	Provision(context.Context, ChannelConnection, string, json.RawMessage) (ConnectionHealth, error)
 	Deprovision(context.Context, ChannelConnection, json.RawMessage) error
+	// Verify выполняет живую проверку внешней регистрации webhook и возвращает
+	// её результат как состояние подключения; ошибка означает, что проверку
+	// выполнить не удалось (сеть, поставщик), а не что webhook сломан.
+	Verify(context.Context, ChannelConnection, json.RawMessage) (ConnectionHealth, error)
+}
+
+// Verification сообщает, откуда взято состояние в ответе проверки связи:
+// REMOTE — из живого запроса к поставщику, LOCAL — из сохранённого состояния,
+// когда у поставщика нет удалённой регистрации (TEST, IMPORT, GENERIC_WEBHOOK).
+type Verification string
+
+const (
+	VerificationRemote Verification = "REMOTE"
+	VerificationLocal  Verification = "LOCAL"
+)
+
+// HealthCheck — результат команды «Проверить связь».
+type HealthCheck struct {
+	Health       ConnectionHealth `json:"health"`
+	Verification Verification     `json:"verification"`
 }
 
 type EventIdentifier interface {

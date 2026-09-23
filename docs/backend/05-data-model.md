@@ -42,7 +42,7 @@ PostgreSQL 18 — единственный источник истины (ADR 00
   схема прежнего выпуска принимает следующие миграции);
 - `/health/ready` сравнивает журнал с набором сборки поэлементно и по
   последней версии — расхождение даёт `503`; CI дополнительно проверяет
-  строку `"latest":"000021_auth_audit"`.
+  строку `"latest":"000022_membership_invitations"`.
 
 Правила: новая миграция получает следующий свободный номер, содержит
 `ENABLE`/`FORCE ROW LEVEL SECURITY` и политику для новых таблиц с `tenant_id`
@@ -73,8 +73,9 @@ PostgreSQL 18 — единственный источник истины (ADR 00
 | `000019_platform_admin` | `platform_admins`, `admin_audit_log`, `discarded_at/discarded_by` в четырёх очередях |
 | `000020_row_level_security` | роли, гранты, политики RLS |
 | `000021_auth_audit` | `auth_audit_log` |
+| `000022_membership_invitations` | `membership_invitations` с RLS и политикой `invitation_by_code` |
 
-Итого 48 таблиц и 68 индексов (без учёта первичных ключей и `UNIQUE`-ограничений).
+Итого 49 таблиц и 69 индексов (без учёта первичных ключей и `UNIQUE`-ограничений).
 
 ## 3. Таблицы по модулям
 
@@ -93,6 +94,7 @@ PostgreSQL 18 — единственный источник истины (ADR 00
 | `auth_rate_limits` | PK `(scope, subject_hash BYTEA(32))`, `scope IN (REGISTER_IP, LOGIN_IP, LOGIN_ACCOUNT, REFRESH_IP)`, `attempts > 0`, `expires_at > window_started_at`; без `tenant_id` |
 | `organizations` | `name`, `default_timezone`, `default_currency CHAR(3) DEFAULT 'RUB'`, `status IN (ACTIVE, SUSPENDED, ARCHIVED)`; собственная политика RLS по `id` |
 | `memberships` | `UNIQUE (tenant_id, user_id)`; `role IN (OWNER, MANAGER)`; `status IN (ACTIVE, INVITED, DISABLED)`; `(status='DISABLED') = (revoked_at IS NOT NULL)`; триггер запрещает `DELETE` (на членство ссылаются факты); политика `member_self` |
+| `membership_invitations` | одноразовые коды приглашения (ADR 0045): `role IN (OWNER, MANAGER)`; `code_hash CHAR(64) UNIQUE` (`^[0-9a-f]{64}$`, открытый код не хранится); `note` ≤ 500 с `btrim`; `expires_at > created_at`; FK создателя, принявшего и отозвавшего на членства; `(accepted_at IS NULL) = (accepted_by IS NULL)`, то же для отзыва, принятие и отзыв взаимоисключающи; индекс `(tenant_id, created_at DESC, id DESC)`; политики `tenant_isolation` и `invitation_by_code` |
 | `locations` | `UNIQUE (tenant_id, id)`; `timezone`; `response_threshold_minutes DEFAULT 45 CHECK 1..1440`; `active` |
 | `location_business_hours` | FK `(tenant_id, location_id)`; `UNIQUE (tenant_id, location_id, weekday)`; `weekday 1..7`; закрытый день без границ, открытый — `opens_at < closes_at` |
 | `ml_consents` | `scope = 'DATASETS'`; FK на членства выдавшего и отозвавшего; `(revoked_at IS NULL) = (revoked_by IS NULL)`; `revoked_at >= granted_at`; частичный уникальный индекс `ml_consents_one_active_idx (tenant_id, scope) WHERE revoked_at IS NULL`; триггер: только один отзыв, без `DELETE` |
@@ -185,6 +187,11 @@ PostgreSQL 18 — единственный источник истины (ADR 00
   `organizations` дополнительно видна участнику по `lidradar.user_id`
   (`EXISTS memberships`), `memberships` имеет политику `member_self` (`FOR
   SELECT`) — это нужно `/auth/me` до выбора организации.
+  `membership_invitations` имеет политику `invitation_by_code` (`FOR SELECT`,
+  `code_hash = current_setting('lidradar.invitation_code_hash', true)`):
+  приём приглашения идёт без организации в запросе, транзакция задаёт хеш
+  кода и затем контекст организации локально (`set_config(…, true)`), поэтому
+  кэш контекста пула не затрагивается (ADR 0045).
 - **Контекст** переносится хуками пула: `AfterConnect` делает `SET ROLE`,
   `PrepareConn` перед каждой выдачей соединения выполняет
   `set_config('lidradar.tenant_id', $1, false), set_config('lidradar.user_id',

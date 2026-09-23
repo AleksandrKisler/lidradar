@@ -99,8 +99,10 @@ sequenceDiagram
 
 Курсорная: `limit` 1…100 (по умолчанию 50), `cursor` — непрозрачная строка.
 Переписки — по времени обновления, сообщения — по времени отправки, риски —
-серверным порядком Radar; курсор рисков привязан к набору фильтров и с
-другими фильтрами отвергается.
+серверным порядком Radar, оплаты аналитики — по времени подтверждения;
+курсоры рисков и переписок привязаны к набору фильтров (у рисков — включая
+статусы) и с другими фильтрами отвергаются; конец страницы — `nextCursor:
+null`.
 
 ## Корреляция, заголовки безопасности, лимиты
 
@@ -128,12 +130,13 @@ sequenceDiagram
 | `risk.acknowledged` | риск принят в работу |
 | `risk.resolved` | риск закрыт |
 | `risk.false_positive` | риск закрыт вердиктом о ложном срабатывании |
+| `resync.required` | буфер подписчика переполнился, часть сигналов отброшена — перечитать сводку и открытые списки целиком |
 
-Тело события — `{"resourceId":"<uuid риска>"}`; комментарий-heartbeat каждые
-20 с; идентификаторов событий и `Last-Event-ID` нет: после разрыва клиент
+Тело событий `risk.*` — `{"resourceId":"<uuid риска>"}`, маркера —
+`{"reason":"BUFFER_OVERFLOW"}`; комментарий-heartbeat каждые 20 с;
+идентификаторов событий и `Last-Event-ID` нет: после разрыва клиент
 переподключается и перечитывает `GET /api/v1/radar` и списки. Буфер
-подписчика 16 сигналов, переполнение сбрасывает сигнал — поэтому перечитывать
-стоит и по таймеру.
+подписчика 16 сигналов. Без инициализированной шины — `503 UNAVAILABLE`.
 
 ## Каталог конечных точек
 
@@ -165,12 +168,20 @@ sequenceDiagram
 | GET | `/api/v1/organization` | членство | `200 Organization` |
 | PATCH | `/api/v1/organization` | `organization.manage` | частичное обновление → `200` |
 | GET | `/api/v1/locations` | членство | `{items}` |
-| POST | `/api/v1/locations` | `location.manage` | `{name,timezone,responseThresholdMinutes?,active?}` → `201` |
+| POST | `/api/v1/locations` | `location.manage` | `{name,timezone,responseThresholdMinutes?}` → `201`; поле `active` отклоняется |
 | PATCH | `/api/v1/locations/{id}` | `location.manage` | `200` |
 | PUT | `/api/v1/locations/{id}/business-hours` | `location.manage` | `{timezone, days: 7 × {weekday,closed,opensAt?,closesAt?}}` → `200` |
 | GET | `/api/v1/organization/ml-consent` | членство | `{scope, active, consent}` |
 | POST | `/api/v1/organization/ml-consent` | `organization.manage` | `201` при выдаче, `200` при повторе |
 | DELETE | `/api/v1/organization/ml-consent` | `organization.manage` | `204` |
+| GET | `/api/v1/organization/onboarding` | членство | статус онбординга, выведенный из данных: `complete`, `nextStep`, `steps`, `facts` |
+| GET | `/api/v1/organization/members` | `member.manage` | участники с почтой и именем, включая отозванных |
+| PATCH | `/api/v1/organization/members/{userId}` | `member.manage` | `{role}` → `200`; последний владелец защищён (`409 LAST_OWNER`) |
+| DELETE | `/api/v1/organization/members/{userId}` | `member.manage` | отзыв доступа → `204`, идемпотентно |
+| GET | `/api/v1/organization/invitations` | `member.manage` | приглашения со статусом `PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`, без кода |
+| POST | `/api/v1/organization/invitations` | `member.manage` | `{role,note?}` → `201 {invitation, code}`; код показывается один раз, срок 7 дней |
+| DELETE | `/api/v1/organization/invitations/{id}` | `member.manage` | отзыв → `204`; принятое → `409 INVITATION_USED` |
+| POST | `/api/v1/invitations/accept` | сеанс, без `X-Tenant-ID` | `{code}` → `200 {membership}`; создаёт или восстанавливает членство |
 
 ### Каталог услуг
 
@@ -186,9 +197,10 @@ sequenceDiagram
 | Метод | Путь | Доступ | Ответ |
 |---|---|---|---|
 | GET | `/api/v1/integrations` | `integration.manage` | `{items}` без хешей и реквизитов |
-| POST | `/api/v1/integrations/{provider}/connect` | `integration.manage` | `{name,locationId?,webhookSecret,botToken?}` → `201`; Telegram без публичного URL и ключа → `503` |
+| POST | `/api/v1/integrations/{provider}/connect` | `integration.manage` | `{name,locationId?,webhookSecret?,botToken?}` → `201` + `webhookSecret` (если секрет выпустил сервер, показывается один раз); Telegram без публичного URL и ключа → `503` |
 | DELETE | `/api/v1/integrations/{id}` | `integration.manage` | `204` |
-| GET | `/api/v1/integrations/{id}/health` | `integration.manage` | `ConnectionHealth` |
+| GET | `/api/v1/integrations/{id}/health` | `integration.manage` | `ConnectionHealth` — сохранённое состояние |
+| POST | `/api/v1/integrations/{id}/health/check` | `integration.manage` | живая проверка Telegram (`getWebhookInfo`) с сохранением; `{health, verification: REMOTE\|LOCAL}` |
 | POST | `/api/v1/webhooks/{provider}/{tenantId}/{connectionId}` | 🔓 + секрет | `202 {rawEventId,status,duplicate}`; `401`, `404`, `409`, `413`, `503` |
 
 | Провайдер | Заголовок секрета | Тело |
@@ -200,8 +212,8 @@ sequenceDiagram
 
 | Метод | Путь | Право | Ответ |
 |---|---|---|---|
-| GET | `/api/v1/conversations` | `conversation.read` | `{items,nextCursor}` |
-| GET | `/api/v1/conversations/{id}` | `conversation.read` | `{conversation,contact}` |
+| GET | `/api/v1/conversations` | `conversation.read` | строки с контактом, каналом, превью, активными рисками и внешней ссылкой; фильтры `search`, `withRisk`, `locationId`, `connectionId`, `status` |
+| GET | `/api/v1/conversations/{id}` | `conversation.read` | `{conversation,contact,channel,externalLink}` |
 | GET | `/api/v1/conversations/{id}/messages` | `conversation.read` | `{items:[{message,attachments}],nextCursor}` |
 
 ### Сделки
@@ -210,7 +222,7 @@ sequenceDiagram
 |---|---|---|---|
 | GET | `/api/v1/opportunities/{id}` | `opportunity.manage` | `{opportunity,stageHistory}` |
 | PATCH | `/api/v1/opportunities/{id}` | `opportunity.manage` | `{stage}` → `200`; недопустимый переход → `409` |
-| POST | `/api/v1/opportunities/{id}/outcomes` | `risks.manage` + ключ | `{status,note?}` → `201`/`200` |
+| POST | `/api/v1/opportunities/{id}/outcomes` | `outcome.manage` + ключ | `{status,note?}` → `201`/`200` |
 | POST | `/api/v1/opportunities/{id}/revenue` | `revenue.confirm` + ключ | `{amount,currency,attributionType,riskId?,actionId?,outcomeId?}` → `201`/`200`; `409 RECOVERED_ALREADY_ATTRIBUTED` |
 
 ### Radar и риски
@@ -218,12 +230,12 @@ sequenceDiagram
 | Метод | Путь | Право | Ответ |
 |---|---|---|---|
 | GET | `/api/v1/radar` | `risks.read` | `{openRisks,criticalRisks,potentialRevenue,confirmedRecoveredRevenue}` |
-| GET | `/api/v1/risks` | `risks.read` | `{items,nextCursor}`; фильтры `status`, `locationId`, `severity`, `riskType` |
-| GET | `/api/v1/risks/{id}` | `risks.read` | риск с рекомендацией, действиями, последним исходом |
+| GET | `/api/v1/risks` | `risks.read` | `{items,nextCursor}`; фильтры `status` (несколько) или `active=true\|false`, `locationId`, `severity`, `riskType` |
+| GET | `/api/v1/risks/{id}` | `risks.read` | карточка: контакт, услуга, канал, превью последнего сообщения, внешняя ссылка, рекомендация, действия, последний исход, выручка (`null`, если нет) |
 | POST | `/api/v1/risks/{id}/acknowledge` | `risks.manage` | `200`, идемпотентно |
 | POST | `/api/v1/risks/{id}/resolve` | `risks.manage` | `200`, идемпотентно |
 | POST | `/api/v1/risks/{id}/recommendation` | `risks.manage` | `200` создать или вернуть |
-| POST | `/api/v1/risks/{id}/actions` | `risks.manage` + ключ | `{type,note?}` → `201`/`200`; риск → `ACTED` |
+| POST | `/api/v1/risks/{id}/actions` | `action.manage` + ключ | `{type,note?}` → `201`/`200`; риск → `ACTED` |
 | POST | `/api/v1/risks/{id}/feedback` | `risks.manage` | `{verdict,reason?,note?}` → `201` |
 | GET | `/api/v1/risks/precision` | `analytics.read` | точность по пяти типам за окно `from`…`to` |
 | GET | `/api/v1/events` | `risks.read` | SSE |
@@ -239,7 +251,8 @@ sequenceDiagram
 | GET | `/api/v1/notifications/preferences` | членство | `{items: 5 записей}` |
 | PUT | `/api/v1/notifications/preferences/{riskType}` | членство | полная замена → `200` |
 | DELETE | `/api/v1/notifications/preferences/{riskType}` | членство | сброс → `204` |
-| GET | `/api/v1/analytics/summary?from&to` | `analytics.read` | сводка за период |
+| GET | `/api/v1/analytics/summary?from&to` | `analytics.read` | сводка за период с дневным рядом `series` и разбивкой атрибуций |
+| GET | `/api/v1/analytics/payments?from&to&limit&cursor` | `analytics.read` | подтверждённые оплаты окна с контактом, услугой и атрибуцией |
 
 ### Администрирование (без `X-Tenant-ID`)
 

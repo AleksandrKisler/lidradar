@@ -27,6 +27,21 @@ func (s *store) Organization(context.Context, string) (application.Organization,
 	return s.organization, s.found, nil
 }
 
+func (s *store) Payments(_ context.Context, _ string, period domain.Period, limit int, cursor *domain.PaymentCursor) ([]domain.Payment, bool, error) {
+	s.period = period
+	items := []domain.Payment{
+		{EventID: "event-2", Amount: "3000.00", Currency: "RUB", Attribution: "ORGANIC", ConfirmedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
+		{EventID: "event-1", Amount: "47000.00", Currency: "RUB", Attribution: "RECOVERED", ConfirmedAt: time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)},
+	}
+	if cursor != nil {
+		items = items[1:]
+	}
+	if len(items) > limit {
+		return items[:limit], true, nil
+	}
+	return items, false, nil
+}
+
 func (s *store) Summary(_ context.Context, _ string, period domain.Period, currency string) (domain.Summary, error) {
 	s.period, s.currency = period, currency
 	return domain.Summary{

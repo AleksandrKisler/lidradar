@@ -24,9 +24,10 @@ type UserResolver interface {
 }
 
 type ConnectorService interface {
-	Connect(context.Context, string, string, application.ConnectCommand) (domain.ChannelConnection, error)
+	Connect(context.Context, string, string, application.ConnectCommand) (application.ConnectResult, error)
 	List(context.Context, string, string) ([]domain.ChannelConnection, error)
 	Health(context.Context, string, string, string) (domain.ConnectionHealth, error)
+	CheckHealth(context.Context, string, string, string) (domain.HealthCheck, error)
 	Disconnect(context.Context, string, string, string) error
 	Receive(context.Context, string, string, string, []byte, domain.Headers) (application.Receipt, error)
 }
@@ -46,6 +47,7 @@ func (handler Handler) ManagementRouter() http.Handler {
 	router.Post("/{provider}/connect", handler.connect)
 	router.Delete("/{connectionID}", handler.disconnect)
 	router.Get("/{connectionID}/health", handler.health)
+	router.Post("/{connectionID}/health/check", handler.checkHealth)
 	return router
 }
 
@@ -68,18 +70,41 @@ func (handler Handler) connect(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var body connectRequest
-	if httpplatform.DecodeJSON(w, request, &body) != nil || body.Name == nil || body.WebhookSecret == nil {
+	if httpplatform.DecodeJSON(w, request, &body) != nil || body.Name == nil {
 		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
 		return
 	}
-	connection, err := handler.service.Connect(request.Context(), actorID, tenantID, application.ConnectCommand{
+	result, err := handler.service.Connect(request.Context(), actorID, tenantID, application.ConnectCommand{
 		Provider: chi.URLParam(request, "provider"), Name: *body.Name,
-		LocationID: body.LocationID, WebhookSecret: *body.WebhookSecret, BotToken: optionalString(body.BotToken),
+		LocationID: body.LocationID, WebhookSecret: optionalString(body.WebhookSecret), BotToken: optionalString(body.BotToken),
 	})
 	if handleError(w, request, err) {
 		return
 	}
-	httpplatform.WriteJSON(w, http.StatusCreated, connection)
+	response := connectResponse{ChannelConnection: result.Connection}
+	if result.WebhookSecret != "" {
+		response.WebhookSecret = &result.WebhookSecret
+	}
+	httpplatform.WriteJSON(w, http.StatusCreated, response)
+}
+
+// connectResponse дополняет подключение выпущенным сервером секретом webhook;
+// секрет присутствует только в этом ответе и только если его создал сервер.
+type connectResponse struct {
+	domain.ChannelConnection
+	WebhookSecret *string `json:"webhookSecret"`
+}
+
+func (handler Handler) checkHealth(w http.ResponseWriter, request *http.Request) {
+	actorID, tenantID, ok := handler.principal(w, request)
+	if !ok {
+		return
+	}
+	check, err := handler.service.CheckHealth(request.Context(), actorID, tenantID, chi.URLParam(request, "connectionID"))
+	if handleError(w, request, err) {
+		return
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, check)
 }
 
 func (handler Handler) list(w http.ResponseWriter, request *http.Request) {

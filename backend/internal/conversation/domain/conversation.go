@@ -313,10 +313,103 @@ type CandidateSnapshot struct {
 	LatestMessage Message
 }
 
-// ConversationDetail объединяет переписку и её контакт для чтения.
+// ChannelSummary — снимок канала, из которого пришла переписка. Каноническая
+// переписка от канала не зависит; снимок нужен только для отображения.
+type ChannelSummary struct {
+	ConnectionID string `json:"connectionId"`
+	Provider     string `json:"provider"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+}
+
+// ExternalLink — безопасная ссылка на собеседника во внешнем клиенте. URL
+// строит только сервер по разрешённой схеме; при отсутствии ссылки
+// UnavailableReason объясняет причину (ADR 0044).
+type ExternalLink struct {
+	URL               *string `json:"url"`
+	Kind              *string `json:"kind"`
+	UnavailableReason *string `json:"unavailableReason"`
+}
+
+// ConversationDetail объединяет переписку, её контакт, канал и внешнюю ссылку.
 type ConversationDetail struct {
-	Conversation Conversation `json:"conversation"`
-	Contact      Contact      `json:"contact"`
+	Conversation Conversation   `json:"conversation"`
+	Contact      Contact        `json:"contact"`
+	Channel      ChannelSummary `json:"channel"`
+	ExternalLink ExternalLink   `json:"externalLink"`
+}
+
+// ContactSummary — отображаемое имя контакта без телефона и почты.
+type ContactSummary struct {
+	ID          string  `json:"id"`
+	DisplayName *string `json:"displayName"`
+}
+
+// MessagePreview — последнее не удалённое у поставщика сообщение: превью
+// текста ограничено MessagePreviewLimit символами, для сообщений без текста —
+// null.
+type MessagePreview struct {
+	ID        string      `json:"id"`
+	Direction Direction   `json:"direction"`
+	Type      MessageType `json:"type"`
+	Preview   *string     `json:"preview"`
+	SentAt    time.Time   `json:"sentAt"`
+}
+
+// MessagePreviewLimit — длина превью последнего сообщения в символах.
+const MessagePreviewLimit = 140
+
+// ActiveRisks — сводка активных рисков переписки для списка: число и
+// наибольшая серьёзность (null без активных рисков).
+type ActiveRisks struct {
+	Count       int     `json:"count"`
+	MaxSeverity *string `json:"maxSeverity"`
+}
+
+// ConversationListItem — строка списка переписок, собранная одним запросом
+// без обращений на каждую строку (ADR 0044).
+type ConversationListItem struct {
+	Conversation Conversation    `json:"conversation"`
+	Contact      ContactSummary  `json:"contact"`
+	Channel      ChannelSummary  `json:"channel"`
+	LastMessage  *MessagePreview `json:"lastMessage"`
+	ActiveRisks  ActiveRisks     `json:"activeRisks"`
+	ExternalLink ExternalLink    `json:"externalLink"`
+}
+
+// SearchLimit — максимальная длина поисковой строки в символах.
+const SearchLimit = 100
+
+// ListFilter — серверные фильтры списка переписок. Search сравнивается без
+// учёта регистра с именем, телефоном и почтой контакта; WithRisk оставляет
+// только переписки с активным риском.
+type ListFilter struct {
+	Search       string
+	WithRisk     bool
+	LocationID   string
+	ConnectionID string
+	Status       ConversationStatus
+}
+
+// Key — каноническое представление фильтров для привязки курсора.
+func (filter ListFilter) Key() string {
+	withRisk := "0"
+	if filter.WithRisk {
+		withRisk = "1"
+	}
+	return strings.Join([]string{filter.Search, withRisk, filter.LocationID, filter.ConnectionID, string(filter.Status)}, "\x00")
+}
+
+// Validate проверяет допустимость фильтров без обращения к хранилищу.
+func (filter ListFilter) Validate() error {
+	if filter.Search != strings.TrimSpace(filter.Search) || utf8.RuneCountInString(filter.Search) > SearchLimit ||
+		!utf8.ValidString(filter.Search) || strings.ContainsRune(filter.Search, '\x00') {
+		return ErrInvalid
+	}
+	if filter.Status != "" && !filter.Status.Valid() {
+		return ErrInvalid
+	}
+	return nil
 }
 
 // MessageView объединяет сообщение и метаданные его вложений.
@@ -335,7 +428,7 @@ type PageCursor struct {
 type Repository interface {
 	Ingest(context.Context, CanonicalChange, CandidateIDs) (IngestResult, error)
 	CandidateSnapshot(context.Context, string, string) (CandidateSnapshot, bool, error)
-	List(context.Context, string, int, *PageCursor) ([]Conversation, bool, error)
+	List(context.Context, string, ListFilter, int, *PageCursor) ([]ConversationListItem, bool, error)
 	Detail(context.Context, string, string) (ConversationDetail, bool, error)
 	Messages(context.Context, string, string, int, *PageCursor) ([]MessageView, bool, error)
 }

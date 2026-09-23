@@ -12,6 +12,16 @@ var (
 	ErrInvalid  = errors.New("invalid tenant state")
 	ErrNotFound = errors.New("tenant resource not found")
 	ErrConflict = errors.New("tenant resource conflict")
+	// ErrLastOwner защищает организацию от потери последнего активного владельца.
+	ErrLastOwner = errors.New("the last active owner cannot be demoted or revoked")
+	// ErrMemberDisabled — команда над отозванным членством: его роль не меняется.
+	ErrMemberDisabled = errors.New("membership is disabled")
+	// Состояния приглашения, при которых код нельзя использовать.
+	ErrInvitationExpired = errors.New("invitation has expired")
+	ErrInvitationRevoked = errors.New("invitation was revoked")
+	ErrInvitationUsed    = errors.New("invitation was already accepted")
+	// ErrAlreadyMember — пользователь уже активный участник организации.
+	ErrAlreadyMember = errors.New("user is already an active member")
 )
 
 type OrganizationStatus string
@@ -186,6 +196,28 @@ type Repository interface {
 	// RevokeMembership отзывает доступ, не удаляя строку. Повтор для уже
 	// отозванного членства возвращает false без ошибки.
 	RevokeMembership(context.Context, string, string, time.Time) (bool, error)
+	// ListMembers перечисляет участников организации с учётными данными
+	// пользователей, включая отозванных.
+	ListMembers(context.Context, string) ([]Member, error)
+	// ChangeMemberRole меняет роль активного участника; понижение последнего
+	// активного владельца отклоняется ErrLastOwner, отозванное членство —
+	// ErrMemberDisabled.
+	ChangeMemberRole(context.Context, string, string, Role, time.Time) (Membership, error)
+	// RevokeMember отзывает участника с защитой последнего владельца; повтор
+	// для уже отозванного возвращает false без ошибки.
+	RevokeMember(context.Context, string, string, time.Time) (Membership, bool, error)
+	CreateInvitation(context.Context, Invitation, AuditEntry) error
+	ListInvitations(context.Context, string) ([]Invitation, error)
+	// RevokeInvitation отзывает ожидающее приглашение; принятое отклоняется
+	// ErrInvitationUsed, уже отозванное возвращается без изменений.
+	RevokeInvitation(context.Context, string, string, string, time.Time, AuditEntry) (Invitation, error)
+	// AcceptInvitation находит приглашение по хешу кода, создаёт или
+	// восстанавливает членство и помечает приглашение принятым одной
+	// транзакцией; аудит записывается от имени нового участника.
+	AcceptInvitation(context.Context, AcceptInvitationCommand) (AccountMembership, error)
+	// OnboardingFacts читает факты настройки организации для расчёта статуса
+	// онбординга (ADR 0045).
+	OnboardingFacts(context.Context, string, string) (OnboardingFacts, error)
 	ListLocations(context.Context, string) ([]Location, error)
 	Location(context.Context, string, string) (Location, bool, error)
 	CreateLocation(context.Context, string, Location) error
@@ -240,4 +272,179 @@ func (consent MLConsent) Active() bool { return consent.RevokedAt == nil }
 type AuditEntry struct {
 	ID, ActorID, Operation, EntityType, EntityID string
 	At                                           time.Time
+}
+
+// InvitationTTL — срок действия кода приглашения.
+const InvitationTTL = 7 * 24 * time.Hour
+
+// InvitationNoteLimit — предел длины пометки владельца о приглашении.
+const InvitationNoteLimit = 500
+
+type InvitationStatus string
+
+const (
+	InvitationPending  InvitationStatus = "PENDING"
+	InvitationAccepted InvitationStatus = "ACCEPTED"
+	InvitationRevoked  InvitationStatus = "REVOKED"
+	InvitationExpired  InvitationStatus = "EXPIRED"
+)
+
+// Invitation — одноразовый код приглашения в организацию с ролью. Сам код
+// показывается владельцу один раз и хранится только как SHA-256 (ADR 0045).
+type Invitation struct {
+	ID         string     `json:"id"`
+	TenantID   string     `json:"-"`
+	Role       Role       `json:"role"`
+	CodeHash   string     `json:"-"`
+	Note       *string    `json:"note"`
+	CreatedBy  string     `json:"createdBy"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	ExpiresAt  time.Time  `json:"expiresAt"`
+	AcceptedAt *time.Time `json:"acceptedAt"`
+	AcceptedBy *string    `json:"acceptedBy"`
+	RevokedAt  *time.Time `json:"revokedAt"`
+	RevokedBy  *string    `json:"revokedBy"`
+}
+
+func NewInvitation(id, tenantID string, role Role, codeHash string, note *string, createdBy string, at time.Time) (Invitation, error) {
+	if note != nil {
+		cleaned := strings.TrimSpace(*note)
+		if cleaned == "" {
+			note = nil
+		} else {
+			note = &cleaned
+		}
+	}
+	invitation := Invitation{
+		ID: id, TenantID: tenantID, Role: role, CodeHash: codeHash, Note: note, CreatedBy: createdBy,
+		CreatedAt: at.UTC(), ExpiresAt: at.UTC().Add(InvitationTTL),
+	}
+	if invitation.Validate() != nil {
+		return Invitation{}, ErrInvalid
+	}
+	return invitation, nil
+}
+
+func (invitation Invitation) Validate() error {
+	if invitation.ID == "" || invitation.TenantID == "" || (invitation.Role != RoleOwner && invitation.Role != RoleManager) ||
+		len(invitation.CodeHash) != 64 || invitation.CreatedBy == "" || invitation.CreatedAt.IsZero() ||
+		!invitation.ExpiresAt.After(invitation.CreatedAt) {
+		return ErrInvalid
+	}
+	if invitation.Note != nil && (*invitation.Note == "" || *invitation.Note != strings.TrimSpace(*invitation.Note) ||
+		len([]rune(*invitation.Note)) > InvitationNoteLimit) {
+		return ErrInvalid
+	}
+	if (invitation.AcceptedAt == nil) != (invitation.AcceptedBy == nil) || (invitation.RevokedAt == nil) != (invitation.RevokedBy == nil) ||
+		(invitation.AcceptedAt != nil && invitation.RevokedAt != nil) {
+		return ErrInvalid
+	}
+	return nil
+}
+
+// Status выводит состояние приглашения на момент времени: отметки принятия и
+// отзыва имеют приоритет над сроком действия.
+func (invitation Invitation) Status(now time.Time) InvitationStatus {
+	switch {
+	case invitation.AcceptedAt != nil:
+		return InvitationAccepted
+	case invitation.RevokedAt != nil:
+		return InvitationRevoked
+	case !now.Before(invitation.ExpiresAt):
+		return InvitationExpired
+	default:
+		return InvitationPending
+	}
+}
+
+// AcceptInvitationCommand — данные приёма приглашения одной транзакцией.
+type AcceptInvitationCommand struct {
+	CodeHash     string
+	UserID       string
+	MembershipID string
+	At           time.Time
+	AuditID      string
+}
+
+// Member — участник организации для экрана команды: членство вместе с
+// учётными данными пользователя (ADR 0045).
+type Member struct {
+	MembershipID string           `json:"membershipId"`
+	UserID       string           `json:"userId"`
+	Email        string           `json:"email"`
+	DisplayName  string           `json:"displayName"`
+	Role         Role             `json:"role"`
+	Status       MembershipStatus `json:"status"`
+	RevokedAt    *time.Time       `json:"revokedAt"`
+	CreatedAt    time.Time        `json:"createdAt"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
+}
+
+// OnboardingFacts — факты настройки, из которых детерминированно выводится
+// статус онбординга; сервер ничего не хранит про «пройденные шаги».
+type OnboardingFacts struct {
+	ActiveLocations       int  `json:"activeLocations"`
+	LocationsWithSchedule int  `json:"locationsWithSchedule"`
+	ActiveServices        int  `json:"activeServices"`
+	Connections           int  `json:"connections"`
+	LiveConnections       int  `json:"liveConnections"`
+	TelegramLinked        bool `json:"telegramLinked"`
+}
+
+// Шаги онбординга в порядке экрана настройки компании.
+const (
+	OnboardingStepOrganization = "ORGANIZATION"
+	OnboardingStepLocation     = "LOCATION"
+	OnboardingStepServices     = "SERVICES"
+	OnboardingStepChannel      = "CHANNEL"
+	OnboardingStepTelegramLink = "TELEGRAM_LINK"
+)
+
+type OnboardingStep struct {
+	Key      string `json:"key"`
+	Required bool   `json:"required"`
+	Done     bool   `json:"done"`
+}
+
+// OnboardingStatus — авторитетный статус онбординга: обязательные шаги —
+// организация, активная точка с полным недельным графиком, активная услуга и
+// хотя бы один не отключённый канал; личная привязка Telegram необязательна.
+type OnboardingStatus struct {
+	Complete   bool             `json:"complete"`
+	NextStep   *string          `json:"nextStep"`
+	Steps      []OnboardingStep `json:"steps"`
+	Facts      OnboardingFacts  `json:"facts"`
+	ComputedAt time.Time        `json:"computedAt"`
+}
+
+// OnboardingFrom выводит статус из фактов. Следующий шаг — первый
+// невыполненный обязательный, затем первый невыполненный необязательный.
+func OnboardingFrom(facts OnboardingFacts, at time.Time) OnboardingStatus {
+	steps := []OnboardingStep{
+		{Key: OnboardingStepOrganization, Required: true, Done: true},
+		{Key: OnboardingStepLocation, Required: true, Done: facts.LocationsWithSchedule > 0},
+		{Key: OnboardingStepServices, Required: true, Done: facts.ActiveServices > 0},
+		{Key: OnboardingStepChannel, Required: true, Done: facts.LiveConnections > 0},
+		{Key: OnboardingStepTelegramLink, Required: false, Done: facts.TelegramLinked},
+	}
+	status := OnboardingStatus{Complete: true, Steps: steps, Facts: facts, ComputedAt: at.UTC()}
+	for _, step := range steps {
+		if step.Required && !step.Done {
+			status.Complete = false
+			if status.NextStep == nil {
+				key := step.Key
+				status.NextStep = &key
+			}
+		}
+	}
+	if status.NextStep == nil {
+		for _, step := range steps {
+			if !step.Done {
+				key := step.Key
+				status.NextStep = &key
+				break
+			}
+		}
+	}
+	return status
 }

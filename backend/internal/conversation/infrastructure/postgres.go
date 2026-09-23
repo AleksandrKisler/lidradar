@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	connectordomain "lidradar/backend/internal/connector/domain"
 	"lidradar/backend/internal/conversation/domain"
 	eventsdomain "lidradar/backend/internal/events/domain"
 	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
@@ -610,41 +613,192 @@ func (repository *PostgresRepository) CandidateSnapshot(
 	return snapshot, true, nil
 }
 
+// listContext собирает отображаемый контекст строки списка: контакт, канал,
+// последнее не удалённое сообщение, внешняя личность контакта в этом канале и
+// сводка активных рисков (чтение таблиц Risk и Opportunity — ADR 0044).
+const listContext = `
+	JOIN contacts AS ct ON ct.tenant_id = c.tenant_id AND ct.id = c.contact_id
+	JOIN channel_connections AS cc ON cc.tenant_id = c.tenant_id AND cc.id = c.connection_id
+	LEFT JOIN LATERAL (
+		SELECT m.id, m.direction, m.type, m.text, m.sent_at
+		FROM messages AS m
+		WHERE m.tenant_id = c.tenant_id AND m.conversation_id = c.id AND m.provider_deleted_at IS NULL
+		ORDER BY m.sent_at DESC, m.id DESC
+		LIMIT 1
+	) AS lm ON true
+	LEFT JOIN LATERAL (
+		SELECT identity.external_id
+		FROM external_identities AS identity
+		WHERE identity.tenant_id = c.tenant_id AND identity.contact_id = c.contact_id
+		  AND identity.connection_id = c.connection_id
+		ORDER BY identity.created_at DESC, identity.id DESC
+		LIMIT 1
+	) AS ei ON true
+	CROSS JOIN LATERAL (
+		SELECT count(*) AS active_count,
+		       COALESCE(max(CASE r.severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END), 0) AS max_rank
+		FROM risk_signals AS r
+		JOIN opportunities AS o ON o.tenant_id = r.tenant_id AND o.id = r.opportunity_id
+		WHERE o.tenant_id = c.tenant_id AND o.conversation_id = c.id
+		  AND r.status IN ('OPEN', 'ACKNOWLEDGED', 'ACTED')
+	) AS risks`
+
 func (repository *PostgresRepository) List(
 	ctx context.Context,
 	tenantID string,
+	filter domain.ListFilter,
 	limit int,
 	cursor *domain.PageCursor,
-) ([]domain.Conversation, bool, error) {
-	if repository == nil || repository.pool == nil || tenantID == "" || limit < 1 || limit > 100 {
+) ([]domain.ConversationListItem, bool, error) {
+	if repository == nil || repository.pool == nil || tenantID == "" || limit < 1 || limit > 100 || filter.Validate() != nil {
 		return nil, false, domain.ErrInvalid
 	}
 	rows, err := repository.pool.Query(ctx, `
-		SELECT id, tenant_id, location_id, connection_id, contact_id, external_id, status,
-		       first_message_at, last_message_at, last_message_direction, revision, created_at, updated_at
-		FROM conversations
-		WHERE tenant_id = $1 AND ($2::timestamptz IS NULL OR (updated_at, id) < ($2, $3::uuid))
-		ORDER BY updated_at DESC, id DESC LIMIT $4`, tenantID, cursorTime(cursor), cursorID(cursor), limit+1)
+		SELECT c.id, c.tenant_id, c.location_id, c.connection_id, c.contact_id, c.external_id, c.status,
+		       c.first_message_at, c.last_message_at, c.last_message_direction, c.revision, c.created_at, c.updated_at,
+		       ct.display_name,
+		       cc.provider, cc.name, cc.status,
+		       lm.id, COALESCE(lm.direction, ''), COALESCE(lm.type, ''), lm.text, lm.sent_at,
+		       risks.active_count, risks.max_rank,
+		       ei.external_id
+		FROM conversations AS c`+listContext+`
+		WHERE c.tenant_id = $1 AND ($2::timestamptz IS NULL OR (c.updated_at, c.id) < ($2, $3::uuid))
+		  AND ($5::text = '' OR ct.display_name ILIKE $5 OR ct.email_normalized ILIKE $5 OR ct.phone_normalized ILIKE $5
+		       OR ($6::text <> '' AND ct.phone_normalized LIKE $6))
+		  AND (NOT $7::boolean OR risks.active_count > 0)
+		  AND ($8::uuid IS NULL OR c.location_id = $8::uuid)
+		  AND ($9::uuid IS NULL OR c.connection_id = $9::uuid)
+		  AND ($10::text = '' OR c.status = $10)
+		ORDER BY c.updated_at DESC, c.id DESC LIMIT $4`,
+		tenantID, cursorTime(cursor), cursorID(cursor), limit+1,
+		searchPattern(filter.Search), digitsPattern(filter.Search), filter.WithRisk,
+		optionalIdentifier(filter.LocationID), optionalIdentifier(filter.ConnectionID), string(filter.Status))
 	if err != nil {
-		return nil, false, fmt.Errorf("список переписок: %w", err)
+		return nil, false, mapPostgresError("список переписок", err)
 	}
 	defer rows.Close()
-	items := make([]domain.Conversation, 0, limit+1)
+	items := make([]domain.ConversationListItem, 0, limit+1)
 	for rows.Next() {
-		conversation, _, scanErr := scanConversation(rows)
+		item, scanErr := scanListItem(rows)
 		if scanErr != nil {
 			return nil, false, scanErr
 		}
-		items = append(items, conversation)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false, fmt.Errorf("обход списка переписок: %w", err)
+		return nil, false, mapPostgresError("обход списка переписок", err)
 	}
 	more := len(items) > limit
 	if more {
 		items = items[:limit]
 	}
 	return items, more, nil
+}
+
+func scanListItem(row rowScanner) (domain.ConversationListItem, error) {
+	var item domain.ConversationListItem
+	var lastMessageID *string
+	var lastDirection, lastType string
+	var lastText *string
+	var lastSentAt *time.Time
+	var activeCount, maxRank int
+	var contactExternalID *string
+	conversation := &item.Conversation
+	if err := row.Scan(
+		&conversation.ID, &conversation.TenantID, &conversation.LocationID, &conversation.ConnectionID,
+		&conversation.ContactID, &conversation.ExternalID, &conversation.Status, &conversation.FirstMessageAt,
+		&conversation.LastMessageAt, &conversation.LastMessageDirection, &conversation.Revision,
+		&conversation.CreatedAt, &conversation.UpdatedAt,
+		&item.Contact.DisplayName,
+		&item.Channel.Provider, &item.Channel.Name, &item.Channel.Status,
+		&lastMessageID, &lastDirection, &lastType, &lastText, &lastSentAt,
+		&activeCount, &maxRank,
+		&contactExternalID,
+	); err != nil {
+		return domain.ConversationListItem{}, fmt.Errorf("чтение строки списка переписок: %w", err)
+	}
+	if conversation.Validate() != nil {
+		return domain.ConversationListItem{}, domain.ErrInvalid
+	}
+	item.Contact.ID = conversation.ContactID
+	item.Channel.ConnectionID = conversation.ConnectionID
+	if lastMessageID != nil && lastSentAt != nil {
+		item.LastMessage = &domain.MessagePreview{
+			ID: *lastMessageID, Direction: domain.Direction(lastDirection), Type: domain.MessageType(lastType),
+			Preview: previewText(lastText, domain.MessagePreviewLimit), SentAt: lastSentAt.UTC(),
+		}
+	}
+	item.ActiveRisks = domain.ActiveRisks{Count: activeCount, MaxSeverity: severityName(maxRank)}
+	item.ExternalLink = externalLinkFor(item.Channel.Provider, contactExternalID)
+	return item, nil
+}
+
+// searchPattern превращает строку поиска в шаблон ILIKE с экранированными
+// метасимволами; пустая строка отключает поиск.
+func searchPattern(search string) string {
+	if search == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return "%" + replacer.Replace(search) + "%"
+}
+
+// digitsPattern ищет телефон по цифрам запроса независимо от разделителей.
+func digitsPattern(search string) string {
+	digits := strings.Map(func(character rune) rune {
+		if character >= '0' && character <= '9' {
+			return character
+		}
+		return -1
+	}, search)
+	if len(digits) < 3 {
+		return ""
+	}
+	return "%" + digits + "%"
+}
+
+func optionalIdentifier(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func severityName(rank int) *string {
+	names := map[int]string{4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW"}
+	name, known := names[rank]
+	if !known {
+		return nil
+	}
+	return &name
+}
+
+// previewText схлопывает пробелы и обрезает текст до limit символов.
+func previewText(text *string, limit int) *string {
+	if text == nil {
+		return nil
+	}
+	collapsed := strings.Join(strings.Fields(*text), " ")
+	if collapsed == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(collapsed) > limit {
+		collapsed = strings.TrimSpace(string([]rune(collapsed)[:limit]))
+	}
+	return &collapsed
+}
+
+func externalLinkFor(provider string, contactExternalID *string) domain.ExternalLink {
+	externalID := ""
+	if contactExternalID != nil {
+		externalID = *contactExternalID
+	}
+	link, reason := connectordomain.ContactDeepLink(connectordomain.Provider(provider), externalID)
+	if reason != "" {
+		return domain.ExternalLink{UnavailableReason: &reason}
+	}
+	kind := string(link.Kind)
+	return domain.ExternalLink{URL: &link.URL, Kind: &kind}
 }
 
 func (repository *PostgresRepository) Detail(
@@ -657,11 +811,23 @@ func (repository *PostgresRepository) Detail(
 	row := repository.pool.QueryRow(ctx, `
 		SELECT c.id, c.tenant_id, c.location_id, c.connection_id, c.contact_id, c.external_id, c.status,
 		       c.first_message_at, c.last_message_at, c.last_message_direction, c.revision, c.created_at, c.updated_at,
-		       ct.id, ct.tenant_id, ct.display_name, ct.phone_normalized, ct.email_normalized, ct.created_at, ct.updated_at
+		       ct.id, ct.tenant_id, ct.display_name, ct.phone_normalized, ct.email_normalized, ct.created_at, ct.updated_at,
+		       cc.provider, cc.name, cc.status,
+		       ei.external_id
 		FROM conversations c
 		JOIN contacts ct ON ct.tenant_id = c.tenant_id AND ct.id = c.contact_id
+		JOIN channel_connections AS cc ON cc.tenant_id = c.tenant_id AND cc.id = c.connection_id
+		LEFT JOIN LATERAL (
+			SELECT identity.external_id
+			FROM external_identities AS identity
+			WHERE identity.tenant_id = c.tenant_id AND identity.contact_id = c.contact_id
+			  AND identity.connection_id = c.connection_id
+			ORDER BY identity.created_at DESC, identity.id DESC
+			LIMIT 1
+		) AS ei ON true
 		WHERE c.tenant_id = $1 AND c.id = $2`, tenantID, conversationID)
 	var detail domain.ConversationDetail
+	var contactExternalID *string
 	err := row.Scan(
 		&detail.Conversation.ID, &detail.Conversation.TenantID, &detail.Conversation.LocationID,
 		&detail.Conversation.ConnectionID, &detail.Conversation.ContactID, &detail.Conversation.ExternalID,
@@ -669,16 +835,20 @@ func (repository *PostgresRepository) Detail(
 		&detail.Conversation.LastMessageDirection, &detail.Conversation.Revision, &detail.Conversation.CreatedAt,
 		&detail.Conversation.UpdatedAt, &detail.Contact.ID, &detail.Contact.TenantID, &detail.Contact.DisplayName,
 		&detail.Contact.PhoneNormalized, &detail.Contact.EmailNormalized, &detail.Contact.CreatedAt, &detail.Contact.UpdatedAt,
+		&detail.Channel.Provider, &detail.Channel.Name, &detail.Channel.Status,
+		&contactExternalID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ConversationDetail{}, false, nil
 	}
 	if err != nil {
-		return domain.ConversationDetail{}, false, fmt.Errorf("чтение переписки: %w", err)
+		return domain.ConversationDetail{}, false, mapPostgresError("чтение переписки", err)
 	}
 	if detail.Conversation.Validate() != nil || detail.Contact.Validate() != nil {
 		return domain.ConversationDetail{}, false, domain.ErrInvalid
 	}
+	detail.Channel.ConnectionID = detail.Conversation.ConnectionID
+	detail.ExternalLink = externalLinkFor(detail.Channel.Provider, contactExternalID)
 	return detail, true, nil
 }
 

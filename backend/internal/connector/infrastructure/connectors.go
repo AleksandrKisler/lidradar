@@ -288,6 +288,32 @@ func (connector TelegramConnectedBusinessConnector) Provision(
 	return domain.ConnectionHealth{Status: domain.ConnectionActive, LastSuccessAt: &now, CheckedAt: now}, nil
 }
 
+// TelegramWebhookMismatchCode — у бота зарегистрирован другой webhook: подключение
+// перестало принимать события, пока владелец не переподключит бота.
+const TelegramWebhookMismatchCode = "TELEGRAM_WEBHOOK_MISMATCH"
+
+// Verify сверяет зарегистрированный у Telegram webhook с адресом подключения.
+func (connector TelegramConnectedBusinessConnector) Verify(
+	ctx context.Context,
+	connection domain.ChannelConnection,
+	credentials json.RawMessage,
+) (domain.ConnectionHealth, error) {
+	parsed, err := decodeTelegramCredentials(credentials)
+	if !connector.configured() || err != nil || connection.Provider != connector.Provider() {
+		return domain.ConnectionHealth{}, ErrTelegramAPI
+	}
+	var info telegramWebhookInfo
+	if err := connector.call(ctx, parsed.BotToken, "getWebhookInfo", struct{}{}, &info); err != nil {
+		return domain.ConnectionHealth{}, ErrTelegramAPI
+	}
+	now := connector.now().UTC()
+	if info.URL != connector.webhookURL(connection) {
+		code := TelegramWebhookMismatchCode
+		return domain.ConnectionHealth{Status: domain.ConnectionError, LastErrorAt: &now, LastErrorCode: &code, CheckedAt: now}, nil
+	}
+	return domain.ConnectionHealth{Status: domain.ConnectionActive, LastSuccessAt: &now, CheckedAt: now}, nil
+}
+
 func (connector TelegramConnectedBusinessConnector) Deprovision(
 	ctx context.Context,
 	connection domain.ChannelConnection,

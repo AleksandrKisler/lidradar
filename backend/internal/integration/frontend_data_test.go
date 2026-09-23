@@ -91,7 +91,8 @@ func TestFrontendDataThroughRealAPI(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
 				t.Fatal(err)
 			}
-			for _, conversation := range page.Items {
+			for _, item := range page.Items {
+				conversation := item.Conversation
 				if seen[conversation.ID] {
 					t.Fatal("duplicate conversation on next page")
 				}

@@ -168,9 +168,10 @@ func TestNoResponseRiskRealMessageFlow(t *testing.T) {
 	}
 	detailResponse := request(t, fixture.handler, http.MethodGet, "/api/v1/risks/"+riskID, "", owner.Cookie, tenantID)
 	requireStatus(t, detailResponse, http.StatusOK)
+	// Ещё не созданные владеющими модулями записи присутствуют явным null (ADR 0044).
 	if body := detailResponse.Body.String(); !strings.Contains(body, `"potentialRevenue":"5000.00"`) ||
-		strings.Contains(body, `"recommendation"`) || strings.Contains(body, `"outcome"`) ||
-		strings.Contains(body, `"revenue"`) {
+		!strings.Contains(body, `"recommendation":null`) || !strings.Contains(body, `"outcome":null`) ||
+		!strings.Contains(body, `"revenue":null`) {
 		t.Fatalf("детали Radar = %s", body)
 	}
 

@@ -34,6 +34,30 @@ func (*permissionRepository) CreateMembership(context.Context, string, domain.Me
 func (*permissionRepository) RevokeMembership(context.Context, string, string, time.Time) (bool, error) {
 	return false, nil
 }
+func (*permissionRepository) ListMembers(context.Context, string) ([]domain.Member, error) {
+	return nil, nil
+}
+func (*permissionRepository) ChangeMemberRole(context.Context, string, string, domain.Role, time.Time) (domain.Membership, error) {
+	return domain.Membership{}, nil
+}
+func (*permissionRepository) RevokeMember(context.Context, string, string, time.Time) (domain.Membership, bool, error) {
+	return domain.Membership{}, false, nil
+}
+func (*permissionRepository) CreateInvitation(context.Context, domain.Invitation, domain.AuditEntry) error {
+	return nil
+}
+func (*permissionRepository) ListInvitations(context.Context, string) ([]domain.Invitation, error) {
+	return nil, nil
+}
+func (*permissionRepository) RevokeInvitation(context.Context, string, string, string, time.Time, domain.AuditEntry) (domain.Invitation, error) {
+	return domain.Invitation{}, nil
+}
+func (*permissionRepository) AcceptInvitation(context.Context, domain.AcceptInvitationCommand) (domain.AccountMembership, error) {
+	return domain.AccountMembership{}, nil
+}
+func (*permissionRepository) OnboardingFacts(context.Context, string, string) (domain.OnboardingFacts, error) {
+	return domain.OnboardingFacts{}, nil
+}
 func (*permissionRepository) ListLocations(context.Context, string) ([]domain.Location, error) {
 	return nil, nil
 }

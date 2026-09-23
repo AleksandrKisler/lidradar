@@ -96,7 +96,10 @@ func TestConversationCoreExitGateThroughWebhookWorkerAndReadAPI(t *testing.T) {
 
 	detail := request(t, fixture.handler, http.MethodGet, "/api/v1/conversations/"+conversationID, "", owner.Cookie, tenantID)
 	requireStatus(t, detail, http.StatusOK)
-	if !strings.Contains(detail.Body.String(), `"displayName":"Ирина"`) || strings.Contains(detail.Body.String(), "GENERIC_WEBHOOK") {
+	if !strings.Contains(detail.Body.String(), `"displayName":"Ирина"`) ||
+		!strings.Contains(detail.Body.String(), `"channel":{"connectionId":"`+connectionID+`","provider":"GENERIC_WEBHOOK","name":"Форма сайта","status":"`) ||
+		!strings.Contains(detail.Body.String(), `"externalLink":{"url":null,"kind":null,"unavailableReason":"PROVIDER_UNSUPPORTED"}`) ||
+		strings.Contains(detail.Body.String(), secret) {
 		t.Fatalf("детали переписки = %s", detail.Body.String())
 	}
 	messages := request(t, fixture.handler, http.MethodGet, "/api/v1/conversations/"+conversationID+"/messages?limit=2", "", manager.Cookie, tenantID)
@@ -174,14 +177,16 @@ func conversationFromList(t *testing.T, body []byte) (string, int64) {
 	t.Helper()
 	var response struct {
 		Items []struct {
-			ID       string `json:"id"`
-			Revision int64  `json:"revision"`
+			Conversation struct {
+				ID       string `json:"id"`
+				Revision int64  `json:"revision"`
+			} `json:"conversation"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil || len(response.Items) != 1 {
 		t.Fatalf("список переписок: %v, %s", err, body)
 	}
-	return response.Items[0].ID, response.Items[0].Revision
+	return response.Items[0].Conversation.ID, response.Items[0].Conversation.Revision
 }
 
 func requireCanonicalCounts(

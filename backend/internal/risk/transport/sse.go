@@ -9,15 +9,32 @@ import (
 
 type Signal struct{ Type, ResourceID string }
 
+// ResyncEvent — маркер потери сигналов: буфер подписчика переполнился, часть
+// сигналов отброшена, клиент обязан перечитать Radar и открытые списки целиком
+// (GAP-RELIABILITY-020). Сам маркер не несёт бизнес-состояния.
+const ResyncEvent = "resync.required"
+
+// subscriberBuffer — число сигналов, которые подписчик может не успеть
+// прочитать до того, как получит маркер ресинхронизации.
+const subscriberBuffer = 16
+
+type subscriber struct {
+	signals chan Signal
+	resync  chan struct{}
+}
+
 // Hub distributes ephemeral invalidation signals. It intentionally stores no
 // business state; slow/disconnected clients recover through REST refetches.
 type Hub struct {
-	mu   sync.RWMutex
-	next uint64
-	subs map[string]map[uint64]chan Signal
+	mu     sync.RWMutex
+	next   uint64
+	buffer int
+	subs   map[string]map[uint64]*subscriber
 }
 
-func NewHub() *Hub { return &Hub{subs: make(map[string]map[uint64]chan Signal)} }
+func NewHub() *Hub {
+	return &Hub{buffer: subscriberBuffer, subs: make(map[string]map[uint64]*subscriber)}
+}
 
 func (h *Hub) Publish(tenantID, eventType, resourceID string) {
 	if h == nil || tenantID == "" || !validSignalType(eventType) || resourceID == "" {
@@ -25,10 +42,16 @@ func (h *Hub) Publish(tenantID, eventType, resourceID string) {
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for _, ch := range h.subs[tenantID] {
+	for _, sub := range h.subs[tenantID] {
 		select {
-		case ch <- Signal{eventType, resourceID}:
+		case sub.signals <- Signal{eventType, resourceID}:
 		default:
+			// Буфер полон: сигнал теряется, вместо него подписчик получит
+			// один маркер ресинхронизации.
+			select {
+			case sub.resync <- struct{}{}:
+			default:
+			}
 		}
 	}
 }
@@ -41,17 +64,17 @@ func validSignalType(eventType string) bool {
 		return false
 	}
 }
-func (h *Hub) subscribe(tenant string) (<-chan Signal, func()) {
+func (h *Hub) subscribe(tenant string) (*subscriber, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.next++
 	id := h.next
-	ch := make(chan Signal, 16)
+	sub := &subscriber{signals: make(chan Signal, h.buffer), resync: make(chan struct{}, 1)}
 	if h.subs[tenant] == nil {
-		h.subs[tenant] = make(map[uint64]chan Signal)
+		h.subs[tenant] = make(map[uint64]*subscriber)
 	}
-	h.subs[tenant][id] = ch
-	return ch, func() {
+	h.subs[tenant][id] = sub
+	return sub, func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		if group := h.subs[tenant]; group != nil {
@@ -83,7 +106,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
-	ch, cancel := h.events.subscribe(t)
+	sub, cancel := h.events.subscribe(t)
 	defer cancel()
 	_, _ = fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
@@ -93,12 +116,27 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case signal := <-ch:
+		case <-sub.resync:
+			// Накопленные сигналы избыточны после полного перечитывания.
+			drainSignals(sub.signals)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"reason\":\"BUFFER_OVERFLOW\"}\n\n", ResyncEvent)
+			flusher.Flush()
+		case signal := <-sub.signals:
 			_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"resourceId\":%q}\n\n", signal.Type, signal.ResourceID)
 			flusher.Flush()
 		case <-heartbeat.C:
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()
+		}
+	}
+}
+
+func drainSignals(signals <-chan Signal) {
+	for {
+		select {
+		case <-signals:
+		default:
+			return
 		}
 	}
 }

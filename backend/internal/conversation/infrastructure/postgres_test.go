@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -246,11 +247,11 @@ func canonicalMessage(
 
 func onlyConversation(t *testing.T, repository *PostgresRepository, tenantID string) domain.Conversation {
 	t.Helper()
-	items, more, err := repository.List(context.Background(), tenantID, 10, nil)
+	items, more, err := repository.List(context.Background(), tenantID, domain.ListFilter{}, 10, nil)
 	if err != nil || more || len(items) != 1 {
 		t.Fatalf("List() = %#v, more=%v, err=%v", items, more, err)
 	}
-	return items[0]
+	return items[0].Conversation
 }
 
 func requireConversationCounts(
@@ -346,4 +347,137 @@ func TestMessagesPageUsesOneConnectionUnderContention(t *testing.T) {
 	for err := range failures {
 		t.Fatalf("конкурентное чтение страницы при пуле из двух соединений: %v", err)
 	}
+}
+
+// Список переписок для экрана «Диалоги» (ADR 0044): контакт, канал, превью,
+// активные риски и внешняя ссылка одним запросом; серверные фильтры и курсор,
+// привязанный к фильтрам.
+func TestConversationListFiltersSearchRisksAndCursor(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	pair := testsupport.TwoTenants(t, ctx, pool)
+	generator := ids.Generator{}
+	connectorRepository := connectorinfrastructure.NewPostgresRepository(pool)
+	repository := NewPostgresRepository(pool)
+	service := conversationapplication.NewService(repository, allowReader(true), generator)
+	connection := conversationConnection(t, connectorRepository, generator, pair.A.TenantID, &pair.A.LocationID)
+	baseTime := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
+
+	irina := canonicalMessage(connection, "event-irina", "dialog-irina", "message-irina", "contact-irina", connectordomain.CanonicalIncoming, baseTime)
+	if err := service.IngestCanonical(ctx, irina); err != nil {
+		t.Fatal(err)
+	}
+	petr := canonicalMessage(connection, "event-petr", "dialog-petr", "message-petr", "contact-petr", connectordomain.CanonicalIncoming, baseTime.Add(time.Minute))
+	petrName := "Пётр Иванов"
+	petrPhone := "+79991234567"
+	petrText := "Хочу   полировку\nкузова"
+	petr.ContactDisplayName, petr.ContactPhoneNormalized, petr.Text = &petrName, &petrPhone, &petrText
+	if err := service.IngestCanonical(ctx, petr); err != nil {
+		t.Fatal(err)
+	}
+	nameless := canonicalMessage(connection, "event-nameless", "dialog-nameless", "message-nameless", "contact-nameless", connectordomain.CanonicalIncoming, baseTime.Add(2*time.Minute))
+	nameless.ContactDisplayName = nil
+	nameless.MessageType, nameless.Text = connectordomain.CanonicalImage, nil
+	if err := service.IngestCanonical(ctx, nameless); err != nil {
+		t.Fatal(err)
+	}
+
+	// Активный риск у переписки Петра: сделка + два сигнала разной серьёзности.
+	var petrConversationID, petrMessageID string
+	if err := pool.QueryRow(ctx, `
+		SELECT c.id, m.id FROM conversations AS c JOIN messages AS m ON m.tenant_id = c.tenant_id AND m.conversation_id = c.id
+		WHERE c.tenant_id = $1 AND c.external_id = 'dialog-petr'`, pair.A.TenantID).Scan(&petrConversationID, &petrMessageID); err != nil {
+		t.Fatal(err)
+	}
+	opportunityID := newConversationTestID(t)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO opportunities(id, tenant_id, conversation_id, stage, currency, opened_at, created_at, updated_at)
+		VALUES ($1, $2, $3, 'NEW', 'RUB', $4, $4, $4)`, opportunityID, pair.A.TenantID, petrConversationID, baseTime); err != nil {
+		t.Fatal(err)
+	}
+	for _, risk := range []struct{ riskType, severity, status string }{
+		{"NO_RESPONSE", "HIGH", "OPEN"}, {"FOLLOW_UP_CANDIDATE", "CRITICAL", "ACKNOWLEDGED"}, {"BOOKING_NOT_CONFIRMED", "CRITICAL", "RESOLVED"},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO risk_signals(id, tenant_id, opportunity_id, location_id, type, severity, status, reason_code, reason_text, source,
+				risk_engine_version, trigger_message_id, detected_at, due_at, acknowledged_at, resolved_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::text, 'FIXTURE', 'fixture', 'RULE', 'test/v1', $8, $9::timestamptz, $9::timestamptz,
+				CASE WHEN $7::text = 'ACKNOWLEDGED' THEN $9::timestamptz ELSE NULL END,
+				CASE WHEN $7::text = 'RESOLVED' THEN $9::timestamptz ELSE NULL END, $9::timestamptz, $9::timestamptz)`,
+			newConversationTestID(t), pair.A.TenantID, opportunityID, pair.A.LocationID, risk.riskType, risk.severity, risk.status,
+			petrMessageID, baseTime.Add(3*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	everything, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{})
+	if err != nil || len(everything.Items) != 3 || everything.NextCursor != nil {
+		t.Fatalf("List() = %#v, %v", everything, err)
+	}
+	last := everything.Items[0] // updated_at DESC: последней ингестирована безымянная переписка
+	if last.Contact.DisplayName != nil || last.LastMessage == nil || last.LastMessage.Type != domain.MessageImage || last.LastMessage.Preview != nil ||
+		last.Channel.Provider != "TEST" || last.Channel.ConnectionID != connection.ID || last.ActiveRisks.Count != 0 || last.ActiveRisks.MaxSeverity != nil ||
+		last.ExternalLink.UnavailableReason == nil || *last.ExternalLink.UnavailableReason != "PROVIDER_UNSUPPORTED" {
+		t.Fatalf("строка без имени = %#v", last)
+	}
+	petrRow := everything.Items[1]
+	if petrRow.Contact.DisplayName == nil || *petrRow.Contact.DisplayName != petrName || petrRow.LastMessage == nil ||
+		petrRow.LastMessage.Preview == nil || *petrRow.LastMessage.Preview != "Хочу полировку кузова" ||
+		petrRow.ActiveRisks.Count != 2 || petrRow.ActiveRisks.MaxSeverity == nil || *petrRow.ActiveRisks.MaxSeverity != "CRITICAL" {
+		t.Fatalf("строка Петра = %#v", petrRow)
+	}
+
+	withRisk, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{WithRisk: true}})
+	if err != nil || len(withRisk.Items) != 1 || withRisk.Items[0].Conversation.ID != petrConversationID {
+		t.Fatalf("фильтр «С риском» = %#v, %v", withRisk, err)
+	}
+	for _, search := range []string{"пётр", "ИВАНОВ", "999 123", "+7999", "Ирина"} {
+		found, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{Search: search}})
+		if err != nil || len(found.Items) != 1 {
+			t.Fatalf("поиск %q = %#v, %v", search, found, err)
+		}
+	}
+	if found, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{Search: "%"}}); err != nil || len(found.Items) != 0 {
+		t.Fatalf("метасимвол поиска не экранирован: %#v, %v", found, err)
+	}
+	if _, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{Search: strings.Repeat("а", 101)}}); !errors.Is(err, conversationapplication.ErrInvalid) {
+		t.Fatalf("длинный поиск принят: %v", err)
+	}
+	byConnection, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{ConnectionID: connection.ID, LocationID: pair.A.LocationID, Status: domain.ConversationActive}})
+	if err != nil || len(byConnection.Items) != 3 {
+		t.Fatalf("фильтр по каналу и точке = %#v, %v", byConnection, err)
+	}
+	if other, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{LocationID: pair.B.LocationID}}); err != nil || len(other.Items) != 0 {
+		t.Fatalf("чужая точка вернула переписки: %#v, %v", other, err)
+	}
+
+	firstPage, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{Search: "и"}, Limit: 1})
+	if err != nil || len(firstPage.Items) != 1 || firstPage.NextCursor == nil {
+		t.Fatalf("первая страница поиска = %#v, %v", firstPage, err)
+	}
+	secondPage, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Filter: domain.ListFilter{Search: "и"}, Limit: 1, Cursor: *firstPage.NextCursor})
+	if err != nil || len(secondPage.Items) != 1 || secondPage.Items[0].Conversation.ID == firstPage.Items[0].Conversation.ID || secondPage.NextCursor != nil {
+		t.Fatalf("вторая страница поиска = %#v, %v", secondPage, err)
+	}
+	if _, err := service.List(ctx, "reader", pair.A.TenantID, conversationapplication.ListQuery{Limit: 1, Cursor: *firstPage.NextCursor}); !errors.Is(err, conversationapplication.ErrInvalid) {
+		t.Fatalf("курсор поиска принят без фильтра: %v", err)
+	}
+
+	detail, found, err := repository.Detail(ctx, pair.A.TenantID, petrConversationID)
+	if err != nil || !found || detail.Channel.Provider != "TEST" || detail.Channel.Name != "Тестовая переписка" ||
+		detail.ExternalLink.URL != nil || detail.ExternalLink.UnavailableReason == nil {
+		t.Fatalf("Detail() = %#v, %v, %v", detail, found, err)
+	}
+	if foreign, err := service.List(ctx, "reader", pair.B.TenantID, conversationapplication.ListQuery{}); err != nil || len(foreign.Items) != 0 {
+		t.Fatalf("список чужой организации = %#v, %v", foreign, err)
+	}
+}
+
+func newConversationTestID(t *testing.T) string {
+	t.Helper()
+	value, err := (ids.Generator{}).NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }

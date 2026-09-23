@@ -246,6 +246,108 @@ paths:
         '204': { description: Согласие отозвано либо уже отсутствовало; история выдач сохраняется. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/organization/onboarding:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Авторитетный статус онбординга организации
+      description: 'Для любого активного участника. Статус выводится детерминированно из данных, сервер не хранит «пройденные шаги» (ADR 0045): обязательны организация, активная точка с полным недельным графиком, активная услуга и хотя бы один не отключённый канал; личная привязка Telegram необязательна и считается по текущему пользователю. nextStep — первый невыполненный обязательный шаг, затем первый невыполненный необязательный, иначе null.'
+      operationId: getOnboardingStatus
+      responses:
+        '200':
+          description: Статус и факты, из которых он выведен.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OnboardingStatus' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/organization/members:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Список участников организации
+      description: Требует member.manage (OWNER). Включает отозванных участников со статусом DISABLED; адрес почты и имя берутся из учётной записи.
+      operationId: listMembers
+      responses:
+        '200':
+          description: Участники организации в порядке присоединения.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MemberList' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/organization/members/{userId}:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/UserId' }
+    patch:
+      summary: Сменить роль участника
+      description: 'Требует member.manage. Действует только для активного членства; понижение последнего активного владельца (в том числе собственное) отклоняется. Записывается аудит MEMBER_ROLE_CHANGED.'
+      operationId: changeMemberRole
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateMemberRoleRequest' } } } }
+      responses:
+        '200': { description: Обновлённое членство., content: { application/json: { schema: { $ref: '#/components/schemas/Membership' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'LAST_OWNER — последний активный владелец не понижается; MEMBER_DISABLED — членство отозвано.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      summary: Отозвать доступ участника
+      description: 'Требует member.manage. Членство переходит в DISABLED и сохраняется (на него ссылаются неизменяемые факты); повтор идемпотентен; последний активный владелец защищён. Записывается аудит MEMBER_REVOKED.'
+      operationId: revokeMember
+      responses:
+        '204': { description: Доступ отозван либо уже был отозван. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: LAST_OWNER — последний активный владелец не отзывается., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/organization/invitations:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Список приглашений организации
+      description: Требует member.manage. Код приглашения не возвращается никогда; состояние выводится из отметок принятия, отзыва и срока действия.
+      operationId: listInvitations
+      responses:
+        '200':
+          description: Приглашения от новых к старым.
+          content: { application/json: { schema: { $ref: '#/components/schemas/InvitationList' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Выпустить одноразовый код приглашения
+      description: 'Требует member.manage. Приглашение не привязано к адресу почты (у MVP нет почтовой инфраструктуры и нет поверхности для перебора адресов): владелец передаёт код сотруднику сам. Код показывается ровно один раз, в базе хранится только SHA-256; срок действия 7 дней. Записывается аудит MEMBER_INVITED (ADR 0045).'
+      operationId: createInvitation
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateInvitationRequest' } } } }
+      responses:
+        '201':
+          description: Приглашение и его открытый код.
+          content: { application/json: { schema: { $ref: '#/components/schemas/IssuedInvitation' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/organization/invitations/{invitationId}:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/InvitationId' }
+    delete:
+      summary: Отозвать приглашение
+      description: Требует member.manage. Ожидающее приглашение отзывается (аудит INVITATION_REVOKED); повторный отзыв идемпотентен; принятое приглашение отозвать нельзя.
+      operationId: revokeInvitation
+      responses:
+        '204': { description: Приглашение отозвано либо уже было отозвано. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: INVITATION_USED — приглашение уже принято., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/invitations/accept:
+    post:
+      summary: Принять приглашение по коду
+      description: 'Только сеанс, без X-Tenant-ID: организацию определяет приглашение. Создаёт активное членство с ролью приглашения или восстанавливает ранее отозванное; после успеха организация появляется в /auth/me. Записывается аудит INVITATION_ACCEPTED от имени нового участника.'
+      operationId: acceptInvitation
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AcceptInvitationRequest' } } } }
+      responses:
+        '200':
+          description: Членство создано или восстановлено.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AcceptedInvitation' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Код неизвестен., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'INVITATION_EXPIRED, INVITATION_REVOKED, INVITATION_USED — код больше не действует; ALREADY_MEMBER — пользователь уже активный участник этой организации.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/locations:
     parameters: [{ $ref: '#/components/parameters/TenantId' }]
     get:
@@ -259,6 +361,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       summary: Create a tenant Location
+      description: 'A new location is always active; the field active is rejected with 400 here and changed only through PATCH (GAP-CONTRACT-019).'
       operationId: createLocation
       requestBody:
         required: true
@@ -388,7 +491,7 @@ paths:
       - { $ref: '#/components/parameters/ConnectorProvider' }
     post:
       summary: Create a channel connection
-      description: OWNER-only. The webhook secret is accepted once and persisted only as a SHA-256 verifier. CONNECTED_BUSINESS_BOT also requires botToken; the token is encrypted at rest and never returned.
+      description: 'OWNER-only (integration.manage). The webhook secret may be omitted: the server then issues a 256-bit base64url secret, returns it once in this response for providers without remote registration and persists only its SHA-256 verifier. CONNECTED_BUSINESS_BOT also requires botToken submitted once over TLS; the token is encrypted at rest with the connection as associated data, never logged and never returned (ADR 0045).'
       operationId: connectChannel
       requestBody:
         required: true
@@ -397,8 +500,8 @@ paths:
             schema: { $ref: '#/components/schemas/ConnectChannelRequest' }
       responses:
         '201':
-          description: Connection created. A Telegram connection is ACTIVE after setWebhook/getWebhookInfo verification, or ERROR with a safe code when remote provisioning failed.
-          content: { application/json: { schema: { $ref: '#/components/schemas/ChannelConnection' } } }
+          description: 'Connection created. A Telegram connection is ACTIVE after setWebhook/getWebhookInfo verification, or ERROR with a safe code when remote provisioning failed. webhookSecret is present only when the server generated it for a provider whose sender must be configured by the operator.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConnectedChannel' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -425,6 +528,7 @@ paths:
       - { $ref: '#/components/parameters/ConnectionId' }
     get:
       summary: Get the last persisted channel health
+      description: 'Reads the persisted state only; checkedAt is the read time, not a live probe. Use POST …/health/check for a live verification.'
       operationId: getChannelHealth
       responses:
         '200':
@@ -434,6 +538,23 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/integrations/{connectionId}/health/check:
+    parameters:
+      - { $ref: '#/components/parameters/TenantId' }
+      - { $ref: '#/components/parameters/ConnectionId' }
+    post:
+      summary: Run a live health check
+      description: 'OWNER-only. For CONNECTED_BUSINESS_BOT the server calls getWebhookInfo and compares the registered URL: ACTIVE on match, ERROR/TELEGRAM_WEBHOOK_MISMATCH on a different URL, ERROR/TELEGRAM_WEBHOOK_CHECK_FAILED when Telegram is unreachable; the result is persisted (verification REMOTE). Providers without remote registration and DISCONNECTED connections return the persisted state unchanged (verification LOCAL).'
+      operationId: checkChannelHealth
+      responses:
+        '200':
+          description: Health after the check and where it came from.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HealthCheck' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Credentials cannot be decrypted in this process (CONNECTOR_UNAVAILABLE)., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/webhooks/{provider}/{tenantId}/{connectionId}:
     parameters:
       - { $ref: '#/components/parameters/ConnectorProvider' }
@@ -476,9 +597,14 @@ paths:
       - { $ref: '#/components/parameters/TenantId' }
     get:
       summary: Получить список переписок выбранной организации
-      description: Требует разрешение conversation.read. Порядок — от недавно изменённых переписок; постраничное чтение использует непрозрачный курсор.
+      description: 'Требует разрешение conversation.read. Каждая строка несёт контакт, канал, превью последнего сообщения, сводку активных рисков и внешнюю ссылку (ADR 0044). Порядок — от недавно изменённых переписок (updated_at, id); курсор привязан к набору фильтров и с другими фильтрами отвергается 400.'
       operationId: listConversations
       parameters:
+        - { name: search, in: query, description: 'Подстрока имени, телефона (по цифрам) или почты контакта без учёта регистра; до 100 символов.', schema: { type: string, maxLength: 100 } }
+        - { name: withRisk, in: query, description: 'true — только переписки с активным риском (OPEN, ACKNOWLEDGED, ACTED).', schema: { type: boolean } }
+        - { name: locationId, in: query, schema: { type: string, format: uuid } }
+        - { name: connectionId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ConversationStatus' } }
         - { name: limit, in: query, description: Размер страницы; по умолчанию 50., schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { name: cursor, in: query, description: Непрозрачный курсор из предыдущего ответа., schema: { type: string } }
       responses:
@@ -494,10 +620,11 @@ paths:
       - { $ref: '#/components/parameters/ConversationId' }
     get:
       summary: Получить переписку и связанный контакт
+      description: Каноническая переписка не зависит от канала; снимок канала и внешняя ссылка добавлены для экрана диалога и строятся сервером.
       operationId: getConversation
       responses:
         '200':
-          description: Каноническая переписка и контакт без сведений, зависящих от конкретного канала.
+          description: Каноническая переписка, контакт, снимок канала и безопасная внешняя ссылка.
           content: { application/json: { schema: { $ref: '#/components/schemas/ConversationDetail' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -555,10 +682,14 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Переход назад, повторное открытие или преждевременный WON запрещены.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/radar:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
     get:
       summary: Получить сводку Radar
+      description: 'Требует risks.read: денежные показатели сводки видны и менеджеру (ADR 0044). Фильтры совпадают с GET /risks; счётчики и потенциал считаются по активным рискам внутри фильтра, возвращённая выручка — по всем отобранным рискам.'
       operationId: getRadarSummary
       parameters:
+        - { $ref: '#/components/parameters/RiskStatusFilter' }
+        - { $ref: '#/components/parameters/RiskActiveFilter' }
         - { name: locationId, in: query, schema: { type: string, format: uuid } }
         - { name: severity, in: query, schema: { $ref: '#/components/schemas/RiskSeverity' } }
         - { name: riskType, in: query, schema: { $ref: '#/components/schemas/RiskType' } }
@@ -572,11 +703,14 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
     get:
       summary: Получить список рисков организации
+      description: 'Требует risks.read. Каждый элемент — обогащённая карточка риска (контакт, услуга, канал, превью последнего сообщения, внешняя ссылка), собранная без запросов на строку (ADR 0044). Курсор привязан к набору фильтров, включая статусы: с другими фильтрами он отвергается 400.'
       operationId: listRisks
       parameters:
-        - { name: status, in: query, schema: { $ref: '#/components/schemas/RiskStatus' } }
+        - { $ref: '#/components/parameters/RiskStatusFilter' }
+        - { $ref: '#/components/parameters/RiskActiveFilter' }
         - { name: locationId, in: query, schema: { type: string, format: uuid } }
         - { name: severity, in: query, schema: { $ref: '#/components/schemas/RiskSeverity' } }
         - { name: riskType, in: query, schema: { $ref: '#/components/schemas/RiskType' } }
@@ -597,9 +731,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/risks/{riskId}:
-    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }]
     get:
       summary: Получить детали риска
+      description: Требует risks.read. Связанные объекты присутствуют всегда; null означает отсутствие связи или ещё не созданную владеющим модулем запись.
       operationId: getRisk
       responses:
         '200':
@@ -610,7 +745,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/acknowledge:
-    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }]
     post:
       summary: Подтвердить просмотр риска
       operationId: acknowledgeRisk
@@ -621,7 +756,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/risks/{riskId}/resolve:
-    parameters: [{ $ref: '#/components/parameters/RiskId' }]
+    parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }]
     post:
       summary: Закрыть риск
       operationId: resolveRisk
@@ -738,7 +873,7 @@ paths:
     parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }]
     post:
       summary: Создать или получить детерминированную рекомендацию по риску
-      description: Тип риска читается сервером из PostgreSQL; команда не обращается к AI.
+      description: Требует risks.manage. Тип риска читается сервером из PostgreSQL; команда не обращается к AI.
       operationId: ensureRiskRecommendation
       responses:
         '200': { description: Созданная ранее либо новая шаблонная рекомендация., content: { application/json: { schema: { $ref: '#/components/schemas/Recommendation' } } } }
@@ -750,6 +885,7 @@ paths:
     parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/RiskId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
     post:
       summary: Записать неизменяемое корректирующее действие
+      description: 'Требует action.manage (у OWNER и MANAGER есть). Переход по внешней ссылке фиксируется клиентом явно как действие OPEN_CONVERSATION. Риск переходит в ACTED.'
       operationId: createRiskAction
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [type], properties: { type: { $ref: '#/components/schemas/ActionType' }, note: { type: string, maxLength: 2000 } } } } } }
       responses:
@@ -767,6 +903,7 @@ paths:
       - { $ref: '#/components/parameters/IdempotencyKey' }
     post:
       summary: Записать неизменяемый исход коммерческой возможности
+      description: Требует outcome.manage (у OWNER и MANAGER есть).
       operationId: createOpportunityOutcome
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [status], properties: { status: { $ref: '#/components/schemas/OutcomeStatus' }, note: { type: string, maxLength: 2000 } } } } } }
       responses:
@@ -777,11 +914,30 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Ключ идемпотентности использован с другим содержимым., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/analytics/payments:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
+    get:
+      summary: Последние подтверждённые оплаты окна
+      description: 'Требует analytics.read. Окно задаётся как у сводки; события идут от новых к старым (confirmedAt, id) со всеми валютами, каждое несёт свою атрибуцию, сделку, переписку, контакт и услугу. Возвратов в модели нет: событие неизменяемо и положительно. Курсор действует только внутри своего окна.'
+      operationId: listAnalyticsPayments
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date }, description: Начальная дата YYYY-MM-DD включительно. }
+        - { name: to, in: query, required: false, schema: { type: string, format: date }, description: Конечная дата YYYY-MM-DD включительно. }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Страница оплат окна.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaymentPage' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/analytics/summary:
     parameters: [{ $ref: '#/components/parameters/TenantId' }]
     get:
       summary: Сводка базовой аналитики за окно календарных дат
-      description: Показатели считаются из необработанных фактов модулей одним снимком (ADR 0039). Окно задаётся датами включительно в часовом поясе организации; по умолчанию — 30 дней, включая сегодняшний; не длиннее 366 дней. Деньги — только в валюте организации. Требует analytics.read.
+      description: 'Показатели считаются из необработанных фактов модулей одним снимком (ADR 0039). Окно задаётся датами включительно в часовом поясе организации; по умолчанию — 30 дней, включая сегодняшний; не длиннее 366 дней. Деньги — только в валюте организации. Дневной ряд series заполнен нулями по каждой дате окна (дни считаются в часовом поясе организации), attribution всегда содержит RECOVERED, ORGANIC и UNKNOWN. Требует analytics.read.' 
       operationId: getAnalyticsSummary
       parameters:
         - { name: from, in: query, required: false, schema: { type: string, format: date }, description: Начальная дата YYYY-MM-DD включительно. }
@@ -1018,14 +1174,16 @@ paths:
         '403': { $ref: '#/components/responses/AdminForbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/events:
+    parameters: [{ $ref: '#/components/parameters/TenantId' }]
     get:
       summary: Получать сигналы об изменениях организации
       operationId: streamInvalidations
-      description: Временные сигналы в границах организации без бизнес-состояния; после сигнала клиент перечитывает авторитетный REST-ресурс.
+      description: 'Требует risks.read. Временные сигналы в границах организации без бизнес-состояния; после сигнала клиент перечитывает авторитетный REST-ресурс. Буфер подписчика — 16 сигналов: при переполнении сервер отбрасывает накопленные сигналы и посылает один маркер resync.required с телом {"reason":"BUFFER_OVERFLOW"}, после которого клиент перечитывает сводку и открытые списки целиком. Повтора событий (Last-Event-ID) нет; комментарий-heartbeat каждые 20 секунд.'
       responses:
-        '200': { description: "Поток text/event-stream с событиями risk.changed, risk.acknowledged, risk.resolved и risk.false_positive." }
+        '200': { description: "Поток text/event-stream с событиями risk.changed, risk.acknowledged, risk.resolved, risk.false_positive (данные {\"resourceId\": uuid}) и resync.required (данные {\"reason\": \"BUFFER_OVERFLOW\"})." }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Шина сигналов не инициализирована в этом процессе (код UNAVAILABLE); клиент продолжает работать по REST с периодическим перечитыванием., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/opportunities/{opportunityId}/revenue:
     parameters:
       - { $ref: '#/components/parameters/TenantId' }
@@ -1043,7 +1201,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Ключ идемпотентности использован с другим содержимым., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'Два кода: IDEMPOTENCY_CONFLICT — ключ идемпотентности использован с другим содержимым (повторить с новым ключом); RECOVERED_ALREADY_ATTRIBUTED — у возможности уже есть атрибуция RECOVERED, последующие оплаты подтверждаются как ORGANIC по явному решению пользователя.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/revenue/confirmed-recovered:
     parameters:
       - { $ref: '#/components/parameters/TenantId' }
@@ -1077,6 +1235,10 @@ components:
     OpportunityId: { name: opportunityId, in: path, required: true, schema: { type: string, format: uuid } }
     WebhookTenantId: { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
     RiskId: { name: riskId, in: path, required: true, schema: { type: string, format: uuid } }
+    UserId: { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    InvitationId: { name: invitationId, in: path, required: true, schema: { type: string, format: uuid } }
+    RiskStatusFilter: { name: status, in: query, required: false, style: form, explode: true, description: 'Один или несколько статусов (повторяющийся параметр либо через запятую). Несовместим с active.', schema: { type: array, minItems: 1, uniqueItems: true, items: { $ref: '#/components/schemas/RiskStatus' } } }
+    RiskActiveFilter: { name: active, in: query, required: false, description: 'true — активные статусы OPEN, ACKNOWLEDGED, ACTED; false — терминальные RESOLVED, FALSE_POSITIVE, IGNORED, EXPIRED. Несовместим со status.', schema: { type: boolean } }
     AdminJobId: { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
     AdminEventId: { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
     NotificationRiskType: { name: riskType, in: path, required: true, schema: { $ref: '#/components/schemas/RiskType' } }
@@ -1196,6 +1358,111 @@ components:
       properties:
         user: { $ref: '#/components/schemas/User' }
         memberships: { type: array, items: { $ref: '#/components/schemas/MembershipSummary' } }
+    Membership:
+      type: object
+      required: [id, tenantId, userId, role, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        role: { type: string, enum: [OWNER, MANAGER] }
+        status: { type: string, enum: [ACTIVE, INVITED, DISABLED] }
+        revokedAt: { type: string, format: date-time, description: Присутствует только у отозванного членства. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Member:
+      type: object
+      required: [membershipId, userId, email, displayName, role, status, revokedAt, createdAt, updatedAt]
+      properties:
+        membershipId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        role: { type: string, enum: [OWNER, MANAGER] }
+        status: { type: string, enum: [ACTIVE, INVITED, DISABLED] }
+        revokedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MemberList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Member' } } }
+    UpdateMemberRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { type: string, enum: [OWNER, MANAGER] }
+    InvitationStatus: { type: string, enum: [PENDING, ACCEPTED, REVOKED, EXPIRED] }
+    Invitation:
+      type: object
+      required: [id, role, note, status, createdBy, createdAt, expiresAt, acceptedAt, acceptedBy, revokedAt, revokedBy]
+      properties:
+        id: { type: string, format: uuid }
+        role: { type: string, enum: [OWNER, MANAGER] }
+        note: { type: [string, 'null'], maxLength: 500 }
+        status: { $ref: '#/components/schemas/InvitationStatus' }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        acceptedAt: { type: [string, 'null'], format: date-time }
+        acceptedBy: { type: [string, 'null'], format: uuid }
+        revokedAt: { type: [string, 'null'], format: date-time }
+        revokedBy: { type: [string, 'null'], format: uuid }
+    InvitationList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Invitation' } } }
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { type: string, enum: [OWNER, MANAGER] }
+        note: { type: [string, 'null'], maxLength: 500, description: 'Пометка владельца (например, имя сотрудника); не раскрывается принимающему.' }
+    IssuedInvitation:
+      type: object
+      required: [invitation, code]
+      properties:
+        invitation: { $ref: '#/components/schemas/Invitation' }
+        code: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: Открытый код; показывается один раз и не хранится на сервере. }
+    AcceptInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', writeOnly: true }
+    AcceptedInvitation:
+      type: object
+      required: [membership]
+      properties:
+        membership: { $ref: '#/components/schemas/MembershipSummary' }
+    OnboardingStep:
+      type: object
+      required: [key, required, done]
+      properties:
+        key: { type: string, enum: [ORGANIZATION, LOCATION, SERVICES, CHANNEL, TELEGRAM_LINK] }
+        required: { type: boolean }
+        done: { type: boolean }
+    OnboardingFacts:
+      type: object
+      required: [activeLocations, locationsWithSchedule, activeServices, connections, liveConnections, telegramLinked]
+      properties:
+        activeLocations: { type: integer, minimum: 0 }
+        locationsWithSchedule: { type: integer, minimum: 0, description: Активные точки с графиком на все семь дней. }
+        activeServices: { type: integer, minimum: 0 }
+        connections: { type: integer, minimum: 0 }
+        liveConnections: { type: integer, minimum: 0, description: 'Подключения в любом статусе, кроме DISCONNECTED.' }
+        telegramLinked: { type: boolean, description: Личная привязка Telegram текущего пользователя. }
+    OnboardingStatus:
+      type: object
+      required: [complete, nextStep, steps, facts, computedAt]
+      properties:
+        complete: { type: boolean, description: Все обязательные шаги выполнены. }
+        nextStep: { type: [string, 'null'], enum: [ORGANIZATION, LOCATION, SERVICES, CHANNEL, TELEGRAM_LINK, null] }
+        steps: { type: array, minItems: 5, maxItems: 5, items: { $ref: '#/components/schemas/OnboardingStep' } }
+        facts: { $ref: '#/components/schemas/OnboardingFacts' }
+        computedAt: { type: string, format: date-time }
     Organization:
       type: object
       required: [id, name, defaultTimezone, defaultCurrency, status, createdAt, updatedAt]
@@ -1361,14 +1628,28 @@ components:
         lastErrorAt: { type: [string, 'null'], format: date-time }
         lastErrorCode: { type: [string, 'null'], maxLength: 100 }
         checkedAt: { type: string, format: date-time }
+    ConnectedChannel:
+      description: Подключение вместе с секретом webhook, выпущенным сервером в этом запросе.
+      allOf:
+        - $ref: '#/components/schemas/ChannelConnection'
+        - type: object
+          required: [webhookSecret]
+          properties:
+            webhookSecret: { type: [string, 'null'], description: 'Открытый секрет, показанный один раз; null, если секрет задал клиент или поставщик регистрируется сервером (Telegram).' }
+    HealthCheck:
+      type: object
+      required: [health, verification]
+      properties:
+        health: { $ref: '#/components/schemas/ConnectionHealth' }
+        verification: { type: string, enum: [REMOTE, LOCAL], description: 'REMOTE — результат живого запроса к поставщику; LOCAL — сохранённое состояние без удалённой регистрации.' }
     ConnectChannelRequest:
       type: object
       additionalProperties: false
-      required: [name, webhookSecret]
+      required: [name]
       properties:
         name: { type: string, minLength: 1, maxLength: 200 }
         locationId: { type: [string, 'null'], format: uuid }
-        webhookSecret: { type: string, minLength: 16, maxLength: 256, writeOnly: true }
+        webhookSecret: { type: string, minLength: 16, maxLength: 256, writeOnly: true, description: 'Необязателен: без него секрет выпускает сервер и возвращает один раз в ответе.' }
         botToken:
           type: string
           minLength: 26
@@ -1423,20 +1704,76 @@ components:
         revision: { type: integer, format: int64, minimum: 0, description: Атомарно увеличивается при каждом фактическом изменении сообщения. }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ChannelSummary:
+      type: object
+      additionalProperties: false
+      required: [connectionId, provider, name, status]
+      properties:
+        connectionId: { type: string, format: uuid }
+        provider: { $ref: '#/components/schemas/ConnectorProvider' }
+        name: { type: string }
+        status: { $ref: '#/components/schemas/ConnectionStatus' }
+    ExternalLink:
+      description: 'Безопасная ссылка на собеседника во внешнем клиенте: строится только сервером по разрешённой схеме (сейчас tg://user?id=<число> для Telegram). Клиент никогда не собирает URL из externalId.'
+      type: object
+      additionalProperties: false
+      required: [url, kind, unavailableReason]
+      properties:
+        url: { type: [string, 'null'], pattern: '^tg://user\?id=[1-9][0-9]{0,19}$' }
+        kind: { type: [string, 'null'], enum: [TELEGRAM_USER, null] }
+        unavailableReason: { type: [string, 'null'], enum: [PROVIDER_UNSUPPORTED, IDENTITY_UNKNOWN, null] }
+    ContactSummary:
+      type: object
+      additionalProperties: false
+      required: [id, displayName]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: [string, 'null'], maxLength: 200 }
+    MessagePreview:
+      description: 'Последнее не удалённое у поставщика сообщение; preview — до 140 символов текста с нормализованными пробелами, null для сообщений без текста.'
+      type: object
+      additionalProperties: false
+      required: [id, direction, type, preview, sentAt]
+      properties:
+        id: { type: string, format: uuid }
+        direction: { $ref: '#/components/schemas/MessageDirection' }
+        type: { $ref: '#/components/schemas/MessageType' }
+        preview: { type: [string, 'null'], maxLength: 140 }
+        sentAt: { type: string, format: date-time }
+    ActiveRisks:
+      type: object
+      additionalProperties: false
+      required: [count, maxSeverity]
+      properties:
+        count: { type: integer, minimum: 0, description: 'Активные риски (OPEN, ACKNOWLEDGED, ACTED) по всем сделкам переписки.' }
+        maxSeverity: { oneOf: [{ $ref: '#/components/schemas/RiskSeverity' }, { type: 'null' }] }
+    ConversationListItem:
+      type: object
+      additionalProperties: false
+      required: [conversation, contact, channel, lastMessage, activeRisks, externalLink]
+      properties:
+        conversation: { $ref: '#/components/schemas/Conversation' }
+        contact: { $ref: '#/components/schemas/ContactSummary' }
+        channel: { $ref: '#/components/schemas/ChannelSummary' }
+        lastMessage: { oneOf: [{ $ref: '#/components/schemas/MessagePreview' }, { type: 'null' }] }
+        activeRisks: { $ref: '#/components/schemas/ActiveRisks' }
+        externalLink: { $ref: '#/components/schemas/ExternalLink' }
     ConversationDetail:
       type: object
       additionalProperties: false
-      required: [conversation, contact]
+      required: [conversation, contact, channel, externalLink]
       properties:
         conversation: { $ref: '#/components/schemas/Conversation' }
         contact: { $ref: '#/components/schemas/Contact' }
+        channel: { $ref: '#/components/schemas/ChannelSummary' }
+        externalLink: { $ref: '#/components/schemas/ExternalLink' }
     ConversationPage:
       type: object
       additionalProperties: false
       required: [items, nextCursor]
       properties:
-        items: { type: array, items: { $ref: '#/components/schemas/Conversation' } }
-        nextCursor: { type: [string, 'null'], description: Непрозрачный курсор следующей страницы или null. }
+        items: { type: array, items: { $ref: '#/components/schemas/ConversationListItem' } }
+        nextCursor: { type: [string, 'null'], description: 'Непрозрачный курсор следующей страницы или null; привязан к набору фильтров.' }
     Message:
       type: object
       additionalProperties: false
@@ -1650,7 +1987,7 @@ components:
         type: { $ref: '#/components/schemas/RiskType' }
         severity: { $ref: '#/components/schemas/RiskSeverity' }
         status: { $ref: '#/components/schemas/RiskStatus' }
-        source: { type: string, enum: [RULE, HYBRID] }
+        source: { type: string, enum: [RULE, HYBRID, MANUAL] }
         confidence: { type: number, minimum: 0, maximum: 1 }
         aiRunId: { type: string, format: uuid }
         policyVersion: { type: string }
@@ -1666,20 +2003,31 @@ components:
     RadarOpportunity:
       type: object
       additionalProperties: false
-      required: [id, stage, locationId, potentialRevenue, currency]
+      required: [id, stage, locationId, serviceId, potentialRevenue, currency]
       properties:
         id: { type: string, format: uuid }
         stage: { $ref: '#/components/schemas/OpportunityStage' }
         locationId: { type: string, format: uuid }
+        serviceId: { type: [string, 'null'], format: uuid }
         potentialRevenue: { type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{2}$' }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
     RadarConversation:
       type: object
       additionalProperties: false
-      required: [id, contactId]
+      required: [id, contactId, lastMessage]
       properties:
         id: { type: string, format: uuid }
         contactId: { type: string, format: uuid }
+        lastMessage: { oneOf: [{ $ref: '#/components/schemas/MessagePreview' }, { type: 'null' }] }
+    RadarService:
+      description: Снимок услуги каталога, видимый любому читателю Radar (в том числе менеджеру без service.manage).
+      type: object
+      additionalProperties: false
+      required: [id, name, active]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        active: { type: boolean }
     RadarRecommendation:
       type: object
       additionalProperties: false
@@ -1704,17 +2052,22 @@ components:
         potential: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }
         confirmedRecovered: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }
     RiskDetail:
+      description: 'Карточка риска для списка и деталей. Все ключи присутствуют всегда: null — связь отсутствует (услуга, последнее сообщение) либо владеющий модуль ещё не создал запись (рекомендация, исход, выручка). Денежные поля видны любому обладателю risks.read (ADR 0044).'
       type: object
       additionalProperties: false
-      required: [risk, opportunity, conversation, actions]
+      required: [risk, opportunity, conversation, contact, service, channel, externalLink, recommendation, actions, outcome, revenue]
       properties:
         risk: { $ref: '#/components/schemas/Risk' }
-        opportunity: { $ref: '#/components/schemas/RadarOpportunity' }
-        conversation: { $ref: '#/components/schemas/RadarConversation' }
-        recommendation: { $ref: '#/components/schemas/RadarRecommendation' }
+        opportunity: { oneOf: [{ $ref: '#/components/schemas/RadarOpportunity' }, { type: 'null' }] }
+        conversation: { oneOf: [{ $ref: '#/components/schemas/RadarConversation' }, { type: 'null' }] }
+        contact: { oneOf: [{ $ref: '#/components/schemas/ContactSummary' }, { type: 'null' }] }
+        service: { oneOf: [{ $ref: '#/components/schemas/RadarService' }, { type: 'null' }] }
+        channel: { oneOf: [{ $ref: '#/components/schemas/ChannelSummary' }, { type: 'null' }] }
+        externalLink: { $ref: '#/components/schemas/ExternalLink' }
+        recommendation: { oneOf: [{ $ref: '#/components/schemas/RadarRecommendation' }, { type: 'null' }] }
         actions: { type: array, items: { $ref: '#/components/schemas/RadarAction' } }
-        outcome: { $ref: '#/components/schemas/RadarOutcome' }
-        revenue: { $ref: '#/components/schemas/RadarRevenue' }
+        outcome: { oneOf: [{ $ref: '#/components/schemas/RadarOutcome' }, { type: 'null' }] }
+        revenue: { oneOf: [{ $ref: '#/components/schemas/RadarRevenue' }, { type: 'null' }] }
     RiskVerdict: { type: string, enum: [TRUE_POSITIVE, FALSE_POSITIVE] }
     RiskFeedbackReason: { type: string, enum: [CUSTOMER_ALREADY_BOOKED, CUSTOMER_ALREADY_ANSWERED, NOT_A_LEAD, CUSTOMER_REJECTED, WRONG_INTERPRETATION, OTHER] }
     RiskFeedbackRequest:
@@ -1864,10 +2217,30 @@ components:
         confirmed: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Подтверждённые события выручки окна. }
         confirmedRecovered: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Их часть с атрибуцией RECOVERED (§39). }
         confirmedPayments: { type: integer, minimum: 0 }
+    AnalyticsDailyPoint:
+      type: object
+      additionalProperties: false
+      required: [date, incoming, outgoing, risksDetected, confirmed, confirmedRecovered, payments]
+      properties:
+        date: { type: string, format: date, description: Календарный день организации. }
+        incoming: { type: integer, minimum: 0 }
+        outgoing: { type: integer, minimum: 0 }
+        risksDetected: { type: integer, minimum: 0 }
+        confirmed: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Подтверждённые события дня в валюте организации. }
+        confirmedRecovered: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }
+        payments: { type: integer, minimum: 0 }
+    AnalyticsAttributionSplit:
+      type: object
+      additionalProperties: false
+      required: [type, amount, count]
+      properties:
+        type: { type: string, enum: [RECOVERED, ORGANIC, UNKNOWN] }
+        amount: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Сумма подтверждённых событий окна с этой атрибуцией в валюте организации. }
+        count: { type: integer, minimum: 0 }
     AnalyticsSummary:
       type: object
       additionalProperties: false
-      required: [period, messages, opportunities, risks, outcomes, revenue]
+      required: [period, messages, opportunities, risks, outcomes, revenue, series, attribution]
       properties:
         period: { $ref: '#/components/schemas/AnalyticsPeriod' }
         messages: { $ref: '#/components/schemas/AnalyticsMessages' }
@@ -1875,6 +2248,33 @@ components:
         risks: { $ref: '#/components/schemas/AnalyticsRisks' }
         outcomes: { $ref: '#/components/schemas/AnalyticsOutcomes' }
         revenue: { $ref: '#/components/schemas/AnalyticsRevenue' }
+        series: { type: array, items: { $ref: '#/components/schemas/AnalyticsDailyPoint' }, description: По одной точке на каждую дату окна по возрастанию; дни без данных заполнены нулями. }
+        attribution: { type: array, minItems: 3, maxItems: 3, items: { $ref: '#/components/schemas/AnalyticsAttributionSplit' }, description: 'Всегда RECOVERED, ORGANIC, UNKNOWN в этом порядке.' }
+    Payment:
+      type: object
+      additionalProperties: false
+      required: [eventId, opportunityId, conversationId, contactId, contactDisplayName, serviceName, amount, currency, attribution, riskId, confirmedBy, confirmedAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        opportunityId: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        contactId: { type: string, format: uuid }
+        contactDisplayName: { type: [string, 'null'] }
+        serviceName: { type: [string, 'null'] }
+        amount: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        attribution: { type: string, enum: [RECOVERED, ORGANIC, UNKNOWN] }
+        riskId: { type: [string, 'null'], format: uuid }
+        confirmedBy: { type: string, format: uuid }
+        confirmedAt: { type: string, format: date-time }
+    PaymentPage:
+      type: object
+      additionalProperties: false
+      required: [period, items, nextCursor]
+      properties:
+        period: { $ref: '#/components/schemas/AnalyticsPeriod' }
+        items: { type: array, items: { $ref: '#/components/schemas/Payment' } }
+        nextCursor: { type: [string, 'null'] }
     PlatformAdmin:
       type: object
       required: [id, userId, grantedBy, grantedAt, note]

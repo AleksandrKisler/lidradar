@@ -53,8 +53,20 @@
 - **Платформенный администратор** — строка в `platform_admins`, не членство;
   первая выдача только через CLI на сервере; каждый вызов `/api/v1/admin/*`
   перепроверяет право и `ACTIVE` пользователя.
-- Приглашений и управления составом по HTTP нет; `AddMember` вызывается
-  только из тестов, отзыв членства — `DISABLED` без удаления.
+- Состав команды управляется по HTTP правом `member.manage` (ADR 0045):
+  приглашение — одноразовый 256-битный код, показанный один раз и хранимый
+  как SHA-256 (без адреса почты, поэтому нет поверхности для перебора учётных
+  записей), срок 7 дней, отзыв мгновенный; приём кода — только сеанс, без
+  выбора организации; смена роли и отзыв членства блокируют членства
+  организации и защищают последнего активного владельца; отзыв — `DISABLED`
+  без удаления. Все операции оставляют аудит (`MEMBER_INVITED`,
+  `INVITATION_REVOKED`, `INVITATION_ACCEPTED`, `MEMBER_ROLE_CHANGED`,
+  `MEMBER_REVOKED`).
+- Права корректирующих команд применяются раздельно: действие —
+  `action.manage`, исход — `outcome.manage`, рекомендация — `risks.manage`
+  (ADR 0044). Деньги карточки риска и сводки Radar видны любому обладателю
+  `risks.read`; итоги организации остаются за `revenue.read` и
+  `analytics.read`.
 
 ## 4. Изоляция организаций в базе
 
@@ -82,7 +94,8 @@
 | пароли | Argon2id PHC в `users.password_hash` | проверка при входе |
 | токены сессий | SHA-256 в `sessions.token_hash` | cookie |
 | секреты вебхуков | SHA-256 hex в `channel_connections.verification_secret_hash` | сравнение в константное время |
-| токен бота коннектора Telegram | AES-256-GCM в `channel_connections.encrypted_credentials`, ключ `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` (ровно 32 байта base64), версия шифра в первом байте, AAD `lidradar:v1:{tenant}:{provider}:{connection}` | `setWebhook`/`deleteWebhook`; расшифровка только на время вызова, буфер обнуляется |
+| токен бота коннектора Telegram | AES-256-GCM в `channel_connections.encrypted_credentials`, ключ `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` (ровно 32 байта base64), версия шифра в первом байте, AAD `lidradar:v1:{tenant}:{provider}:{connection}`; для MVP принята одноразовая передача из браузера по TLS в write-only поле (ADR 0045) | `setWebhook`/`deleteWebhook`/`getWebhookInfo` (живая проверка связи); расшифровка только на время вызова, буфер обнуляется |
+| секрет webhook подключения | только SHA-256 в `channel_connections.verification_secret_hash`; если клиент не задал секрет, сервер выпускает 256-битный `base64url` и возвращает его один раз в ответе подключения (для Telegram не возвращается) | сравнение в константное время при приёме вебхука |
 | токен бота уведомлений | только переменная окружения `LIDRADAR_TELEGRAM_TOKEN` у worker (прежнее имя `LIDAR_TELEGRAM_TOKEN` принимается) | Bot API; не читается API, не возвращается, не логируется |
 | секрет AI-узла | SHA-256 в `ai_nodes.secret_digest`; открытый — файл `0600` на узле | HMAC подписи запросов |
 | коды привязки Telegram | SHA-256 в `telegram_link_tokens`, TTL 15 мин, одноразовые | `/start` |

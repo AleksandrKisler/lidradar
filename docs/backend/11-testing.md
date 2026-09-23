@@ -131,7 +131,7 @@ Workflow `Backend` (`.github/workflows/backend.yml`) на `pull_request` и
 5. `archcheck -root backend`;
 6. `go run ./backend/cmd/migrate` (smoke миграций);
 7. запуск собранного API и проверка `/health/ready` на строку
-   `"latest":"000021_auth_audit"` — новая миграция без обновления ожидания
+   `"latest":"000022_membership_invitations"` — новая миграция без обновления ожидания
    ломает CI;
 8. `npx @redocly/cli@1.34.5 lint contracts/openapi/openapi.yaml`;
 9. `go build ./backend/cmd/...`;

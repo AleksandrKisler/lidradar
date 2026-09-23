@@ -111,3 +111,48 @@ func TestEveryDeclaredRiskTypeHasUsefulTemplate(t *testing.T) {
 		}
 	}
 }
+
+type grants map[string]bool
+
+func (g grants) Allowed(_ context.Context, _, _, permission string) (bool, error) {
+	return g[permission], nil
+}
+
+// GAP-CONTRACT-021: действие и исход охраняются собственными правами, а
+// рекомендация остаётся частью risks.manage.
+func TestCorrectivePermissionsAreSeparateGates(t *testing.T) {
+	ctx := context.Background()
+	build := func(allowed ...string) application.Service {
+		store := infrastructure.NewTestMemoryStore()
+		store.AddRisk("tenant", "risk", "opportunity")
+		granted := grants{}
+		for _, permission := range allowed {
+			granted[permission] = true
+		}
+		return application.NewService(store, granted, &ids{}, time.Now)
+	}
+	onlyActions := build(application.PermissionActionManage)
+	if _, created, err := onlyActions.AddAction(ctx, "actor", "tenant", "risk", "key", domain.ActionCall, ""); err != nil || !created {
+		t.Fatalf("action.manage не открыл действие: created=%v err=%v", created, err)
+	}
+	if _, err := onlyActions.EnsureRecommendation(ctx, "actor", "tenant", "risk"); !errors.Is(err, application.ErrForbidden) {
+		t.Fatalf("рекомендация без risks.manage: %v", err)
+	}
+	if _, _, err := onlyActions.AddOutcome(ctx, "actor", "tenant", "opportunity", "key", domain.OutcomeBooked, ""); !errors.Is(err, application.ErrForbidden) {
+		t.Fatalf("исход без outcome.manage: %v", err)
+	}
+	onlyOutcomes := build(application.PermissionOutcomeManage)
+	if _, created, err := onlyOutcomes.AddOutcome(ctx, "actor", "tenant", "opportunity", "key", domain.OutcomeBooked, ""); err != nil || !created {
+		t.Fatalf("outcome.manage не открыл исход: created=%v err=%v", created, err)
+	}
+	if _, _, err := onlyOutcomes.AddAction(ctx, "actor", "tenant", "risk", "key", domain.ActionCall, ""); !errors.Is(err, application.ErrForbidden) {
+		t.Fatalf("действие без action.manage: %v", err)
+	}
+	onlyRisks := build(application.PermissionManage)
+	if _, err := onlyRisks.EnsureRecommendation(ctx, "actor", "tenant", "risk"); err != nil {
+		t.Fatalf("рекомендация с risks.manage: %v", err)
+	}
+	if _, _, err := onlyRisks.AddAction(ctx, "actor", "tenant", "risk", "key", domain.ActionCall, ""); !errors.Is(err, application.ErrForbidden) {
+		t.Fatalf("risks.manage больше не открывает действие: %v", err)
+	}
+}

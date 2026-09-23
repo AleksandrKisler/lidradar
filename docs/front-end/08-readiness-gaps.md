@@ -1,9 +1,10 @@
 # Готовность и реестр разрывов
 
 Срез выполнен 14 сентября 2026 года по runtime, OpenAPI, backend docs/tests и
-локальному пакету макетов. Реестр запрещает скрытые предположения: если экрану
-не хватает данных или решения, это prerequisite, а не повод для N+1, hardcode
-или фиктивного client-side результата.
+локальному пакету макетов; обновлён 18 сентября 2026 года после закрытия
+API-разрывов на стороне сервера (ADR 0044, ADR 0045). Реестр запрещает скрытые
+предположения: если экрану не хватает данных или решения, это prerequisite, а
+не повод для N+1, hardcode или фиктивного client-side результата.
 
 <a id="readiness-levels"></a>
 ## 1. Приоритет и статус
@@ -29,20 +30,20 @@
 
 | Блок | Сейчас | Что можно делать | Что нельзя принимать |
 |---|---|---|---|
-| Transport/generated API | заблокирован P0 | wrapper/error/idempotency design | стабильную генерацию и tenant operations |
+| Transport/generated API | контракт согласован (2026-09-18) | генерация клиента, tenant interceptor как единая точка | ручные patch схемы |
 | Login | API+desktop design готовы | полный login | registration/workspace visual acceptance |
-| Onboarding | частично | company/location/hours/services forms | надёжный resume/completion и production source flow |
-| Radar | частично | shell, summary, honest empty/error | полную active feed/card |
-| Risk Workspace | частично | command plumbing, базовый read | целевой context и visual acceptance |
-| Conversations | частично | detail/messages cursor | целевой list/search/risk filter/deeplink |
-| Integrations | decision required | persisted list/health states | безопасный production connect/live check |
+| Onboarding | API готов | формы и resume по `GET /organization/onboarding` | visual acceptance resume/skip states |
+| Radar | API готов | active feed, enriched cards, summary | visual acceptance (нет основного макета) |
+| Risk Workspace | API готов | полный read composition, команды, deeplink | visual acceptance |
+| Conversations | API готов | enriched list, search, «С риском», deeplink | visual acceptance filter/error states |
+| Integrations | API готов (ADR 0045) | connect с серверным секретом, live check | UX без дизайна secret/token states |
 | Personal notifications | API готов | link/preferences | owner-only placement без решения |
 | Company/location/services | API+desktop design почти готовы | формы/списки | service dialogs/mobile acceptance |
-| Team | заблокирован | shell/story only | production data/actions |
+| Team | API готов | list, invite code, role, revoke, accept | confirmations без макетов |
 | Privacy | API готов | behavior | visual acceptance |
 | Revenue | API готов | idempotent dialog/command | создание RECOVERED без evidence |
-| Analytics | частично | текущие aggregate cards/precision | chart/payment list/attribution split из макета |
-| SSE | runtime готов, schema неполна | lifecycle/parser | generated tenant-safe stream без contract fix |
+| Analytics | API готов | cards, precision, series chart, attribution, payments | смешение валют в таблице оплат |
+| SSE | API готов | lifecycle/parser, `resync.required` | локальный `+1/-1` вместо refetch |
 | Admin | API готов | data/command implementation | visual acceptance |
 
 <a id="contract-gaps"></a>
@@ -51,7 +52,7 @@
 <a id="gap-contract-001"></a>
 ### GAP-CONTRACT-001 — обязательный tenant header пропущен у Risk/SSE
 
-**P0 · READY_FOR_FIX.** Backend API docs требуют `X-Tenant-ID` для всех
+**P0 · CLOSED (2026-09-18).** Общий параметр `TenantId` объявлен у `/radar`, `/risks`, `/risks/{riskId}`, acknowledge, resolve и `/events`; интеграционный тест `TestFrontendReadModelsThroughAPI` работает через эти пути с header. Исходное описание: Backend API docs требуют `X-Tenant-ID` для всех
 tenant-scoped paths, runtime handler читает tenant, но OpenAPI не объявляет
 parameter у `GET /radar`, `GET /risks`, `GET /risks/{riskId}`, acknowledge,
 resolve и `GET /events`.
@@ -68,7 +69,7 @@ interceptor добавляет tenant ко всем операциям из allo
 <a id="gap-contract-002"></a>
 ### GAP-CONTRACT-002 — Risk/runtime nullability и enum расходятся со схемой
 
-**P0 · READY_FOR_FIX.** Runtime/fixtures используют `Risk.source=MANUAL`, а
+**P0 · CLOSED (2026-09-18).** `Risk.source` включает `MANUAL`; все связи `RiskDetail` обязательны и nullable (`oneOf … null`), runtime всегда пишет ключи (`null` для отсутствующих); `nextCursor: string|null` во всех страницах и в prose (ADR 0044). Исходное описание: Runtime/fixtures используют `Risk.source=MANUAL`, а
 OpenAPI Risk разрешает только `RULE|HYBRID`. Go `risk/application.Detail`
 отдаёт `opportunity`, `conversation`, recommendation/outcome/revenue как
 `omitempty`, но OpenAPI требует первые две. Runtime list сериализует конец
@@ -84,7 +85,7 @@ RiskDetail relations; закрепить `nextCursor: string|null` во всех
 <a id="gap-api-003"></a>
 ### GAP-API-003 — нельзя корректно запросить всю active Risk feed
 
-**P0 · READY_FOR_FIX.** Radar считает active `OPEN|ACKNOWLEDGED|ACTED`.
+**P0 · CLOSED (2026-09-18).** `GET /risks` и `GET /radar` принимают повторяемый `status` (или через запятую) и `active=true|false`; параметры взаимоисключающи (`400`); набор статусов входит в ключ курсора; тесты `TestPostgresRadarEnrichedContextStatusesAndDeepLink`, `TestRiskHTTPStatusFiltersAndActiveShortcut` (ADR 0044). Исходное описание: Radar считает active `OPEN|ACKNOWLEDGED|ACTED`.
 `GET /risks` принимает только один `status`; без него возвращает и четыре
 terminal statuses. Client-side filtering paginated страниц даёт пустые/неполные
 страницы и неверный cursor UX.
@@ -98,7 +99,7 @@ deterministic ordering/cursor tests. **Safe interim:** отдельные status
 <a id="gap-api-004"></a>
 ### GAP-API-004 — Risk card/workspace не получает контекст из макета
 
-**P1 · READY_FOR_FIX.** `RiskDetail` содержит только contactId, сокращённую
+**P1 · CLOSED (2026-09-18).** `RiskDetail` дополнен `contact`, `service`, `channel`, `opportunity.serviceId`, `conversation.lastMessage` (превью ≤ 140), `externalLink`; собирается одним запросом для страницы; vehicle отдельным полем не моделируется (контекст — `service.name`, `reason`, превью) (ADR 0044). Исходное описание: `RiskDetail` содержит только contactId, сокращённую
 Conversation, stage/location/potential и serviceId даже отсутствует в
 `RadarOpportunity`. Макет требует contact display name, service/vehicle,
 channel, message preview, точное waiting/due context и primary external action.
@@ -112,7 +113,7 @@ interim:** показывать только reason/type/severity/time/amount, �
 <a id="gap-api-005"></a>
 ### GAP-API-005 — conversation list не поддерживает целевой список
 
-**P1 · READY_FOR_FIX.** List возвращает только `Conversation`: нет Contact,
+**P1 · CLOSED (2026-09-18).** `ConversationListItem` (контакт, канал, превью, `activeRisks`, `externalLink`), фильтры `search` (имя/телефон/почта, ≤ 100, экранирование), `withRisk`, `locationId`, `connectionId`, `status`; курсор привязан к фильтрам; тест `TestConversationListFiltersSearchRisksAndCursor` (ADR 0044). Исходное описание: List возвращает только `Conversation`: нет Contact,
 preview, channel display и active-risk flag. Query не поддерживает search или
 «С риском». Локальный поиск по одной загруженной странице вводит в заблуждение;
 detail per row создаёт N+1.
@@ -126,7 +127,7 @@ detail per row создаёт N+1.
 <a id="gap-api-006"></a>
 ### GAP-API-006 — отсутствует безопасный deeplink во внешний диалог
 
-**P1 · DECISION_REQUIRED.** Product boundary требует отвечать в Telegram, но
+**P1 · CLOSED (2026-09-18).** Решение ADR 0044: `externalLink {url, kind, unavailableReason}` строит сервер по единственной схеме `tg://user?id=<число>` (Telegram); иначе `PROVIDER_UNSUPPORTED`/`IDENTITY_UNKNOWN`; клиент записывает `OPEN_CONVERSATION` явно после перехода. Исходное описание: Product boundary требует отвечать в Telegram, но
 Conversation API не возвращает allowlisted URL, а `externalId` непрозрачен и не
 может становиться URL. Endpoint отправки сообщений намеренно отсутствует.
 
@@ -139,7 +140,7 @@ connector/security.
 <a id="gap-api-007"></a>
 ### GAP-API-007 — Analytics API уже макета
 
-**P1 · READY_FOR_FIX.** API отдаёт один aggregate snapshot, но лист 07 показывает
+**P1 · CLOSED (2026-09-18).** `AnalyticsSummary.series` (дни в timezone организации, нули заполнены) и `attribution` (RECOVERED/ORGANIC/UNKNOWN); `GET /analytics/payments` с курсором внутри окна, все валюты построчно; возвратов в модели нет; тесты store и `TestAnalyticsSummaryMatchesRawDomainData`. Исходное описание: API отдаёт один aggregate snapshot, но лист 07 показывает
 суточный series, список последних подтверждений и полное разделение
 `RECOVERED|ORGANIC|UNKNOWN`. Эти данные нельзя восстановить из totals.
 
@@ -152,7 +153,7 @@ refund semantics, limits/cursor. Обновить OpenAPI/docs/tests. **Safe int
 <a id="gap-api-008"></a>
 ### GAP-API-008 — нет HTTP API команды
 
-**P1 · DECISION_REQUIRED.** Макет имеет members/roles/actions; backend
+**P1 · CLOSED (2026-09-18).** Решение ADR 0045: одноразовые коды приглашения (без email, SHA-256, 7 дней), `GET /organization/members`, `PATCH`/`DELETE …/members/{userId}`, `GET`/`POST /organization/invitations`, `DELETE …/invitations/{id}`, `POST /invitations/accept` без tenant header; защита последнего OWNER (`409 LAST_OWNER`), восстановление `DISABLED`, аудит; миграция `000022`; тесты `TestPostgresTeamInvitationsAndOnboardingUnderRLS`, `TestOnboardingTeamAndSecureConnectThroughAPI`. Исходное описание: Макет имеет members/roles/actions; backend
 application layer содержит AddMember, но public routes, list schema, invitation
 lifecycle, role update/revoke отсутствуют.
 
@@ -165,7 +166,7 @@ email-enumeration. Затем routes/OpenAPI/tests. **Safe interim:** route ск
 <a id="gap-api-009"></a>
 ### GAP-API-009 — нет авторитетного onboarding completion/resume state
 
-**P1 · DECISION_REQUIRED.** Наличие Organization/Location/Service не определяет,
+**P1 · CLOSED (2026-09-18).** Решение ADR 0045: `GET /organization/onboarding` выводит статус из данных (обязательны организация, точка с полным графиком, активная услуга, не отключённый канал; Telegram-привязка необязательна); существующие организации получают статус без миграции. Исходное описание: Наличие Organization/Location/Service не определяет,
 обязателен ли source, можно ли skip Telegram и какой шаг пользователь завершил.
 LocalStorage не годится как источник истины между устройствами/users.
 
@@ -177,7 +178,7 @@ LocalStorage не годится как источник истины между
 <a id="gap-api-010"></a>
 ### GAP-API-010 — source connect и health требуют security/UX решения
 
-**P0 · DECISION_REQUIRED.** Current connect принимает webhook secret и для
+**P0 · CLOSED (2026-09-18).** Решение ADR 0045: секрет webhook выпускает сервер (`webhookSecret?` в запросе, показ один раз в `ConnectedChannel`); одноразовая передача bot token из браузера по TLS принята для MVP (шифрование с привязкой, без возврата и логов); live probe — `POST …/health/check` с `verification: REMOTE|LOCAL`. Исходное описание: Current connect принимает webhook secret и для
 `CONNECTED_BUSINESS_BOT` bot token из browser; runbook рекомендует безопасную
 provisioning boundary. Health GET читает persisted state, но макетная кнопка
 «Проверить связь» предполагает активный probe.
@@ -204,7 +205,7 @@ persisted health с честной подписью; production secret form не
 <a id="gap-api-012"></a>
 ### GAP-API-012 — Manager не может получить имя услуги для Risk
 
-**P1 · READY_FOR_FIX.** `GET /services` требует `service.manage` (OWNER), Manager
+**P1 · CLOSED (2026-09-18).** Снимок услуги (`service {id, name, active}`) и `opportunity.serviceId` входят в `RiskDetail` для любого читателя Radar; отдельное право `service.read` не вводится, каталог остаётся за `service.manage` (ADR 0044). Исходное описание: `GET /services` требует `service.manage` (OWNER), Manager
 имеет `risks.read/manage`, а Risk read model не содержит service name/id.
 Следовательно, целевой Risk context для основной операционной роли недоступен.
 
@@ -228,7 +229,7 @@ in-app центр; значение preference можно редактирова
 <a id="gap-api-016"></a>
 ### GAP-API-016 — видимость денег у Manager не согласована между permissions
 
-**P1 · DECISION_REQUIRED.** Manager не имеет `revenue.read`/`analytics.read`, но
+**P1 · CLOSED (2026-09-18).** Политика ADR 0044: суммы карточки риска и сводки Radar видны любому обладателю `risks.read` (включая MANAGER); `revenue.read`/`analytics.read` охраняют только организационные итоги; ролевой тест `TestFrontendReadModelsThroughAPI`. Исходное описание: Manager не имеет `revenue.read`/`analytics.read`, но
 имеет `risks.read` и `revenue.confirm`; Radar summary и RiskDetail через
 `risks.read` могут вернуть potential/confirmedRecovered amounts.
 
@@ -242,7 +243,7 @@ authorization/Risk backend.
 <a id="gap-contract-017"></a>
 ### GAP-CONTRACT-017 — documented Revenue conflict уже runtime semantics
 
-**P2 · READY_FOR_FIX.** OpenAPI description для revenue `409` говорит только об
+**P2 · CLOSED (2026-09-18).** Ответ `409` `POST /opportunities/{id}/revenue` описывает оба кода (`IDEMPOTENCY_CONFLICT`, `RECOVERED_ALREADY_ATTRIBUTED`) в OpenAPI и docs. Исходное описание: OpenAPI description для revenue `409` говорит только об
 idempotency key mismatch, но backend docs/runtime также имеют
 `RECOVERED_ALREADY_ATTRIBUTED`. Generated documentation не подсказывает UI
 различить исправимый attribution conflict.
@@ -255,7 +256,7 @@ API contract.
 <a id="gap-contract-019"></a>
 ### GAP-CONTRACT-019 — `active` при создании Location принимается и игнорируется
 
-**P2 · READY_FOR_FIX.** Backend prose перечисляет optional `active?` в create,
+**P2 · CLOSED (2026-09-18).** Выбран контракт «всегда active при создании»: `POST /locations` с полем `active` отвечает `400 INVALID_ARGUMENT`; prose обновлён; тест в `TestOnboardingTeamAndSecureConnectThroughAPI`. Исходное описание: Backend prose перечисляет optional `active?` в create,
 общий runtime decoder принимает поле, но `createLocation` не передаёт его в
 application service и новая точка всегда active. OpenAPI справедливо не
 объявляет поле, однако три источника расходятся, а неизвестное ожидание клиента
@@ -270,7 +271,7 @@ interim:** frontend не отправляет `active` при POST и меняе
 <a id="gap-reliability-020"></a>
 ### GAP-RELIABILITY-020 — SSE может потерять сигнал без resync marker
 
-**P1 · DECISION_REQUIRED.** SSE намеренно не имеет replay, PostgreSQL NOTIFY
+**P1 · CLOSED (2026-09-18).** Решение ADR 0044: при переполнении буфера подписчика сервер отбрасывает сигналы и посылает `resync.required` (`{"reason":"BUFFER_OVERFLOW"}`); `503 UNAVAILABLE` описан в OpenAPI; тест `TestSSEEmitsResyncMarkerWhenSubscriberBufferOverflows`. Исходное описание: SSE намеренно не имеет replay, PostgreSQL NOTIFY
 best-effort, а заполненный buffer подписчика молча отбрасывает signal. Текущий
 client узнаёт о потере только при разрыве/reconnect; живое соединение может
 оставить долгий Radar snapshot устаревшим.
@@ -285,7 +286,7 @@ window focus/online/manual refresh и явное время snapshot; SSE ост
 <a id="gap-contract-021"></a>
 ### GAP-CONTRACT-021 — named Action/Outcome permissions не являются runtime gate
 
-**P2 · DECISION_REQUIRED.** Role map объявляет `action.manage` и
+**P2 · CLOSED (2026-09-18).** Runtime применяет отдельные gates: `action.manage` для действий, `outcome.manage` для исходов, `risks.manage` для рекомендации; карта ролей не изменилась; тест `TestCorrectivePermissionsAreSeparateGates` (ADR 0044). Исходное описание: Role map объявляет `action.manage` и
 `outcome.manage`, но corrective service проверяет `risks.manage` для
 Recommendation, Action и Outcome. Сегодня OWNER/MANAGER имеют все эти права,
 поэтому расхождение скрыто, но будущая роль получит неоднозначный доступ.
@@ -361,7 +362,10 @@ flowchart TD
 
 Valid OpenAPI/tenant/schema — первая волна. После неё независимы read models,
 analytics, team, onboarding, integration security и design tracks. Frontend
-feature не меняет статус `OPEN` сам по себе.
+feature не меняет статус `OPEN` сам по себе. По состоянию на 18 сентября 2026
+года все API/contract/reliability разрывы этой схемы закрыты на стороне сервера
+(ADR 0044, ADR 0045); открытыми остаются GAP-API-013 (P2, решение о in-app
+feed) и design gaps 014/015/018.
 
 <a id="gap-closure-checklist"></a>
 ## 6. Checklist закрытия gap

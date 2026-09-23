@@ -53,8 +53,8 @@ fixture matrix. Backend-окружение описано в
 - `Retry-After` seconds разбирается с bounded fallback;
 - unknown enum/error/event не падает и не раскрывает raw content;
 - GET retry policy не повторяет 4xx, mutation не повторяется без разрешения.
-- focus/online resync работает даже без SSE disconnect; переполнение/lost
-  signal покрыто принятой стратегией GAP-RELIABILITY-020.
+- focus/online resync работает даже без SSE disconnect; переполнение буфера
+  обрабатывается событием `resync.required` (GAP-RELIABILITY-020 закрыт).
 
 ### 3.2. Деньги
 
@@ -125,10 +125,12 @@ unmount.
 - Contract fixture проходит schema validation для success и Error envelope.
 - Тест отдельно удерживает временные adapters для известных gaps; после
   исправления OpenAPI тест требует удалить adapter.
-- Нормативные header tests обязаны обнаружить текущий missing `X-Tenant-ID` в
-  Risk/SSE schema до закрытия [GAP-CONTRACT-001](08-readiness-gaps.md#gap-contract-001).
-- Runtime smoke сверяет `Risk.source=MANUAL`, optional RiskDetail relations и
-  nullable `nextCursor` до закрытия GAP-CONTRACT-002.
+- Нормативные header tests подтверждают `X-Tenant-ID` во всех Risk/SSE
+  операциях сгенерированного клиента ([GAP-CONTRACT-001](08-readiness-gaps.md#gap-contract-001)
+  закрыт; временный allowlist-interceptor удаляется).
+- Runtime smoke сверяет `Risk.source=MANUAL`, явные `null` у relations
+  `RiskDetail` и nullable `nextCursor` (GAP-CONTRACT-002 закрыт; adapter,
+  принимавший отсутствующие поля, удаляется).
 
 Contract mock не должен содержать дополнительные поля только потому, что они
 нужны макету. Для них сначала меняется backend contract.

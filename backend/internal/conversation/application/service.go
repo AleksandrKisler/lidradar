@@ -3,7 +3,9 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -66,33 +68,40 @@ func (service Service) IngestCanonical(ctx context.Context, event connectordomai
 	return nil
 }
 
-// ConversationPage — страница переписок с непрозрачным продолжением.
+// ConversationPage — страница списка переписок с непрозрачным продолжением.
+// Курсор привязан к набору фильтров: с другими фильтрами он отвергается.
 type ConversationPage struct {
-	Items      []domain.Conversation `json:"items"`
-	NextCursor *string               `json:"nextCursor"`
+	Items      []domain.ConversationListItem `json:"items"`
+	NextCursor *string                       `json:"nextCursor"`
 }
 
-func (service Service) List(
-	ctx context.Context,
-	actorID, tenantID string,
-	limit int,
-	cursor string,
-) (ConversationPage, error) {
+// ListQuery — фильтры и пагинация списка переписок.
+type ListQuery struct {
+	Filter domain.ListFilter
+	Limit  int
+	Cursor string
+}
+
+func (service Service) List(ctx context.Context, actorID, tenantID string, query ListQuery) (ConversationPage, error) {
 	if err := service.requireRead(ctx, actorID, tenantID); err != nil {
 		return ConversationPage{}, err
 	}
-	limit, pageCursor, err := pagination(limit, cursor)
+	query.Filter.Search = strings.Join(strings.Fields(query.Filter.Search), " ")
+	if err := query.Filter.Validate(); err != nil {
+		return ConversationPage{}, ErrInvalid
+	}
+	limit, pageCursor, err := pagination(query.Limit, query.Cursor, query.Filter.Key())
 	if err != nil {
 		return ConversationPage{}, err
 	}
-	items, more, err := service.repository.List(ctx, tenantID, limit, pageCursor)
+	items, more, err := service.repository.List(ctx, tenantID, query.Filter, limit, pageCursor)
 	if err != nil {
 		return ConversationPage{}, mapDomainError(err)
 	}
 	if items == nil {
-		items = []domain.Conversation{}
+		items = []domain.ConversationListItem{}
 	}
-	return ConversationPage{Items: items, NextCursor: conversationCursor(items, more)}, nil
+	return ConversationPage{Items: items, NextCursor: conversationCursor(items, more, query.Filter.Key())}, nil
 }
 
 func (service Service) Detail(
@@ -133,7 +142,7 @@ func (service Service) Messages(
 	if strings.TrimSpace(conversationID) == "" {
 		return MessagePage{}, ErrInvalid
 	}
-	limit, pageCursor, err := pagination(limit, cursor)
+	limit, pageCursor, err := pagination(limit, cursor, "")
 	if err != nil {
 		return MessagePage{}, err
 	}
@@ -220,9 +229,12 @@ func mapCanonical(event connectordomain.CanonicalEvent) (domain.CanonicalChange,
 type encodedCursor struct {
 	At string `json:"at"`
 	ID string `json:"id"`
+	// F — отпечаток фильтров, с которыми выдан курсор; курсор без фильтров
+	// (сообщения, список без параметров) поля не имеет.
+	F string `json:"f,omitempty"`
 }
 
-func pagination(limit int, cursor string) (int, *domain.PageCursor, error) {
+func pagination(limit int, cursor, filterKey string) (int, *domain.PageCursor, error) {
 	if limit == 0 {
 		limit = defaultLimit
 	}
@@ -237,7 +249,7 @@ func pagination(limit int, cursor string) (int, *domain.PageCursor, error) {
 		return 0, nil, ErrInvalid
 	}
 	var value encodedCursor
-	if json.Unmarshal(decoded, &value) != nil || value.ID == "" {
+	if json.Unmarshal(decoded, &value) != nil || value.ID == "" || value.F != cursorFingerprint(filterKey) {
 		return 0, nil, ErrInvalid
 	}
 	at, err := time.Parse(time.RFC3339Nano, value.At)
@@ -247,12 +259,12 @@ func pagination(limit int, cursor string) (int, *domain.PageCursor, error) {
 	return limit, &domain.PageCursor{At: at.UTC(), ID: value.ID}, nil
 }
 
-func conversationCursor(items []domain.Conversation, more bool) *string {
+func conversationCursor(items []domain.ConversationListItem, more bool, filterKey string) *string {
 	if !more || len(items) == 0 {
 		return nil
 	}
-	last := items[len(items)-1]
-	return encodeCursor(last.UpdatedAt, last.ID)
+	last := items[len(items)-1].Conversation
+	return encodeCursor(last.UpdatedAt, last.ID, filterKey)
 }
 
 func messageCursor(items []domain.MessageView, more bool) *string {
@@ -260,13 +272,23 @@ func messageCursor(items []domain.MessageView, more bool) *string {
 		return nil
 	}
 	last := items[len(items)-1].Message
-	return encodeCursor(last.SentAt, last.ID)
+	return encodeCursor(last.SentAt, last.ID, "")
 }
 
-func encodeCursor(at time.Time, id string) *string {
-	encoded, _ := json.Marshal(encodedCursor{At: at.UTC().Format(time.RFC3339Nano), ID: id})
+func encodeCursor(at time.Time, id, filterKey string) *string {
+	encoded, _ := json.Marshal(encodedCursor{At: at.UTC().Format(time.RFC3339Nano), ID: id, F: cursorFingerprint(filterKey)})
 	value := base64.RawURLEncoding.EncodeToString(encoded)
 	return &value
+}
+
+// cursorFingerprint не раскрывает фильтры в курсоре; курсор сообщений
+// (пустой ключ) отпечатка не имеет.
+func cursorFingerprint(filterKey string) string {
+	if filterKey == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(filterKey))
+	return hex.EncodeToString(digest[:8])
 }
 
 func cleanOptional(value *string) *string {

@@ -143,10 +143,13 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	filters := filtersFrom(r)
+	filters, err := filtersFrom(r)
+	if err != nil {
+		writeError(w, r, 400, "INVALID_ARGUMENT", err.Error())
+		return
+	}
 	page, err := h.radar.List(r.Context(), a, t, application.ListQuery{
-		Filters: filters, Status: domain.Status(r.URL.Query().Get("status")),
-		Limit: limit, After: r.URL.Query().Get("cursor"),
+		Filters: filters, Limit: limit, After: r.URL.Query().Get("cursor"),
 	})
 	if handleError(w, r, err) {
 		return
@@ -169,7 +172,12 @@ func (h Handler) summary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s, err := h.radar.Summary(r.Context(), a, t, filtersFrom(r))
+	filters, err := filtersFrom(r)
+	if err != nil {
+		writeError(w, r, 400, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	s, err := h.radar.Summary(r.Context(), a, t, filters)
 	if handleError(w, r, err) {
 		return
 	}
@@ -191,12 +199,47 @@ func (h Handler) command(w http.ResponseWriter, r *http.Request, fn func(context
 	writeJSON(w, 200, risk)
 }
 
-func filtersFrom(r *http.Request) application.Filters {
-	return application.Filters{
-		LocationID: r.URL.Query().Get("locationId"),
-		Severity:   domain.Severity(r.URL.Query().Get("severity")),
-		RiskType:   domain.Type(r.URL.Query().Get("riskType")),
+var (
+	errInvalidStatus  = errors.New("invalid status")
+	errInvalidActive  = errors.New("invalid active")
+	errStatusConflict = errors.New("status and active are mutually exclusive")
+)
+
+// filtersFrom читает общие фильтры списка и сводки. Статусы принимаются
+// повторяющимся параметром status и/или через запятую; active=true — краткая
+// запись активных статусов (OPEN, ACKNOWLEDGED, ACTED), active=false —
+// терминальных. Одновременно status и active не принимаются.
+func filtersFrom(r *http.Request) (application.Filters, error) {
+	query := r.URL.Query()
+	filters := application.Filters{
+		LocationID: query.Get("locationId"),
+		Severity:   domain.Severity(query.Get("severity")),
+		RiskType:   domain.Type(query.Get("riskType")),
 	}
+	for _, raw := range query["status"] {
+		for _, value := range strings.Split(raw, ",") {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return application.Filters{}, errInvalidStatus
+			}
+			filters.Statuses = append(filters.Statuses, domain.Status(value))
+		}
+	}
+	switch active := query.Get("active"); active {
+	case "":
+	case "true", "false":
+		if len(filters.Statuses) > 0 {
+			return application.Filters{}, errStatusConflict
+		}
+		if active == "true" {
+			filters.Statuses = domain.ActiveStatuses()
+		} else {
+			filters.Statuses = domain.TerminalStatuses()
+		}
+	default:
+		return application.Filters{}, errInvalidActive
+	}
+	return filters, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
