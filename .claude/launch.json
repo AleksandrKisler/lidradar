@@ -6,6 +6,15 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "docs/notion"],
       "port": 8765
+    },
+    {
+      "name": "web-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd \"$HOME/WebstormProjects/Lidradar\" && export PATH=\"$HOME/.nvm/versions/node/v24.19.0/bin:$PATH\" && npm run dev"
+      ],
+      "port": 5173
     }
   ]
 }

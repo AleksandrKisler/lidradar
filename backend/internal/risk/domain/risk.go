@@ -54,6 +54,9 @@ const (
 
 type Source string
 
+// Source сообщает, кто породил риск. Правила и AI-подтверждение — машинные
+// источники; MANUAL создаёт человек (или учебные данные стенда), поэтому у
+// него нет AI-полей, но остаются правила соответствия типа и серьёзности.
 const (
 	SourceRule   Source = "RULE"
 	SourceHybrid Source = "HYBRID"
@@ -219,7 +222,10 @@ func (r Risk) Validate() error {
 	if r.Type == TypeBookingNotConfirmed && r.Severity != SeverityCritical {
 		return ErrInvalidRisk
 	}
-	if r.Type == TypePromiseNotFulfilled && (r.Severity != SeverityHigh || r.Source != SourceHybrid) {
+	// Автоматически обещание распознаёт только гибридный контур; вручную
+	// такой риск вправе завести человек.
+	if r.Type == TypePromiseNotFulfilled &&
+		(r.Severity != SeverityHigh || (r.Source != SourceHybrid && r.Source != SourceManual)) {
 		return ErrInvalidRisk
 	}
 	if r.Type == TypeCustomerSilentAfterPrice && r.Severity != SeverityMedium && r.Severity != SeverityHigh {
@@ -229,7 +235,7 @@ func (r Risk) Validate() error {
 		return ErrInvalidRisk
 	}
 	switch r.Source {
-	case SourceRule:
+	case SourceRule, SourceManual:
 		if r.Confidence != nil || r.AIRunID != nil {
 			return ErrInvalidRisk
 		}

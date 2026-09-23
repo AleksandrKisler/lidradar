@@ -559,7 +559,8 @@ func scanRankedDetail(row riskRow) (rankedDetail, error) {
 		return rankedDetail{}, err
 	}
 	if risk.Validate() != nil {
-		return rankedDetail{}, domain.ErrInvalidRisk
+		// Идентификатор нужен в логах: без него 500 на Radar нечем расследовать.
+		return rankedDetail{}, fmt.Errorf("риск %s: %w", risk.ID, domain.ErrInvalidRisk)
 	}
 	opportunity.LocationID = risk.LocationID
 	if potentialRevenue != "" {

@@ -196,7 +196,7 @@ func scanRisk(row riskRow) (domain.Risk, error) {
 		return domain.Risk{}, err
 	}
 	if risk.Validate() != nil {
-		return domain.Risk{}, domain.ErrInvalidRisk
+		return domain.Risk{}, fmt.Errorf("риск %s: %w", risk.ID, domain.ErrInvalidRisk)
 	}
 	return risk, nil
 }

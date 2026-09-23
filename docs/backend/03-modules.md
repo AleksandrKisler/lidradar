@@ -301,7 +301,7 @@ JSON-объект; текст — валидный UTF-8 без `\x00`; внеш
 
 **Типы, важность, статусы.** Пять типов; важность по типу ограничена:
 `NO_RESPONSE` → `HIGH`/`CRITICAL`; `BOOKING_NOT_CONFIRMED` → `CRITICAL`;
-`PROMISE_NOT_FULFILLED` → `HIGH` и только `HYBRID`; `CUSTOMER_SILENT_AFTER_PRICE`
+`PROMISE_NOT_FULFILLED` → `HIGH` и только `HYBRID` (или `MANUAL`, когда риск заводит человек); `CUSTOMER_SILENT_AFTER_PRICE`
 → `MEDIUM`/`HIGH`; `FOLLOW_UP_CANDIDATE` → `MEDIUM`. Источник `RULE` без
 уверенности и прогона, `HYBRID` с уверенностью 0…1 и `ai_run_id`. Активные
 статусы `OPEN`/`ACKNOWLEDGED`/`ACTED`; закрывающие `RESOLVED`, `FALSE_POSITIVE`,

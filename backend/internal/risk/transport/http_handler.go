@@ -14,6 +14,7 @@ import (
 	"lidradar/backend/internal/risk/application"
 	"lidradar/backend/internal/risk/domain"
 	httpplatform "lidradar/backend/platform/http"
+	"lidradar/backend/platform/observability"
 )
 
 // PrincipalResolver is implemented by the identity transport. Authentication
@@ -260,6 +261,11 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case errors.Is(err, application.ErrInvalidCommand):
 		writeError(w, r, 400, "INVALID_ARGUMENT", "invalid request")
 	default:
+		// Клиент получает только конверт с traceId; причина остаётся в логах,
+		// иначе 500 на стенде и в production нечем расследовать.
+		observability.Logger(r.Context()).ErrorContext(r.Context(), "Risk request failed",
+			"event", "risk.request.failed", "method", r.Method, "path", r.URL.Path,
+			"trace_id", httpplatform.TraceID(r.Context()), "error", err.Error())
 		writeError(w, r, 500, "INTERNAL_ERROR", "internal error")
 	}
 	return true

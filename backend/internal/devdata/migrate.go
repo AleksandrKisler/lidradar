@@ -21,6 +21,11 @@ import (
 )
 
 const Version = "frontend-v1"
+
+// SchemaVersion — последняя миграция схемы, на которой проверен набор.
+// Миграция 000022 добавила только таблицу приглашений с RLS; набор её не
+// заполняет, поэтому проверен без изменений содержимого.
+const SchemaVersion = "000022_membership_invitations"
 const DatabaseName = "lidradar_frontend"
 
 //go:embed migrations/*.sql
@@ -98,8 +103,8 @@ func Run(ctx context.Context, pool *pgxpool.Pool, environment config.Environment
 	if err != nil {
 		return Result{}, errors.New("сначала примените обычные миграции текущей сборки")
 	}
-	if state.Latest != "000021_auth_audit" {
-		return Result{}, errors.New("набор frontend-v1 рассчитан на схему по 000021_auth_audit; для новой схемы обновите и проверьте версию учебной миграции")
+	if state.Latest != SchemaVersion {
+		return Result{}, errors.New("набор frontend-v1 рассчитан на схему по " + SchemaVersion + "; для новой схемы обновите и проверьте версию учебной миграции")
 	}
 	up, err := files.ReadFile("migrations/000001_frontend.up.sql")
 	if err != nil {
