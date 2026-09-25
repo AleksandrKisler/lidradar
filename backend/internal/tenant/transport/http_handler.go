@@ -13,6 +13,7 @@ import (
 	"lidradar/backend/internal/tenant/application"
 	"lidradar/backend/internal/tenant/domain"
 	httpplatform "lidradar/backend/platform/http"
+	"lidradar/backend/platform/ids"
 )
 
 type UserResolver interface {
@@ -361,12 +362,16 @@ func (handler Handler) updateLocation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	locationID, ok := pathID(w, r, "locationID")
+	if !ok {
+		return
+	}
 	var request locationRequest
 	if httpplatform.DecodeJSON(w, r, &request) != nil {
 		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
 		return
 	}
-	location, err := handler.service.UpdateLocation(r.Context(), actorID, tenantID, chi.URLParam(r, "locationID"), application.LocationUpdate{
+	location, err := handler.service.UpdateLocation(r.Context(), actorID, tenantID, locationID, application.LocationUpdate{
 		Name: request.Name, Timezone: request.Timezone,
 		ResponseThresholdMinutes: request.ResponseThresholdMinutes, Active: request.Active,
 	})
@@ -393,6 +398,10 @@ func (handler Handler) replaceBusinessHours(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	locationID, ok := pathID(w, r, "locationID")
+	if !ok {
+		return
+	}
 	var request businessHoursRequest
 	if httpplatform.DecodeJSON(w, r, &request) != nil {
 		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
@@ -402,7 +411,7 @@ func (handler Handler) replaceBusinessHours(w http.ResponseWriter, r *http.Reque
 	for _, day := range request.Days {
 		days = append(days, application.BusinessHourInput{Weekday: day.Weekday, Closed: day.Closed, OpensAt: day.OpensAt, ClosesAt: day.ClosesAt})
 	}
-	location, err := handler.service.ReplaceBusinessHours(r.Context(), actorID, tenantID, chi.URLParam(r, "locationID"), request.Timezone, days)
+	location, err := handler.service.ReplaceBusinessHours(r.Context(), actorID, tenantID, locationID, request.Timezone, days)
 	if handleError(w, r, err) {
 		return
 	}
@@ -472,4 +481,16 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	httpplatform.WriteError(w, r, status, code, message, nil)
+}
+
+// pathID читает идентификатор из пути и отклоняет значение не в формате UUID
+// ответом 400 до обращения к сервису: иначе оно дошло бы до PostgreSQL и
+// вернулось бы как 500.
+func pathID(w http.ResponseWriter, r *http.Request, name string) (string, bool) {
+	value := chi.URLParam(r, name)
+	if !ids.Valid(value) {
+		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
+		return "", false
+	}
+	return value, true
 }

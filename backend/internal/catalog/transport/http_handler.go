@@ -13,6 +13,7 @@ import (
 	"lidradar/backend/internal/catalog/application"
 	"lidradar/backend/internal/catalog/domain"
 	httpplatform "lidradar/backend/platform/http"
+	"lidradar/backend/platform/ids"
 )
 
 type UserResolver interface {
@@ -123,12 +124,16 @@ func (handler Handler) update(w http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
+	itemID, ok := pathID(w, request, "serviceID")
+	if !ok {
+		return
+	}
 	var body updateRequest
 	if httpplatform.DecodeJSON(w, request, &body) != nil {
 		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
 		return
 	}
-	item, err := handler.service.Update(request.Context(), actorID, tenantID, chi.URLParam(request, "serviceID"), application.UpdateCommand{
+	item, err := handler.service.Update(request.Context(), actorID, tenantID, itemID, application.UpdateCommand{
 		Name:       body.Name,
 		LocationID: application.OptionalString{Set: body.LocationID.Set, Value: body.LocationID.Value},
 		PriceFrom:  application.OptionalString{Set: body.PriceFrom.Set, Value: body.PriceFrom.Value},
@@ -147,10 +152,26 @@ func (handler Handler) deactivate(w http.ResponseWriter, request *http.Request) 
 	if !ok {
 		return
 	}
-	if handleError(w, request, handler.service.Deactivate(request.Context(), actorID, tenantID, chi.URLParam(request, "serviceID"))) {
+	itemID, ok := pathID(w, request, "serviceID")
+	if !ok {
+		return
+	}
+	if handleError(w, request, handler.service.Deactivate(request.Context(), actorID, tenantID, itemID)) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// pathID читает идентификатор из пути и отклоняет значение не в формате UUID
+// ответом 400 до обращения к сервису: иначе оно дошло бы до PostgreSQL и
+// вернулось бы как 500.
+func pathID(w http.ResponseWriter, request *http.Request, name string) (string, bool) {
+	value := chi.URLParam(request, name)
+	if !ids.Valid(value) {
+		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
+		return "", false
+	}
+	return value, true
 }
 
 func (handler Handler) principal(w http.ResponseWriter, request *http.Request) (string, string, bool) {

@@ -100,7 +100,11 @@ func (handler Handler) checkHealth(w http.ResponseWriter, request *http.Request)
 	if !ok {
 		return
 	}
-	check, err := handler.service.CheckHealth(request.Context(), actorID, tenantID, chi.URLParam(request, "connectionID"))
+	connectionID, ok := pathID(w, request, "connectionID")
+	if !ok {
+		return
+	}
+	check, err := handler.service.CheckHealth(request.Context(), actorID, tenantID, connectionID)
 	if handleError(w, request, err) {
 		return
 	}
@@ -127,7 +131,11 @@ func (handler Handler) health(w http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	health, err := handler.service.Health(request.Context(), actorID, tenantID, chi.URLParam(request, "connectionID"))
+	connectionID, ok := pathID(w, request, "connectionID")
+	if !ok {
+		return
+	}
+	health, err := handler.service.Health(request.Context(), actorID, tenantID, connectionID)
 	if handleError(w, request, err) {
 		return
 	}
@@ -139,15 +147,27 @@ func (handler Handler) disconnect(w http.ResponseWriter, request *http.Request) 
 	if !ok {
 		return
 	}
-	if handleError(w, request, handler.service.Disconnect(
-		request.Context(), actorID, tenantID, chi.URLParam(request, "connectionID"),
-	)) {
+	connectionID, ok := pathID(w, request, "connectionID")
+	if !ok {
+		return
+	}
+	if handleError(w, request, handler.service.Disconnect(request.Context(), actorID, tenantID, connectionID)) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (handler Handler) receive(w http.ResponseWriter, request *http.Request) {
+	// Формат идентификаторов проверяется до чтения тела: неверный путь не должен
+	// доходить ни до хранилища, ни до разбора полезной нагрузки.
+	tenantID, ok := pathID(w, request, "tenantID")
+	if !ok {
+		return
+	}
+	connectionID, ok := pathID(w, request, "connectionID")
+	if !ok {
+		return
+	}
 	payload, err := io.ReadAll(http.MaxBytesReader(w, request.Body, maxWebhookBody))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
@@ -158,13 +178,9 @@ func (handler Handler) receive(w http.ResponseWriter, request *http.Request) {
 		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
 		return
 	}
-	ctx := request.Context()
-	if tenantID := chi.URLParam(request, "tenantID"); ids.Valid(tenantID) {
-		ctx = tenantctx.WithTenant(ctx, tenantID)
-	}
+	ctx := tenantctx.WithTenant(request.Context(), tenantID)
 	receipt, err := handler.service.Receive(
-		ctx, chi.URLParam(request, "provider"), chi.URLParam(request, "tenantID"),
-		chi.URLParam(request, "connectionID"), payload, request.Header,
+		ctx, chi.URLParam(request, "provider"), tenantID, connectionID, payload, request.Header,
 	)
 	if handleError(w, request, err) {
 		return
@@ -219,6 +235,18 @@ func handleError(w http.ResponseWriter, request *http.Request, err error) bool {
 
 func writeError(w http.ResponseWriter, request *http.Request, status int, code, message string) {
 	httpplatform.WriteError(w, request, status, code, message, nil)
+}
+
+// pathID читает идентификатор из пути и отклоняет значение не в формате UUID
+// ответом 400 до обращения к сервису: иначе оно дошло бы до PostgreSQL и
+// вернулось бы как 500.
+func pathID(w http.ResponseWriter, request *http.Request, name string) (string, bool) {
+	value := chi.URLParam(request, name)
+	if !ids.Valid(value) {
+		writeError(w, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
+		return "", false
+	}
+	return value, true
 }
 
 func optionalString(value *string) string {

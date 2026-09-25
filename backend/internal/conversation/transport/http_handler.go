@@ -104,9 +104,11 @@ func (handler Handler) detail(writer http.ResponseWriter, request *http.Request)
 	if !ok {
 		return
 	}
-	detail, err := handler.service.Detail(
-		request.Context(), actorID, tenantID, chi.URLParam(request, "conversationID"),
-	)
+	conversationID, ok := pathID(writer, request, "conversationID")
+	if !ok {
+		return
+	}
+	detail, err := handler.service.Detail(request.Context(), actorID, tenantID, conversationID)
 	if handleError(writer, request, err) {
 		return
 	}
@@ -118,13 +120,16 @@ func (handler Handler) messages(writer http.ResponseWriter, request *http.Reques
 	if !ok {
 		return
 	}
+	conversationID, ok := pathID(writer, request, "conversationID")
+	if !ok {
+		return
+	}
 	limit, ok := pageLimit(writer, request)
 	if !ok {
 		return
 	}
 	page, err := handler.service.Messages(
-		request.Context(), actorID, tenantID, chi.URLParam(request, "conversationID"),
-		limit, request.URL.Query().Get("cursor"),
+		request.Context(), actorID, tenantID, conversationID, limit, request.URL.Query().Get("cursor"),
 	)
 	if handleError(writer, request, err) {
 		return
@@ -188,4 +193,16 @@ func handleError(writer http.ResponseWriter, request *http.Request, err error) b
 
 func writeError(writer http.ResponseWriter, request *http.Request, status int, code, message string) {
 	httpplatform.WriteError(writer, request, status, code, message, nil)
+}
+
+// pathID читает идентификатор из пути и отклоняет значение не в формате UUID
+// ответом 400 до обращения к сервису: иначе оно дошло бы до PostgreSQL и
+// вернулось бы как 500.
+func pathID(writer http.ResponseWriter, request *http.Request, name string) (string, bool) {
+	value := chi.URLParam(request, name)
+	if !ids.Valid(value) {
+		writeError(writer, request, http.StatusBadRequest, "INVALID_ARGUMENT", "Некорректный идентификатор")
+		return "", false
+	}
+	return value, true
 }
