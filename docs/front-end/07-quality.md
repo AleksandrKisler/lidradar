@@ -254,8 +254,10 @@ smoke для login, Radar, Risk action, revenue dialog и settings form.
 - RTL не входит в MVP без отдельного требования, но layout не строится на
   несемантических space characters.
 
-До утверждения responsive designs действует blocker GAP-DESIGN-015 для
-визуальной приёмки, но semantic reflow tests проектируются сразу.
+Responsive-спецификация утверждена листами 29–31 комплекта v0.3
+([§7 карты макетов](06-design-map.md#responsive-spec); GAP-DESIGN-015 закрыт
+2026-09-25): визуальная приёмка сверяется с ними, семантические reflow-тесты —
+матрица `tests/e2e/responsive.spec.ts` веб-репозитория.
 
 <a id="security"></a>
 ## 11. Security и privacy tests

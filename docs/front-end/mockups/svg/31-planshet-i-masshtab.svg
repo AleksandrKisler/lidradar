@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180" fill="none" role="img" aria-labelledby="title desc"><title id="title">Планшет 768 и масштаб 200 %</title><desc id="desc">Планшет: боковая панель и одна колонка содержимого; 200 % масштаба: таблицы прокручиваются внутри области, действия не скрываются. Демонстрационные данные. Макет для планшета и масштаба 200 %.</desc><rect x="0" y="0" width="1440" height="1180" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(48 36) scale(1.0416666666666667)" fill="none" stroke="#6C55FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="82" y="55" font-family="Inter" font-size="21" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="48" y="126" font-family="Inter" font-size="30" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="1300">Планшет 768–1023 px и масштаб 200 %</text>
+<text id="text-4" x="48" y="160" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1300">Боковая панель 232 px появляется с 768 px; двухколоночные раскладки (диалоги, аналитика) — только с 1024 px.</text>
+<g transform="translate(48 200) scale(0.62)">
+<rect x="0" y="0" width="768" height="1024" rx="28" fill="#F5F7FB" stroke="#E1E7F0" stroke-width="2"/>
+<clipPath id="clip-31-planshet-i-masshtab-5"><rect x="0" y="0" width="768" height="1024" rx="28"/></clipPath>
+<g clip-path="url(#clip-31-planshet-i-masshtab-5)">
+<rect x="0" y="0" width="768" height="1024" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<rect x="0" y="0" width="232" height="1024" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-6" transform="translate(24 30) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-7" x="58" y="49" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-8" x="32" y="126" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Radar</text>
+<rect x="16" y="146" width="200" height="42" rx="10" fill="#1C2435" stroke="none" stroke-width="1"/>
+<text id="text-9" x="32" y="176" font-family="Inter" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="170">Диалоги</text>
+<text id="text-10" x="32" y="226" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Аналитика</text>
+<text id="text-11" x="32" y="276" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Интеграции</text>
+<text id="text-12" x="32" y="326" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Настройки</text>
+<rect x="232" y="0" width="536" height="72" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-13" x="264" y="30" font-family="Inter" font-size="10" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="300">DETAIL LAB</text>
+<text id="text-14" x="264" y="54" font-family="Inter" font-size="18" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="300">Диалоги</text>
+<text id="text-15" x="264" y="120" font-family="Inter" font-size="24" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="470">Контекст для следующего шага</text>
+<rect x="264" y="150" width="472" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-16" x="290" y="178" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="300">Поиск по имени</text>
+<rect x="264" y="214" width="472" height="72" rx="14" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-17" x="288" y="242" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="400">Дмитрий Соколов</text>
+<text id="text-18" x="288" y="264" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="400">Сколько стоит полировка кузова?</text>
+<rect x="264" y="298" width="472" height="72" rx="14" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-19" x="288" y="326" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="400">Елена Волкова</text>
+<text id="text-20" x="288" y="348" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="400">Спасибо, а что входит в комплекс?</text>
+<rect x="264" y="382" width="472" height="72" rx="14" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-21" x="288" y="410" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="400">Ольга Кузнецова</text>
+<text id="text-22" x="288" y="432" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="400">Оплатила, чек отправила</text>
+<rect x="264" y="480" width="472" height="140" rx="14" fill="#EDF6FF" stroke="none" stroke-width="1"/>
+<text id="text-23" x="288" y="516" font-family="Inter" font-size="14" font-weight="600" fill="#1768C6" text-anchor="start" data-max-width="420">Переписка открывается как отдельное состояние</text>
+<text id="text-24" x="288" y="544" font-family="Inter" font-size="12" font-weight="400" fill="#1768C6" text-anchor="start" data-max-width="420">На планшете двум колонкам тесно рядом с панелью:</text>
+<text id="text-25" x="288" y="562" font-family="Inter" font-size="12" font-weight="400" fill="#1768C6" text-anchor="start" data-max-width="420">список и переписка чередуются, «К списку» возвращает.</text>
+</g></g>
+<g transform="translate(560 200) scale(0.62)">
+<rect x="0" y="0" width="640" height="1024" rx="28" fill="#F5F7FB" stroke="#E1E7F0" stroke-width="2"/>
+<clipPath id="clip-31-planshet-i-masshtab-26"><rect x="0" y="0" width="640" height="1024" rx="28"/></clipPath>
+<g clip-path="url(#clip-31-planshet-i-masshtab-26)">
+<rect x="0" y="0" width="640" height="1024" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<rect x="0" y="0" width="640" height="64" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-27" x="20" y="26" font-family="Inter" font-size="9" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="220">DETAIL LAB</text>
+<text id="text-28" x="20" y="48" font-family="Inter" font-size="16" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="220">Команда</text>
+<rect x="560" y="16" width="60" height="32" rx="8" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-29" x="590" y="37" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="48">Меню</text>
+<text id="text-30" x="20" y="112" font-family="Inter" font-size="26" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="600">Команда и доступ</text>
+<rect x="20" y="140" width="600" height="540" rx="16" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-31" x="40" y="176" font-family="Inter" font-size="16" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="400">Участники компании</text>
+<rect x="40" y="200" width="560" height="420" rx="0" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-32" x="56" y="226" font-family="Inter" font-size="11" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="500">Область прокрутки · role=&quot;region&quot; · tabindex=&quot;0&quot;</text>
+<text id="text-33" x="56" y="262" font-family="Inter" font-size="9" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="200">СОТРУДНИК</text>
+<text id="text-34" x="356" y="262" font-family="Inter" font-size="9" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="100">РОЛЬ</text>
+<text id="text-35" x="460" y="262" font-family="Inter" font-size="9" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="100">ДОСТУП</text>
+<text id="text-36" x="56" y="302" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="290">Мария Владелец · вы</text>
+<text id="text-37" x="356" y="302" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="100">Владелец</text>
+<rect x="460" y="284" width="86" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-38" x="503" y="302" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="70">Активен</text>
+<line x1="56" y1="324" x2="584" y2="324" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-39" x="56" y="362" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="290">Анна Смирнова</text>
+<text id="text-40" x="356" y="362" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="100">Менеджер</text>
+<rect x="460" y="344" width="86" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-41" x="503" y="362" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="70">Активен</text>
+<line x1="56" y1="384" x2="584" y2="384" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-42" x="56" y="422" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="290">Пётр Бывший-Длиннофамильный</text>
+<text id="text-43" x="356" y="422" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="100">Менеджер</text>
+<rect x="460" y="404" width="96" height="28" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-44" x="508" y="422" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="80">Отозван</text>
+<line x1="56" y1="444" x2="584" y2="444" stroke="#E1E7F0" stroke-width="1"/>
+<rect x="56" y="560" width="528" height="8" rx="4" fill="#E3E8F0" stroke="none" stroke-width="1"/>
+<rect x="56" y="560" width="300" height="8" rx="4" fill="#B6BFD0" stroke="none" stroke-width="1"/>
+<text id="text-45" x="56" y="596" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="500">Горизонтальная прокрутка внутри области, не страницы</text>
+<text id="text-46" x="40" y="660" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="560">Кнопки действий остаются в строке; при отключённых кнопках область сама фокусируема.</text>
+<rect x="20" y="700" width="600" height="120" rx="16" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-47" x="40" y="736" font-family="Inter" font-size="16" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="400">Приглашения</text>
+<text id="text-48" x="40" y="770" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="400">Приглашений пока нет</text>
+</g></g>
+<text id="text-49" x="1000" y="236" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="392">Планшет 768–1023</text>
+<text id="text-50" x="1000" y="258" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">Панель навигации закреплена слева, содержимое — одна</text>
+<text id="text-51" x="1000" y="276" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">колонка. Диалоги: список и переписка чередуются как</text>
+<text id="text-52" x="1000" y="294" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">отдельные состояния. Аналитика и карточка риска: секции</text>
+<text id="text-53" x="1000" y="312" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">складываются вертикально.</text>
+<text id="text-54" x="1000" y="392" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="392">200 % масштаба (640 CSS px при 1280)</text>
+<text id="text-55" x="1000" y="414" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">Ширина области содержимого меньше 768: включается режим</text>
+<text id="text-56" x="1000" y="432" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">телефона с «Меню». Таблицы шире области получают</text>
+<text id="text-57" x="1000" y="450" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">собственную прокрутку с именем и фокусом; подписи полей и</text>
+<text id="text-58" x="1000" y="468" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">кнопки не скрываются.</text>
+<text id="text-59" x="1000" y="548" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="392">Проверка</text>
+<text id="text-60" x="1000" y="570" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">Матрица ширин включает 640 px как имитацию 200 %: без</text>
+<text id="text-61" x="1000" y="588" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">горизонтальной прокрутки страницы, действие видно, axe без</text>
+<text id="text-62" x="1000" y="606" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">нарушений. Уменьшение движения: анимации и переходы 0,01</text>
+<text id="text-63" x="1000" y="624" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">мс.</text>
+<text id="text-64" x="1000" y="690" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="392">Что не проектируется</text>
+<text id="text-65" x="1000" y="712" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">Отдельных макетов на 1024 и 1440 для планшета нет: с 1024</text>
+<text id="text-66" x="1000" y="730" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="392">px действуют десктопные листы 06–28.</text>
+<text id="text-67" x="48" y="1140" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="1340">Кадры: 768 × 1024 в масштабе 0,62 и 640 × 1024 (200 % от 1280) в масштабе 0,62. Токены и компоненты те же, что на листе 16.</text></svg>

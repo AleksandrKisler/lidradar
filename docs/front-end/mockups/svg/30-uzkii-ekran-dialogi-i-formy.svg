@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180" fill="none" role="img" aria-labelledby="title desc"><title id="title">Узкий экран · Диалоги и формы</title><desc id="desc">Список и переписка — отдельные состояния маршрута с возвратом; формы в одну колонку; диалоги на всю ширину минус отступ. Демонстрационные данные. Макет для телефона.</desc><rect x="0" y="0" width="1440" height="1180" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(48 36) scale(1.0416666666666667)" fill="none" stroke="#6C55FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="82" y="55" font-family="Inter" font-size="21" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="48" y="126" font-family="Inter" font-size="30" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="1300">Узкий экран · диалоги, формы и модальные окна</text>
+<text id="text-4" x="48" y="160" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1300">Список → переписка → «К списку»: два состояния одного маршрута вместо сжатия двух колонок.</text>
+<g transform="translate(48 200) scale(0.8)">
+<rect x="0" y="0" width="375" height="812" rx="28" fill="#F5F7FB" stroke="#E1E7F0" stroke-width="2"/>
+<clipPath id="clip-30-uzkii-ekran-dialogi-i-formy-5"><rect x="0" y="0" width="375" height="812" rx="28"/></clipPath>
+<g clip-path="url(#clip-30-uzkii-ekran-dialogi-i-formy-5)">
+<rect x="0" y="0" width="375" height="64" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-6" x="20" y="26" font-family="Inter" font-size="9" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="220">DETAIL LAB</text>
+<text id="text-7" x="20" y="48" font-family="Inter" font-size="16" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="220">Диалоги</text>
+<rect x="299" y="16" width="60" height="32" rx="8" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-8" x="329" y="37" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="48">Меню</text>
+<rect x="20" y="80" width="335" height="44" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-search-9" transform="translate(34 92) scale(0.75)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></g>
+<text id="text-10" x="60" y="108" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="240">Поиск по имени</text>
+<rect x="20" y="136" width="110" height="28" rx="14" fill="#F0EDFF" stroke="none" stroke-width="1"/>
+<text id="text-11" x="75" y="154" font-family="Inter" font-size="11" font-weight="600" fill="#5640D8" text-anchor="middle" data-max-width="94">Все диалоги</text>
+<rect x="138" y="136" width="96" height="28" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-12" x="186" y="154" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="80">С риском</text>
+<rect x="20" y="186" width="335" height="84" rx="14" fill="#FFFFFF" stroke="#6C55FF" stroke-width="1"/>
+<circle cx="46" cy="216" r="16" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-13" x="46" y="220" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="28">ДС</text>
+<text id="text-14" x="72" y="212" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="200">Дмитрий Соколов</text>
+<text id="text-15" x="72" y="232" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="260">Сколько стоит полировка…</text>
+<text id="text-16" x="72" y="254" font-family="Inter" font-size="10" font-weight="600" fill="#D22A25" text-anchor="start" data-max-width="200">Критично</text>
+<rect x="20" y="282" width="335" height="84" rx="14" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<circle cx="46" cy="312" r="16" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-17" x="46" y="316" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="28">ЕВ</text>
+<text id="text-18" x="72" y="308" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="200">Елена Волкова</text>
+<text id="text-19" x="72" y="328" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="260">Спасибо, а что входит…</text>
+<text id="text-20" x="72" y="350" font-family="Inter" font-size="10" font-weight="600" fill="#D22A25" text-anchor="start" data-max-width="200">Высокий</text>
+<rect x="20" y="378" width="335" height="84" rx="14" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<circle cx="46" cy="408" r="16" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-21" x="46" y="412" font-family="Inter" font-size="10" font-weight="700" fill="#5640D8" text-anchor="middle" data-max-width="28">ОК</text>
+<text id="text-22" x="72" y="404" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="200">Ольга Кузнецова</text>
+<text id="text-23" x="72" y="424" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="260">Оплатила, чек отправила</text>
+<text id="text-24" x="72" y="446" font-family="Inter" font-size="10" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="200">—</text>
+<g id="button-25">
+<rect x="36" y="490" width="303" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-26" x="187.5" y="516.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="279">Показать ещё</text>
+</g>
+</g></g>
+<g transform="translate(388 200) scale(0.8)">
+<rect x="0" y="0" width="375" height="812" rx="28" fill="#F5F7FB" stroke="#E1E7F0" stroke-width="2"/>
+<clipPath id="clip-30-uzkii-ekran-dialogi-i-formy-27"><rect x="0" y="0" width="375" height="812" rx="28"/></clipPath>
+<g clip-path="url(#clip-30-uzkii-ekran-dialogi-i-formy-27)">
+<rect x="0" y="0" width="375" height="64" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-28" x="20" y="26" font-family="Inter" font-size="9" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="220">DETAIL LAB</text>
+<text id="text-29" x="20" y="48" font-family="Inter" font-size="16" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="220">Диалоги</text>
+<rect x="299" y="16" width="60" height="32" rx="8" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-30" x="329" y="37" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="48">Меню</text>
+<text id="text-31" x="20" y="92" font-family="Inter" font-size="12" font-weight="650" fill="#5640D8" text-anchor="start" data-max-width="120">← К списку</text>
+<text id="text-32" x="20" y="126" font-family="Inter" font-size="18" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="330">Дмитрий Соколов</text>
+<text id="text-33" x="20" y="146" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="330">Telegram Business · Студия на Пресне</text>
+<g id="button-34">
+<rect x="20" y="164" width="335" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-35" x="187.5" y="190.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="311">Открыть в Telegram</text>
+</g>
+<text id="text-36" x="20" y="232" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="330">Ответ клиенту — только во внешнем канале.</text>
+<text id="text-37" x="187" y="266" font-family="Inter" font-size="10" font-weight="400" fill="#63718A" text-anchor="middle" data-max-width="200">18 сентября</text>
+<rect x="20" y="282" width="280" height="64" rx="12" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-38" x="34" y="302" font-family="Inter" font-size="9" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="200">Клиент</text>
+<text id="text-39" x="34" y="326" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">Сколько стоит полировка кузова?</text>
+<rect x="75" y="360" width="280" height="64" rx="12" fill="#F0EDFF" stroke="none" stroke-width="1"/>
+<text id="text-40" x="89" y="380" font-family="Inter" font-size="9" font-weight="600" fill="#5640D8" text-anchor="start" data-max-width="200">Вы</text>
+<text id="text-41" x="89" y="404" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">Полный комплекс — 31 000 ₽.</text>
+<rect x="20" y="438" width="280" height="52" rx="12" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-42" x="34" y="458" font-family="Inter" font-size="9" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="200">Клиент</text>
+<text id="text-43" x="34" y="480" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250">Сообщение удалено в мессенджере.</text>
+<g id="button-44">
+<rect x="20" y="520" width="335" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-45" x="187.5" y="546.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="311">Показать более ранние</text>
+</g>
+<rect x="20" y="590" width="335" height="86" rx="12" fill="#EDF6FF" stroke="none" stroke-width="1"/>
+<text id="text-46" x="36" y="618" font-family="Inter" font-size="12" font-weight="600" fill="#1768C6" text-anchor="start" data-max-width="300">Активные риски по переписке: 1</text>
+<text id="text-47" x="36" y="646" font-family="Inter" font-size="12" font-weight="650" fill="#5640D8" text-anchor="start" data-max-width="300">Открыть риск →</text>
+</g></g>
+<g transform="translate(728 200) scale(0.8)">
+<rect x="0" y="0" width="375" height="812" rx="28" fill="#F5F7FB" stroke="#E1E7F0" stroke-width="2"/>
+<clipPath id="clip-30-uzkii-ekran-dialogi-i-formy-48"><rect x="0" y="0" width="375" height="812" rx="28"/></clipPath>
+<g clip-path="url(#clip-30-uzkii-ekran-dialogi-i-formy-48)">
+<rect x="0" y="0" width="375" height="64" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-49" x="20" y="26" font-family="Inter" font-size="9" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="220">DETAIL LAB</text>
+<text id="text-50" x="20" y="48" font-family="Inter" font-size="16" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="220">Настройки</text>
+<rect x="299" y="16" width="60" height="32" rx="8" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-51" x="329" y="37" font-family="Inter" font-size="12" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="48">Меню</text>
+<text id="text-52" x="20" y="90" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="330">Компания и график  Услуги  Уведомления</text>
+<rect x="20" y="100" width="150" height="3" rx="2" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<rect x="20" y="120" width="335" height="300" rx="14" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-53" x="36" y="150" font-family="Inter" font-size="15" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="300">Компания</text>
+<text id="text-54" x="36" y="178" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="300">Название компании</text>
+<rect x="36" y="186" width="303" height="40" rx="8" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-55" x="50" y="211" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="260">Detail Lab</text>
+<text id="text-56" x="36" y="246" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="300">Основная валюта</text>
+<rect x="36" y="254" width="303" height="40" rx="8" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-57" x="50" y="279" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="260">RUB · Российский рубль</text>
+<text id="text-58" x="36" y="314" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="300">Часовой пояс</text>
+<rect x="36" y="322" width="303" height="40" rx="8" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-59" x="50" y="347" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="260">Europe/Moscow</text>
+<g id="button-60">
+<rect x="36" y="372" width="303" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-61" x="187.5" y="398.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="279">Сохранить</text>
+</g>
+<rect x="0" y="0" width="375" height="812" fill="#0E1422" opacity="0.46"/>
+<rect x="16" y="220" width="343" height="330" rx="20" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-62" x="36" y="262" font-family="Inter" font-size="18" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="280">Сменить валюту?</text>
+<text id="text-63" x="36" y="292" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="290">Аналитика и исторические суммы</text>
+<text id="text-64" x="36" y="311" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="290">будут показаны в новой валюте</text>
+<text id="text-65" x="36" y="330" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="290">без пересчёта.</text>
+<rect x="36" y="360" width="303" height="64" rx="10" fill="#FFF6E8" stroke="none" stroke-width="1"/>
+<text id="text-66" x="50" y="398" font-family="Inter" font-size="11" font-weight="600" fill="#AD5B11" text-anchor="start" data-max-width="280">Изменение нельзя отменить автоматически.</text>
+<g id="button-67">
+<rect x="36" y="440" width="140" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-68" x="106" y="466.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="116">Отмена</text>
+</g>
+<g id="button-69">
+<rect x="196" y="440" width="143" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-70" x="267.5" y="466.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="119">Сменить</text>
+</g>
+<text id="text-71" x="187" y="520" font-family="Inter" font-size="10" font-weight="400" fill="#63718A" text-anchor="middle" data-max-width="300">Диалог: ширина 100 % − 2 rem, макс. 28 rem</text>
+</g></g>
+<text id="text-72" x="1080" y="236" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="312">Два состояния маршрута</text>
+<text id="text-73" x="1080" y="258" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">До 1024 px маршрут диалогов показывает либо</text>
+<text id="text-74" x="1080" y="276" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">список, либо переписку. «К списку» возвращает</text>
+<text id="text-75" x="1080" y="294" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">к списку с сохранёнными фильтрами; на планшете</text>
+<text id="text-76" x="1080" y="312" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">в альбомной ориентации и на компьютере —</text>
+<text id="text-77" x="1080" y="330" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">разделённая раскладка.</text>
+<text id="text-78" x="1080" y="410" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="312">Формы</text>
+<text id="text-79" x="1080" y="432" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">Одна колонка, подписи всегда видны, ошибки</text>
+<text id="text-80" x="1080" y="450" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">связаны через aria-describedby, кнопки 44 px</text>
+<text id="text-81" x="1080" y="468" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">на всю ширину. Таблицы становятся</text>
+<text id="text-82" x="1080" y="486" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">прокручиваемыми областями с именем.</text>
+<text id="text-83" x="1080" y="566" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="312">Модальные окна</text>
+<text id="text-84" x="1080" y="588" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">Reka Dialog: ширина 100 % − 2 rem, максимум 28</text>
+<text id="text-85" x="1080" y="606" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">rem, ловушка фокуса, Escape закрывает, кроме</text>
+<text id="text-86" x="1080" y="624" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">неделимой операции в состоянии ожидания; фокус</text>
+<text id="text-87" x="1080" y="642" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">возвращается к триггеру.</text>
+<text id="text-88" x="1080" y="740" font-family="Inter" font-size="14" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="312">Длинный контент</text>
+<text id="text-89" x="1080" y="762" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">Длинные почты, названия и суммы переносятся</text>
+<text id="text-90" x="1080" y="780" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">или получают break-all; полное значение</text>
+<text id="text-91" x="1080" y="798" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="312">доступно в подсказке и копированием.</text>
+<text id="text-92" x="48" y="1140" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="1340">Кадры 375 × 812 в масштабе 0,8. Все состояния проверяются e2e в профиле «mobile» (iPhone 13) и матрицей ширин в Chromium.</text></svg>

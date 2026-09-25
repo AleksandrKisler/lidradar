@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" fill="none" role="img" aria-labelledby="title desc"><title id="title">Онбординг · Возобновление и итог</title><desc id="desc">Сервер называет следующий шаг; необязательный шаг Telegram можно пропустить; итог показывает факты. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1024" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<rect x="0" y="0" width="380" height="1024" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(48 38) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="82" y="57" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="48" y="126" font-family="Inter" font-size="11" font-weight="650" fill="#8D99B0" text-anchor="start" data-max-width="270">НАЧАЛО РАБОТЫ</text>
+<circle cx="64" cy="174" r="16" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-check-4" transform="translate(54 164) scale(0.8333333333333334)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-5" x="98" y="172" font-family="Inter" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="250">Компания</text>
+<text id="text-6" x="98" y="192" font-family="Inter" font-size="11" font-weight="500" fill="#8D99B0" text-anchor="start" data-max-width="250">готово</text>
+<line x1="64" y1="200" x2="64" y2="232" stroke="#35405A" stroke-width="1"/>
+<circle cx="64" cy="258" r="16" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-check-7" transform="translate(54 248) scale(0.8333333333333334)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-8" x="98" y="256" font-family="Inter" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="250">Точка и график</text>
+<text id="text-9" x="98" y="276" font-family="Inter" font-size="11" font-weight="500" fill="#8D99B0" text-anchor="start" data-max-width="250">готово</text>
+<line x1="64" y1="284" x2="64" y2="316" stroke="#35405A" stroke-width="1"/>
+<circle cx="64" cy="342" r="16" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-10" x="64" y="347" font-family="Inter" font-size="12" font-weight="650" fill="#FFFFFF" text-anchor="middle" data-max-width="24">3</text>
+<text id="text-11" x="98" y="340" font-family="Inter" font-size="15" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="250">Услуги</text>
+<text id="text-12" x="98" y="360" font-family="Inter" font-size="11" font-weight="500" fill="#AFA4FF" text-anchor="start" data-max-width="250">следующий шаг</text>
+<line x1="64" y1="368" x2="64" y2="400" stroke="#35405A" stroke-width="1"/>
+<circle cx="64" cy="426" r="16" fill="#253048" stroke="none" stroke-width="1"/>
+<text id="text-13" x="64" y="431" font-family="Inter" font-size="12" font-weight="650" fill="#FFFFFF" text-anchor="middle" data-max-width="24">4</text>
+<text id="text-14" x="98" y="424" font-family="Inter" font-size="15" font-weight="600" fill="#9AA7BE" text-anchor="start" data-max-width="250">Источник сообщений</text>
+<text id="text-15" x="98" y="444" font-family="Inter" font-size="11" font-weight="500" fill="#8D99B0" text-anchor="start" data-max-width="250">не выполнен</text>
+<line x1="64" y1="452" x2="64" y2="484" stroke="#35405A" stroke-width="1"/>
+<circle cx="64" cy="510" r="16" fill="#253048" stroke="none" stroke-width="1"/>
+<text id="text-16" x="64" y="515" font-family="Inter" font-size="12" font-weight="650" fill="#FFFFFF" text-anchor="middle" data-max-width="24">5</text>
+<text id="text-17" x="98" y="508" font-family="Inter" font-size="15" font-weight="600" fill="#9AA7BE" text-anchor="start" data-max-width="250">Уведомления в Telegram</text>
+<text id="text-18" x="98" y="528" font-family="Inter" font-size="11" font-weight="500" fill="#8D99B0" text-anchor="start" data-max-width="250">необязательно</text>
+<rect x="40" y="758" width="300" height="182" rx="16" fill="#1B2436" stroke="none" stroke-width="1"/>
+<g id="icon-shield-check-19" transform="translate(62 780) scale(0.9583333333333334)" fill="none" stroke="#AFA4FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g>
+<text id="text-20" x="62" y="829" font-family="Inter" font-size="14" font-weight="500" fill="#E0E4EE" text-anchor="start" data-max-width="258">Статус считает сервер</text>
+<text id="text-21" x="62" y="852" font-family="Inter" font-size="14" font-weight="500" fill="#E0E4EE" text-anchor="start" data-max-width="258">по данным, а не по галочкам</text>
+<text id="text-22" x="62" y="875" font-family="Inter" font-size="14" font-weight="500" fill="#E0E4EE" text-anchor="start" data-max-width="258">в браузере: продолжайте</text>
+<text id="text-23" x="62" y="898" font-family="Inter" font-size="14" font-weight="500" fill="#E0E4EE" text-anchor="start" data-max-width="258">с любого устройства.</text>
+<rect x="460" y="120" width="888" height="330" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-24" x="484" y="154" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="840">Продолжим настройку</text>
+<text id="text-25" x="484" y="177" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="840">Сервер запомнил, что уже сделано: компания и точка с графиком есть.</text>
+<text id="text-26" x="484" y="208" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="151.6">Компания</text>
+<text id="text-27" x="643.6" y="208" font-family="Inter" font-size="13" font-weight="550" fill="#191E2B" text-anchor="start" data-max-width="260.4">Detail Lab · Москва · RUB</text>
+<text id="text-28" x="484" y="236" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="151.6">Точки с графиком</text>
+<text id="text-29" x="643.6" y="236" font-family="Inter" font-size="13" font-weight="550" fill="#191E2B" text-anchor="start" data-max-width="260.4">1 из 1</text>
+<text id="text-30" x="484" y="264" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="151.6">Активные услуги</text>
+<text id="text-31" x="643.6" y="264" font-family="Inter" font-size="13" font-weight="550" fill="#D22A25" text-anchor="start" data-max-width="260.4">0</text>
+<text id="text-32" x="904" y="208" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="151.6">Подключения</text>
+<text id="text-33" x="1063.6" y="208" font-family="Inter" font-size="13" font-weight="550" fill="#D22A25" text-anchor="start" data-max-width="260.4">0</text>
+<text id="text-34" x="904" y="236" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="202">Личная привязка Telegram</text>
+<text id="text-35" x="1114" y="236" font-family="Inter" font-size="13" font-weight="550" fill="#191E2B" text-anchor="start" data-max-width="210">не выполнена</text>
+<text id="text-36" x="904" y="264" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="151.6">Статус</text>
+<text id="text-37" x="1063.6" y="264" font-family="Inter" font-size="13" font-weight="550" fill="#AD5B11" text-anchor="start" data-max-width="260.4">не завершена</text>
+<g id="button-38">
+<rect x="484" y="340" width="220" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-arrow-right-39" transform="translate(500 353) scale(0.75)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
+<text id="text-40" x="527" y="366.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="164">Перейти к услугам</text>
+</g>
+<g id="button-41">
+<rect x="720" y="340" width="180" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-42" x="810" y="366.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="156">Позже, в Radar</text>
+</g>
+<text id="text-43" x="484" y="420" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="800">Обязательные шаги нельзя пропустить, необязательные — можно.</text>
+<rect x="460" y="474" width="888" height="450" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-44" x="484" y="508" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="840">Настройка завершена</text>
+<text id="text-45" x="484" y="531" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="840">Обязательные шаги выполнены: риски начнут появляться в Radar по мере переписки.</text>
+<circle cx="536" cy="640" r="52" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<g id="icon-check-check-46" transform="translate(510 614) scale(2.1666666666666665)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></g>
+<text id="text-47" x="612" y="632" font-family="Inter" font-size="26" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="700">Готово к работе</text>
+<text id="text-48" x="612" y="672" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="712">Источник переписки подключён и проверен у провайдера.</text>
+<text id="text-49" x="612" y="696" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="712">Личные уведомления в Telegram можно подключить позже в настройках.</text>
+<g id="button-50">
+<rect x="612" y="740" width="220" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-arrow-right-51" transform="translate(628 753) scale(0.75)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
+<text id="text-52" x="655" y="766.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="164">Открыть Radar</text>
+</g>
+<g id="button-53">
+<rect x="848" y="740" width="232" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-bell-54" transform="translate(864 753) scale(0.75)" fill="none" stroke="#191E2B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></g>
+<text id="text-55" x="891" y="766.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="176">Подключить Telegram</text>
+</g>
+<text id="text-56" x="612" y="832" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="712">Шаг TELEGRAM_LINK необязателен и считается по текущему пользователю.</text>
+<text id="text-57" x="460" y="972" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="880">Правило: статус начала работы — только серверный (GET /organization/onboarding); localStorage не участвует.</text></svg>

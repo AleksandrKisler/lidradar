@@ -142,5 +142,149 @@
     "height": 1180,
     "file": "svg/16-osnovy-interfeisa.svg",
     "preview": "preview/16-osnovy-interfeisa.png"
+  },
+  {
+    "id": "17-radar-osnovnoi",
+    "title": "Radar · Лента рисков",
+    "description": "Сводка, фильтры в адресе и лента активных рисков с курсорной подгрузкой.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/17-radar-osnovnoi.svg",
+    "preview": "preview/17-radar-osnovnoi.png"
+  },
+  {
+    "id": "18-kartochka-riska",
+    "title": "Карточка риска · Активный риск",
+    "description": "Причина, контекст переписки и сделки с историей этапов, рекомендация и все команды на одном экране.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/18-kartochka-riska.svg",
+    "preview": "preview/18-kartochka-riska.png"
+  },
+  {
+    "id": "19-kartochka-riska-sostoianiia",
+    "title": "Карточка риска · Состояния",
+    "description": "Загрузка, закрытый риск только для чтения, конфликт этапа и потеря права — четыре композиции.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/19-kartochka-riska-sostoianiia.svg",
+    "preview": "preview/19-kartochka-riska-sostoianiia.png"
+  },
+  {
+    "id": "20-registraciia-i-prostranstva",
+    "title": "Регистрация и выбор пространства",
+    "description": "Создание аккаунта без раскрытия занятости адреса и явный выбор организации при нескольких членствах.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/20-registraciia-i-prostranstva.svg",
+    "preview": "preview/20-registraciia-i-prostranstva.png"
+  },
+  {
+    "id": "21-onbording-vozobnovlenie",
+    "title": "Онбординг · Возобновление и итог",
+    "description": "Сервер называет следующий шаг; необязательный шаг Telegram можно пропустить; итог показывает факты.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/21-onbording-vozobnovlenie.svg",
+    "preview": "preview/21-onbording-vozobnovlenie.png"
+  },
+  {
+    "id": "22-uslugi-dialogi",
+    "title": "Настройки · Диалоги услуг",
+    "description": "Создание и изменение услуги с ценой «точная, диапазон, не указана» и отключение с подтверждением.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/22-uslugi-dialogi.svg",
+    "preview": "preview/22-uslugi-dialogi.png"
+  },
+  {
+    "id": "23-perepiska-sostoianiia",
+    "title": "Диалоги · Состояния переписки",
+    "description": "Удалённое сообщение, недоступное вложение, отсутствие внешнего перехода и подгрузка ранних сообщений.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/23-perepiska-sostoianiia.svg",
+    "preview": "preview/23-perepiska-sostoianiia.png"
+  },
+  {
+    "id": "24-komanda-podtverzhdeniia",
+    "title": "Команда · Подтверждения",
+    "description": "Смена роли и отзыв доступа с точными последствиями, защита единственного владельца и одноразовый код приглашения.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/24-komanda-podtverzhdeniia.svg",
+    "preview": "preview/24-komanda-podtverzhdeniia.png"
+  },
+  {
+    "id": "25-dannye-i-soglasie",
+    "title": "Настройки · Данные и согласие",
+    "description": "Статус согласия на использование данных в наборах читает любой участник; выдача и отзыв — только владелец.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/25-dannye-i-soglasie.svg",
+    "preview": "preview/25-dannye-i-soglasie.png"
+  },
+  {
+    "id": "26-admin-obzor",
+    "title": "Администрирование · Обзор",
+    "description": "Отдельная оболочка платформы: снимок очередей с временем проверки сервера и ручным обновлением.",
+    "width": 1440,
+    "height": 1024,
+    "file": "svg/26-admin-obzor.svg",
+    "preview": "preview/26-admin-obzor.png"
+  },
+  {
+    "id": "27-admin-mertvye-pisma",
+    "title": "Администрирование · Мёртвые письма",
+    "description": "Четыре очереди, одиночные команды восстановления и подтверждение с типом, объектом и организацией.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/27-admin-mertvye-pisma.svg",
+    "preview": "preview/27-admin-mertvye-pisma.png"
+  },
+  {
+    "id": "28-admin-trassirovka-i-ai",
+    "title": "Администрирование · Трассировка и AI",
+    "description": "Цепочка метаданных от сообщения до выручки и факты анализа с признаком доверия; текстов и промптов нет.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/28-admin-trassirovka-i-ai.svg",
+    "preview": "preview/28-admin-trassirovka-i-ai.png"
+  },
+  {
+    "id": "29-uzkii-ekran-navigaciia-radar",
+    "title": "Узкий экран · Навигация и Radar",
+    "description": "375 CSS px: боковая панель заменена диалогом «Меню», сводка и лента в одну колонку, карточка риска — последовательные секции.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/29-uzkii-ekran-navigaciia-radar.svg",
+    "preview": "preview/29-uzkii-ekran-navigaciia-radar.png"
+  },
+  {
+    "id": "30-uzkii-ekran-dialogi-i-formy",
+    "title": "Узкий экран · Диалоги и формы",
+    "description": "Список и переписка — отдельные состояния маршрута с возвратом; формы в одну колонку; диалоги на всю ширину минус отступ.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/30-uzkii-ekran-dialogi-i-formy.svg",
+    "preview": "preview/30-uzkii-ekran-dialogi-i-formy.png"
+  },
+  {
+    "id": "31-planshet-i-masshtab",
+    "title": "Планшет 768 и масштаб 200 %",
+    "description": "Планшет: боковая панель и одна колонка содержимого; 200 % масштаба: таблицы прокручиваются внутри области, действия не скрываются.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/31-planshet-i-masshtab.svg",
+    "preview": "preview/31-planshet-i-masshtab.png"
+  },
+  {
+    "id": "32-sostoianiia-form",
+    "title": "Состояния форм",
+    "description": "Валидация, конфликт, потеря права, неизвестный результат, офлайн и блокировка на время отправки — шесть композиций.",
+    "width": 1440,
+    "height": 1180,
+    "file": "svg/32-sostoianiia-form.svg",
+    "preview": "preview/32-sostoianiia-form.png"
   }
 ]

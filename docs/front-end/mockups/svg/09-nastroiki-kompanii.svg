@@ -38,83 +38,84 @@
 <text id="text-24" x="494" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="76">Услуги</text>
 <text id="text-25" x="602" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="138">Уведомления</text>
 <text id="text-26" x="772" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="88">Команда</text>
+<text id="text-27" x="892" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="76">Данные</text>
 <line x1="280" y1="219" x2="1392" y2="219" stroke="#E1E7F0" stroke-width="1"/>
 <rect x="280" y="249" width="538" height="292" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-27" x="304" y="283" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="490">Компания</text>
-<text id="text-28" x="304" y="334" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="490">Название компании</text>
+<text id="text-28" x="304" y="283" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="490">Компания</text>
+<text id="text-29" x="304" y="334" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="490">Название компании</text>
 <rect x="304" y="346" width="490" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-29" x="318" y="375" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="462">Detail Lab</text>
-<text id="text-30" x="304" y="432" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="235">Основная валюта</text>
+<text id="text-30" x="318" y="375" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="462">Detail Lab</text>
+<text id="text-31" x="304" y="432" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="235">Основная валюта</text>
 <rect x="304" y="444" width="235" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-31" x="318" y="473" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="185">RUB · Российский рубль</text>
-<g id="icon-chevron-down-32" transform="translate(508 458) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
-<text id="text-33" x="555" y="432" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="239">Часовой пояс</text>
+<text id="text-32" x="318" y="473" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="185">RUB · Российский рубль</text>
+<g id="icon-chevron-down-33" transform="translate(508 458) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+<text id="text-34" x="555" y="432" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="239">Часовой пояс</text>
 <rect x="555" y="444" width="239" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-34" x="569" y="473" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="189">Москва · UTC+3</text>
-<g id="icon-chevron-down-35" transform="translate(763 458) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+<text id="text-35" x="569" y="473" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="189">Москва · UTC+3</text>
+<g id="icon-chevron-down-36" transform="translate(763 458) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
 <rect x="842" y="249" width="550" height="292" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-36" x="866" y="283" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="502">Точка и контроль ответа</text>
-<text id="text-37" x="866" y="334" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="502">Точка</text>
+<text id="text-37" x="866" y="283" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="502">Точка и контроль ответа</text>
+<text id="text-38" x="866" y="334" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="502">Точка</text>
 <rect x="866" y="346" width="502" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-38" x="880" y="375" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="452">Студия на Пресне</text>
-<g id="icon-chevron-down-39" transform="translate(1337 360) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
-<text id="text-40" x="866" y="432" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="228">Порог ответа</text>
+<text id="text-39" x="880" y="375" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="452">Студия на Пресне</text>
+<g id="icon-chevron-down-40" transform="translate(1337 360) scale(0.6666666666666666)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+<text id="text-41" x="866" y="432" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="228">Порог ответа</text>
 <rect x="866" y="444" width="228" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-41" x="880" y="473" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="200">45 минут</text>
-<text id="text-42" x="1118" y="459" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="249">Учитывается только</text>
-<text id="text-43" x="1118" y="480" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="249">рабочее время точки.</text>
+<text id="text-42" x="880" y="473" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="200">45 минут</text>
+<text id="text-43" x="1118" y="459" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="249">Учитывается только</text>
+<text id="text-44" x="1118" y="480" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="249">рабочее время точки.</text>
 <rect x="280" y="565" width="1112" height="304" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-44" x="304" y="599" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">График работы</text>
-<text id="text-45" x="304" y="622" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1064">Время местное · Москва, UTC+3</text>
+<text id="text-45" x="304" y="599" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">График работы</text>
+<text id="text-46" x="304" y="622" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1064">Время местное · Москва, UTC+3</text>
 <rect x="304" y="661" width="136" height="162" rx="12" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-46" x="320" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Пн</text>
+<text id="text-47" x="320" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Пн</text>
 <rect x="382" y="672" width="40" height="24" rx="12" fill="#6C55FF" stroke="none" stroke-width="1"/>
 <circle cx="410" cy="684" r="9" fill="#FFFFFF" stroke="none" stroke-width="1"/>
-<text id="text-47" x="320" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
+<text id="text-48" x="320" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
 <line x1="320" y1="757" x2="424" y2="757" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-48" x="320" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
+<text id="text-49" x="320" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
 <rect x="456" y="661" width="136" height="162" rx="12" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-49" x="472" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Вт</text>
+<text id="text-50" x="472" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Вт</text>
 <rect x="534" y="672" width="40" height="24" rx="12" fill="#6C55FF" stroke="none" stroke-width="1"/>
 <circle cx="562" cy="684" r="9" fill="#FFFFFF" stroke="none" stroke-width="1"/>
-<text id="text-50" x="472" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
+<text id="text-51" x="472" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
 <line x1="472" y1="757" x2="576" y2="757" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-51" x="472" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
+<text id="text-52" x="472" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
 <rect x="608" y="661" width="136" height="162" rx="12" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-52" x="624" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Ср</text>
+<text id="text-53" x="624" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Ср</text>
 <rect x="686" y="672" width="40" height="24" rx="12" fill="#6C55FF" stroke="none" stroke-width="1"/>
 <circle cx="714" cy="684" r="9" fill="#FFFFFF" stroke="none" stroke-width="1"/>
-<text id="text-53" x="624" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
+<text id="text-54" x="624" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
 <line x1="624" y1="757" x2="728" y2="757" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-54" x="624" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
+<text id="text-55" x="624" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
 <rect x="760" y="661" width="136" height="162" rx="12" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-55" x="776" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Чт</text>
+<text id="text-56" x="776" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Чт</text>
 <rect x="838" y="672" width="40" height="24" rx="12" fill="#6C55FF" stroke="none" stroke-width="1"/>
 <circle cx="866" cy="684" r="9" fill="#FFFFFF" stroke="none" stroke-width="1"/>
-<text id="text-56" x="776" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
+<text id="text-57" x="776" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
 <line x1="776" y1="757" x2="880" y2="757" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-57" x="776" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
+<text id="text-58" x="776" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
 <rect x="912" y="661" width="136" height="162" rx="12" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-58" x="928" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Пт</text>
+<text id="text-59" x="928" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Пт</text>
 <rect x="990" y="672" width="40" height="24" rx="12" fill="#6C55FF" stroke="none" stroke-width="1"/>
 <circle cx="1018" cy="684" r="9" fill="#FFFFFF" stroke="none" stroke-width="1"/>
-<text id="text-59" x="928" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
+<text id="text-60" x="928" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">09:00</text>
 <line x1="928" y1="757" x2="1032" y2="757" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-60" x="928" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
+<text id="text-61" x="928" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">20:00</text>
 <rect x="1064" y="661" width="136" height="162" rx="12" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-61" x="1080" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Сб</text>
+<text id="text-62" x="1080" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Сб</text>
 <rect x="1142" y="672" width="40" height="24" rx="12" fill="#6C55FF" stroke="none" stroke-width="1"/>
 <circle cx="1170" cy="684" r="9" fill="#FFFFFF" stroke="none" stroke-width="1"/>
-<text id="text-62" x="1080" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">10:00</text>
+<text id="text-63" x="1080" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="106">10:00</text>
 <line x1="1080" y1="757" x2="1184" y2="757" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-63" x="1080" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">18:00</text>
+<text id="text-64" x="1080" y="791" font-family="Inter" font-size="14" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="105">18:00</text>
 <rect x="1216" y="661" width="136" height="162" rx="12" fill="#F5F7FB" stroke="#E1E7F0" stroke-width="1"/>
-<text id="text-64" x="1232" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Вс</text>
+<text id="text-65" x="1232" y="691" font-family="Inter" font-size="15" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="105">Вс</text>
 <rect x="1294" y="672" width="40" height="24" rx="12" fill="#CDD5E2" stroke="none" stroke-width="1"/>
 <circle cx="1306" cy="684" r="9" fill="#FFFFFF" stroke="none" stroke-width="1"/>
-<text id="text-65" x="1232" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="106">Выходной</text>
-<text id="text-66" x="280" y="921" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="780">Изменения применяются к новым проверкам риска.</text>
-<g id="button-67">
+<text id="text-66" x="1232" y="740" font-family="Inter" font-size="14" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="106">Выходной</text>
+<text id="text-67" x="280" y="921" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="780">Изменения применяются к новым проверкам риска.</text>
+<g id="button-68">
 <rect x="1141" y="893" width="251" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
-<text id="text-68" x="1266.5" y="919.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="227">Сохранить изменения</text>
+<text id="text-69" x="1266.5" y="919.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="227">Сохранить изменения</text>
 </g></svg>

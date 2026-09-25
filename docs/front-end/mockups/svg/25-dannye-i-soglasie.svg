@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" fill="none" role="img" aria-labelledby="title desc"><title id="title">Настройки · Данные и согласие</title><desc id="desc">Статус согласия на использование данных в наборах читает любой участник; выдача и отзыв — только владелец. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1024" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="Sidebar">
+<rect x="0" y="0" width="232" height="1024" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(24 30) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="58" y="49" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="24" y="99" font-family="Inter" font-size="10" font-weight="650" fill="#7E8BA5" text-anchor="start" data-max-width="190">РАБОЧЕЕ ПРОСТРАНСТВО</text>
+<g id="icon-radar-4" transform="translate(32 132) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-5" x="64" y="148" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Radar</text>
+<g id="icon-messages-square-6" transform="translate(32 186) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></g>
+<text id="text-7" x="64" y="202" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Диалоги</text>
+<g id="icon-chart-no-axes-combined-8" transform="translate(32 240) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16v5"/><path d="M16 14v7"/><path d="M20 10v11"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/><path d="M4 18v3"/><path d="M8 14v7"/></g>
+<text id="text-9" x="64" y="256" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Аналитика</text>
+<g id="icon-plug-10" transform="translate(32 294) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></g>
+<text id="text-11" x="64" y="310" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Интеграции</text>
+<rect x="16" y="336" width="200" height="44" rx="12" fill="#1C2435" stroke="none" stroke-width="1"/>
+<rect x="16" y="346" width="3" height="24" rx="2" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-settings-12" transform="translate(32 348) scale(0.8333333333333334)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g>
+<text id="text-13" x="64" y="364" font-family="Inter" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Настройки</text>
+<line x1="24" y1="925" x2="208" y2="925" stroke="#263047" stroke-width="1"/>
+<circle cx="42" cy="966" r="18" fill="#293347" stroke="none" stroke-width="1"/>
+<text id="text-14" x="42" y="970" font-family="Inter" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle" data-max-width="30">DL</text>
+<text id="text-15" x="70" y="963" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Detail Lab</text>
+<text id="text-16" x="70" y="983" font-family="Inter" font-size="11" font-weight="400" fill="#8996AE" text-anchor="start" data-max-width="130">Владелец</text>
+<g id="icon-chevron-down-17" transform="translate(190 960) scale(0.6666666666666666)" fill="none" stroke="#8996AE" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+</g>
+<g id="Header">
+<rect x="232" y="0" width="1208" height="80" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-18" x="280" y="35" font-family="Inter" font-size="21" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="600">Данные и согласие</text>
+<text id="text-19" x="280" y="59" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="680">Что происходит с перепиской и вердиктами команды</text>
+<rect x="1190" y="24" width="202" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-20" x="1291" y="42" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="186">Telegram подключён</text>
+</g>
+<text id="text-21" x="280" y="136" font-family="Inter" font-size="29" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="1050">Данные и согласие на обучение</text>
+<text id="text-22" x="280" y="164" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1070">Что происходит с перепиской и вердиктами команды</text>
+<text id="text-23" x="292" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="170">Компания и график</text>
+<text id="text-24" x="494" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="76">Услуги</text>
+<text id="text-25" x="602" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="138">Уведомления</text>
+<text id="text-26" x="772" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="88">Команда</text>
+<text id="text-27" x="892" y="200" font-family="Inter" font-size="13" font-weight="650" fill="#5640D8" text-anchor="start" data-max-width="76">Данные</text>
+<rect x="880" y="216" width="96" height="3" rx="2" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<line x1="280" y1="219" x2="1392" y2="219" stroke="#E1E7F0" stroke-width="1"/>
+<rect x="280" y="249" width="1112" height="236" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-28" x="304" y="283" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">Согласие на использование данных в наборах</text>
+<text id="text-29" x="304" y="306" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1064">Область — наборы данных: обучение и оценка моделей на реальных переписках и вердиктах команды.</text>
+<rect x="1268" y="272" width="100" height="28" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-30" x="1318" y="290" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="84">Не дано</text>
+<text id="text-31" x="304" y="346" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1000">Согласие не выдавалось: данные организации используются только для работы сервиса.</text>
+<g id="button-32">
+<rect x="304" y="404" width="180" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-33" x="394" y="430.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="156">Дать согласие</text>
+</g>
+<text id="text-34" x="304" y="470" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1000">Менеджер видит статус и подпись «Дать или отозвать согласие может владелец организации».</text>
+<rect x="280" y="509" width="540" height="300" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-35" x="304" y="543" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="492">На что влияет согласие</text>
+<g id="icon-check-36" transform="translate(304 572) scale(0.75)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-37" x="335" y="587" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Реальные переписки и вердикты по рискам</text>
+<text id="text-38" x="335" y="607" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">могут включаться в наборы данных.</text>
+<g id="icon-check-39" transform="translate(304 636) scale(0.75)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-40" x="335" y="651" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Каждый вердикт хранит признак: действовало ли</text>
+<text id="text-41" x="335" y="671" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">согласие в момент записи.</text>
+<g id="icon-check-42" transform="translate(304 700) scale(0.75)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-43" x="335" y="715" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Инструменты наборов данных отбирают только</text>
+<text id="text-44" x="335" y="735" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">записи с этим признаком.</text>
+<rect x="844" y="509" width="548" height="300" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-45" x="868" y="543" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="500">Что не меняется</text>
+<g id="icon-shield-check-46" transform="translate(868 572) scale(0.75)" fill="none" stroke="#6C55FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g>
+<text id="text-47" x="899" y="587" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Поиск рисков и работа Radar</text>
+<text id="text-48" x="899" y="607" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">не зависят от согласия.</text>
+<g id="icon-shield-check-49" transform="translate(868 636) scale(0.75)" fill="none" stroke="#6C55FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g>
+<text id="text-50" x="899" y="651" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Отзыв действует на будущее и не удаляет</text>
+<text id="text-51" x="899" y="671" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">историю выдач из аудита.</text>
+<g id="icon-shield-check-52" transform="translate(868 700) scale(0.75)" fill="none" stroke="#6C55FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g>
+<text id="text-53" x="899" y="715" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Уже записанные вердикты сохраняют признак</text>
+<text id="text-54" x="899" y="735" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">согласия на момент записи.</text>
+<rect x="280" y="833" width="1112" height="150" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-55" x="304" y="867" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">Активное согласие</text>
+<text id="text-56" x="304" y="890" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1064">Так выглядит карточка после выдачи: аудит с временем и автором, кнопка отзыва.</text>
+<rect x="1250" y="856" width="118" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-57" x="1309" y="874" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="102">Действует</text>
+<text id="text-58" x="304" y="928" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="151.6">Выдано</text>
+<text id="text-59" x="463.6" y="928" font-family="Inter" font-size="13" font-weight="550" fill="#191E2B" text-anchor="start" data-max-width="260.4">25 сент., 10:12 · вы</text>
+<g id="button-60">
+<rect x="1160" y="908" width="208" height="40" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-61" x="1264" y="932.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="184">Отозвать согласие</text>
+</g>
+<text id="text-62" x="304" y="958" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="800">Диалоги подтверждения не обещают удаления истории или сформированных наборов.</text></svg>

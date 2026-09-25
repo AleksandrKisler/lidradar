@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180" fill="none" role="img" aria-labelledby="title desc"><title id="title">Администрирование · Трассировка и AI</title><desc id="desc">Цепочка метаданных от сообщения до выручки и факты анализа с признаком доверия; текстов и промптов нет. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1180" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="AdminSidebar">
+<rect x="0" y="0" width="232" height="1180" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(24 30) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="58" y="49" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="24" y="84" font-family="Inter" font-size="10" font-weight="650" fill="#F0EDFF" text-anchor="start" data-max-width="200">АДМИНИСТРИРОВАНИЕ ПЛАТФОРМЫ</text>
+<text id="text-4" x="32" y="133" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Обзор</text>
+<text id="text-5" x="32" y="177" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Организации</text>
+<text id="text-6" x="32" y="221" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Подключения</text>
+<text id="text-7" x="32" y="265" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Задания</text>
+<text id="text-8" x="32" y="309" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Мёртвые письма</text>
+<text id="text-9" x="32" y="353" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">AI</text>
+<text id="text-10" x="32" y="397" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Потребление</text>
+<rect x="16" y="418" width="200" height="36" rx="10" fill="#1C2435" stroke="none" stroke-width="1"/>
+<text id="text-11" x="32" y="441" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="170">Трассировка</text>
+<text id="text-12" x="32" y="485" font-family="Inter" font-size="13" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="170">Администраторы</text>
+<line x1="24" y1="1049" x2="208" y2="1049" stroke="#263047" stroke-width="1"/>
+<text id="text-13" x="24" y="1080" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="180">Мария Владелец</text>
+<text id="text-14" x="24" y="1106" font-family="Inter" font-size="12" font-weight="600" fill="#BAC2D2" text-anchor="start" data-max-width="190">← В рабочее пространство</text>
+<rect x="24" y="1124" width="184" height="36" rx="10" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-15" x="116" y="1147" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="120">Выйти</text>
+</g>
+<g id="AdminHeader">
+<rect x="232" y="0" width="1208" height="72" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-16" x="280" y="30" font-family="Inter" font-size="10" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="300">ТОЛЬКО МЕТАДАННЫЕ</text>
+<text id="text-17" x="280" y="55" font-family="Inter" font-size="19" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="700">Трассировка сообщения</text>
+</g>
+<rect x="280" y="96" width="1112" height="150" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-18" x="304" y="120" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="420">Организация (UUID)</text>
+<rect x="304" y="132" width="420" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-19" x="318" y="161" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="392">01990000-0000-7000-8000-000000000001</text>
+<text id="text-20" x="748" y="120" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="420">Сообщение (UUID)</text>
+<rect x="748" y="132" width="420" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-21" x="762" y="161" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="392">01990000-0000-7000-8000-000000000801</text>
+<g id="button-22">
+<rect x="1192" y="132" width="176" height="46" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-23" x="1280" y="159.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="152">Построить трассу</text>
+</g>
+<text id="text-24" x="304" y="222" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1060">В трассе только метаданные: идентификаторы, статусы, коды ошибок, суммы. Текст сообщения и вывод модели не запрашиваются.</text>
+<rect x="280" y="270" width="1112" height="96" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-25" x="304" y="304" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">Сообщение</text>
+<text id="text-26" x="304" y="340" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1060">01990000… ⧉ · INCOMING · TEXT · переписка 01990000… ⧉ · подключение 01990000… ⧉ · отправлено 18 сент., 09:00 · получено 18 сент., 09:00</text>
+<rect x="280" y="390" width="540" height="220" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-27" x="304" y="424" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="492">Обработка</text>
+<text id="text-28" x="304" y="458" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="100">Задание</text>
+<rect x="400" y="440" width="96" height="22" rx="6" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-29" x="408" y="456" font-family="Inter" font-size="11" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="68">01990000…</text>
+<g id="icon-copy-30" transform="translate(476 443) scale(0.5833333333333334)" fill="none" stroke="#5640D8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g>
+<text id="text-31" x="508" y="458" font-family="Inter" font-size="13" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="160">risk.detect</text>
+<rect x="690" y="440" width="100" height="28" rx="14" fill="#FFF3F2" stroke="none" stroke-width="1"/>
+<text id="text-32" x="740" y="458" font-family="Inter" font-size="11" font-weight="600" fill="#D22A25" text-anchor="middle" data-max-width="84">Мёртвое</text>
+<text id="text-33" x="304" y="502" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="100">AI-задание</text>
+<rect x="400" y="484" width="96" height="22" rx="6" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-34" x="408" y="500" font-family="Inter" font-size="11" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="68">01990000…</text>
+<g id="icon-copy-35" transform="translate(476 487) scale(0.5833333333333334)" fill="none" stroke="#5640D8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g>
+<text id="text-36" x="508" y="502" font-family="Inter" font-size="13" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="160">qwen3-8b</text>
+<rect x="690" y="484" width="100" height="28" rx="14" fill="#FFF3F2" stroke="none" stroke-width="1"/>
+<text id="text-37" x="740" y="502" font-family="Inter" font-size="11" font-weight="600" fill="#D22A25" text-anchor="middle" data-max-width="84">Мёртвое</text>
+<text id="text-38" x="304" y="546" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="100">Прогон</text>
+<rect x="400" y="528" width="96" height="22" rx="6" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-39" x="408" y="544" font-family="Inter" font-size="11" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="68">01990000…</text>
+<g id="icon-copy-40" transform="translate(476 531) scale(0.5833333333333334)" fill="none" stroke="#5640D8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g>
+<text id="text-41" x="508" y="546" font-family="Inter" font-size="13" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="160">qwen3-8b-2026-08</text>
+<rect x="690" y="528" width="100" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-42" x="740" y="546" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="84">Применён</text>
+<rect x="852" y="390" width="540" height="220" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-43" x="876" y="424" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="492">Результат анализа</text>
+<text id="text-44" x="876" y="447" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="492">Последний применённый: ревизия 3 · доверенных 1, слабых 1.</text>
+<text id="text-45" x="876" y="482" font-family="Inter" font-size="13" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="180">service_interest</text>
+<rect x="1060" y="464" width="110" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-46" x="1115" y="482" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="94">доверенный</text>
+<text id="text-47" x="1180" y="482" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="180">уверенность 92 %</text>
+<text id="text-48" x="876" y="504" font-family="Inter" font-size="11" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="490">{&quot;service&quot;:&quot;полировка&quot;,&quot;price&quot;:31000}</text>
+<text id="text-49" x="876" y="538" font-family="Inter" font-size="13" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="180">promise</text>
+<rect x="1060" y="520" width="110" height="28" rx="14" fill="#FFF6E8" stroke="none" stroke-width="1"/>
+<text id="text-50" x="1115" y="538" font-family="Inter" font-size="11" font-weight="600" fill="#AD5B11" text-anchor="middle" data-max-width="94">слабый</text>
+<text id="text-51" x="1180" y="538" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="180">уверенность 41 %</text>
+<text id="text-52" x="876" y="560" font-family="Inter" font-size="11" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="490">&quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot;</text>
+<text id="text-53" x="876" y="596" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="490">Значение факта — текст: разметка внутри не исполняется.</text>
+<rect x="280" y="634" width="1112" height="240" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-54" x="304" y="668" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">Бизнес-артефакты</text>
+<text id="text-55" x="304" y="706" font-family="Inter" font-size="13" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="250">Риски</text>
+<text id="text-56" x="304" y="738" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">Нет ответа клиенту · Критично</text>
+<text id="text-57" x="304" y="756" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250">Открыт</text>
+<text id="text-58" x="304" y="778" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">18 сент., 10:00</text>
+<text id="text-59" x="304" y="796" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250"></text>
+<text id="text-60" x="576" y="706" font-family="Inter" font-size="13" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="250">Уведомления</text>
+<text id="text-61" x="576" y="738" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">RISK_DETECTED</text>
+<text id="text-62" x="576" y="756" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250">Telegram: Мёртвое</text>
+<text id="text-63" x="576" y="778" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">В приложении: Доставлено</text>
+<text id="text-64" x="576" y="796" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250"></text>
+<text id="text-65" x="848" y="706" font-family="Inter" font-size="13" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="250">Действия и исходы</text>
+<text id="text-66" x="848" y="738" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">Действие · MARK_CONTACTED</text>
+<text id="text-67" x="848" y="756" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250">23 сент., 12:00</text>
+<text id="text-68" x="848" y="778" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">Исход · PAID</text>
+<text id="text-69" x="848" y="796" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250">23 сент., 12:30</text>
+<text id="text-70" x="1120" y="706" font-family="Inter" font-size="13" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="250">Выручка</text>
+<text id="text-71" x="1120" y="738" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">31 000 ₽ · RECOVERED</text>
+<text id="text-72" x="1120" y="756" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250">23 сент., 12:00</text>
+<text id="text-73" x="1120" y="778" font-family="Inter" font-size="12" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="250">риск 01990000…</text>
+<text id="text-74" x="1120" y="796" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="250"></text>
+<text id="text-75" x="304" y="846" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1060">Отсутствующий сегмент подписывается «Нет»; ошибка запроса — отдельная композиция с повтором. 404 — «Сообщение не найдено».</text>
+<rect x="280" y="898" width="1112" height="160" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-76" x="304" y="932" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">Администраторы платформы</text>
+<text id="text-77" x="304" y="955" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1064">Выдача по почте зарегистрированного пользователя; 201 — выдано, 200 — уже действовало; отзыв собственного права закрывает раздел.</text>
+<text id="text-78" x="304" y="984" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="420">Электронная почта</text>
+<rect x="304" y="996" width="420" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-79" x="318" y="1025" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="392">ops@example.test</text>
+<text id="text-80" x="748" y="984" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="300">Заметка</text>
+<rect x="748" y="996" width="300" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-81" x="762" y="1025" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="272">дежурство</text>
+<g id="button-82">
+<rect x="1072" y="996" width="150" height="46" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-83" x="1147" y="1023.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="126">Выдать право</text>
+</g>
+<text id="text-84" x="280" y="1120" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="1120">Правила: идентификаторы показываются сокращённо и копируются целиком · JSON фактов выводится как текст · 403 закрывает оболочку</text></svg>

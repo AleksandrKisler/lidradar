@@ -2,7 +2,8 @@
 
 Срез выполнен 14 сентября 2026 года по runtime, OpenAPI, backend docs/tests и
 локальному пакету макетов; обновлён 18 сентября 2026 года после закрытия
-API-разрывов на стороне сервера (ADR 0044, ADR 0045). Реестр запрещает скрытые
+API-разрывов на стороне сервера (ADR 0044, ADR 0045) и 25 сентября 2026 года
+после выпуска комплекта макетов v0.3 (листы 17–32), закрывшего design gaps. Реестр запрещает скрытые
 предположения: если экрану не хватает данных или решения, это prerequisite, а
 не повод для N+1, hardcode или фиктивного client-side результата.
 
@@ -31,20 +32,20 @@ API-разрывов на стороне сервера (ADR 0044, ADR 0045). Р
 | Блок | Сейчас | Что можно делать | Что нельзя принимать |
 |---|---|---|---|
 | Transport/generated API | контракт согласован (2026-09-18) | генерация клиента, tenant interceptor как единая точка | ручные patch схемы |
-| Login | API+desktop design готовы | полный login | registration/workspace visual acceptance |
-| Onboarding | API готов | формы и resume по `GET /organization/onboarding` | visual acceptance resume/skip states |
-| Radar | API готов | active feed, enriched cards, summary | visual acceptance (нет основного макета) |
-| Risk Workspace | API готов | полный read composition, команды, deeplink | visual acceptance |
-| Conversations | API готов | enriched list, search, «С риском», deeplink | visual acceptance filter/error states |
-| Integrations | API готов (ADR 0045) | connect с серверным секретом, live check | UX без дизайна secret/token states |
+| Login | API и макеты готовы (01, 20) | login, registration, выбор пространства | — |
+| Onboarding | API и макеты готовы (02–05, 21) | формы и resume по `GET /organization/onboarding` | — |
+| Radar | API и макеты готовы (14, 17) | active feed, enriched cards, summary | — |
+| Risk Workspace | API и макеты готовы (13, 18, 19) | полный read composition, команды, deeplink | — |
+| Conversations | API и макеты готовы (06, 23) | enriched list, search, «С риском», deeplink | — |
+| Integrations | API готов (ADR 0045), макеты 05, 08, 32 | connect с серверным секретом, live check | — |
 | Personal notifications | API готов | link/preferences | owner-only placement без решения |
-| Company/location/services | API+desktop design почти готовы | формы/списки | service dialogs/mobile acceptance |
-| Team | API готов | list, invite code, role, revoke, accept | confirmations без макетов |
-| Privacy | API готов | behavior | visual acceptance |
+| Company/location/services | API и макеты готовы (09, 10, 22) | формы/списки/диалоги | — |
+| Team | API и макеты готовы (12, 24) | list, invite code, role, revoke, accept | — |
+| Privacy | API и макет готовы (25) | behavior | — |
 | Revenue | API готов | idempotent dialog/command | создание RECOVERED без evidence |
 | Analytics | API готов | cards, precision, series chart, attribution, payments | смешение валют в таблице оплат |
 | SSE | API готов | lifecycle/parser, `resync.required` | локальный `+1/-1` вместо refetch |
-| Admin | API готов | data/command implementation | visual acceptance |
+| Admin | API и макеты готовы (26–28) | data/command implementation | — |
 
 <a id="contract-gaps"></a>
 ## 3. Contract gaps
@@ -303,39 +304,56 @@ Corrective backend.
 <a id="gap-design-014"></a>
 ### GAP-DESIGN-014 — отсутствуют обязательные desktop states
 
-**P1 · DECISION_REQUIRED.** Локальный v0.2 bundle содержит 16 листов, но
+**P1 · CLOSED (2026-09-25).** Комплект v0.3 добавил versioned локальные
+экспорты (SVG + PNG в `mockups/`, исходник `mockups/source/build.mjs`) для
+всех пунктов [перечня](06-design-map.md#missing-designs): основной Radar
+(17), карточка риска и её состояния (18, 19), регистрация и выбор пространства
+(20), возобновление онбординга (21), диалоги услуг (22), состояния переписки
+(23), подтверждения команды (24), данные и согласие (25), администрирование
+(26–28), состояния форм (32). Каждый видимый элемент сопоставлен с
+реализованными блоками клиента; неподдерживаемые API возможности не изображены
+рабочими. Исходное описание: Локальный v0.2 bundle содержит 16 листов, но
 ссылается на внешний Product UI v0.1 без доступного URL/export. Нет основного
 Radar, полного Risk Workspace, registration/workspaces, service dialogs,
 privacy, admin и многих terminal/conflict states.
 
-**Нужно.** Передать Figma URL с точными node IDs либо добавить versioned local
-exports; согласовать перечень из [карты макетов](06-design-map.md#missing-designs),
-data-field mapping и states. **Safe interim:** primitives/shell и листы v0.2;
-заблокированные pages не проходят visual acceptance по догадке.
+**Было нужно.** Передать Figma URL с точными node IDs либо добавить versioned
+local exports; согласовать перечень, data-field mapping и states.
 **Владелец:** product design.
 
 <a id="gap-design-015"></a>
 ### GAP-DESIGN-015 — нет responsive/mobile спецификации
 
-**P1 · DECISION_REQUIRED.** Все product screens 1440×1024; SVG не содержит
-constraints/auto-layout. Не определены navigation drawer, conversations
-list→detail, Risk action order, tables/dialogs на narrow viewport.
+**P1 · CLOSED (2026-09-25).** Листы 29–31 и
+[§7 карты макетов](06-design-map.md#responsive-spec) задают поведение на
+320–767 («Меню» как диалог, одна колонка, порядок секций карточки риска,
+список и переписка как состояния маршрута, формы и модальные окна), на планшете
+768–1023 (боковая панель, одна колонка) и при 200 % масштаба (таблицы в
+labelled scroll region); контрольные точки — токены Tailwind `sm/md/lg`.
+Автоматическая приёмка — матрица `tests/e2e/responsive.spec.ts` и профиль
+«mobile» веб-репозитория. Исходное описание: Все product screens 1440×1024; SVG
+не содержит constraints/auto-layout. Не определены navigation drawer,
+conversations list→detail, Risk action order, tables/dialogs на narrow viewport.
 
-**Нужно.** Утвердить 320/375/768 layouts и overflow/focus behavior для всех P0
-flows. **Safe interim:** semantic reflow rules из quality docs, но pixel/UX
-acceptance остаётся открытой. **Владелец:** product design + frontend.
+**Было нужно.** Утвердить 320/375/768 layouts и overflow/focus behavior для всех
+P0 flows. **Владелец:** product design + frontend.
 
 <a id="gap-design-018"></a>
 ### GAP-DESIGN-018 — нет единого mapping текущих UI examples
 
-**P2 · READY_FOR_FIX.** Product UI v0.1 расходится по примеру Дмитрия
-(Audi/полировка против BMW/керамика), а v0.2 содержит демонстрационные числа,
-которые не равны runtime fixtures.
+**P2 · CLOSED (2026-09-25).** Один демонстрационный набор описан в
+[§6 карты макетов](06-design-map.md#copy-and-demo-data): Detail Lab, «Студия
+на Пресне», Мария Владелец, Анна Смирнова, Дмитрий Соколов с полировкой кузова
+на 31 000 ₽, Елена Волкова с керамическим покрытием на 16 000 ₽; листы v0.3
+используют только его, галерея и `<desc>` каждого SVG помечают данные как
+демонстрационные; e2e-мок веб-репозитория использует те же имена людей и услуг,
+но не служит ожиданием backend fixtures. Исходное описание: Product UI v0.1
+расходится по примеру Дмитрия (Audi/полировка против BMW/керамика), а v0.2
+содержит демонстрационные числа, которые не равны runtime fixtures.
 
-**Нужно.** Один design fixture/story dataset с явной пометкой demo и
-непротиворечивыми связями IDs/amounts/dates; не использовать его как E2E
-backend expectation. **Safe interim:** production никогда не hardcode examples.
-**Владелец:** design + frontend stories.
+**Было нужно.** Один design fixture/story dataset с явной пометкой demo и
+непротиворечивыми связями IDs/amounts/dates. **Владелец:** design + frontend
+stories.
 
 <a id="closure-order"></a>
 ## 5. Рекомендуемый порядок закрытия
@@ -364,8 +382,9 @@ Valid OpenAPI/tenant/schema — первая волна. После неё не�
 analytics, team, onboarding, integration security и design tracks. Frontend
 feature не меняет статус `OPEN` сам по себе. По состоянию на 18 сентября 2026
 года все API/contract/reliability разрывы этой схемы закрыты на стороне сервера
-(ADR 0044, ADR 0045); открытыми остаются GAP-API-013 (P2, решение о in-app
-feed) и design gaps 014/015/018.
+(ADR 0044, ADR 0045); 25 сентября 2026 года комплект макетов v0.3 закрыл design
+gaps 014/015/018. Открытым остаётся только GAP-API-013 (P2, решение о in-app
+feed).
 
 <a id="gap-closure-checklist"></a>
 ## 6. Checklist закрытия gap

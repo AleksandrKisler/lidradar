@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180" fill="none" role="img" aria-labelledby="title desc"><title id="title">Команда · Подтверждения</title><desc id="desc">Смена роли и отзыв доступа с точными последствиями, защита единственного владельца и одноразовый код приглашения. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1180" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="Sidebar">
+<rect x="0" y="0" width="232" height="1180" rx="0" fill="#0E1422" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(24 30) scale(1.0416666666666667)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="58" y="49" font-family="Inter" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="24" y="99" font-family="Inter" font-size="10" font-weight="650" fill="#7E8BA5" text-anchor="start" data-max-width="190">РАБОЧЕЕ ПРОСТРАНСТВО</text>
+<g id="icon-radar-4" transform="translate(32 132) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-5" x="64" y="148" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Radar</text>
+<g id="icon-messages-square-6" transform="translate(32 186) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></g>
+<text id="text-7" x="64" y="202" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Диалоги</text>
+<g id="icon-chart-no-axes-combined-8" transform="translate(32 240) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16v5"/><path d="M16 14v7"/><path d="M20 10v11"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/><path d="M4 18v3"/><path d="M8 14v7"/></g>
+<text id="text-9" x="64" y="256" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Аналитика</text>
+<g id="icon-plug-10" transform="translate(32 294) scale(0.8333333333333334)" fill="none" stroke="#BAC2D2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></g>
+<text id="text-11" x="64" y="310" font-family="Inter" font-size="14" font-weight="400" fill="#BAC2D2" text-anchor="start" data-max-width="135">Интеграции</text>
+<rect x="16" y="336" width="200" height="44" rx="12" fill="#1C2435" stroke="none" stroke-width="1"/>
+<rect x="16" y="346" width="3" height="24" rx="2" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-settings-12" transform="translate(32 348) scale(0.8333333333333334)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g>
+<text id="text-13" x="64" y="364" font-family="Inter" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Настройки</text>
+<line x1="24" y1="1081" x2="208" y2="1081" stroke="#263047" stroke-width="1"/>
+<circle cx="42" cy="1122" r="18" fill="#293347" stroke="none" stroke-width="1"/>
+<text id="text-14" x="42" y="1126" font-family="Inter" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle" data-max-width="30">DL</text>
+<text id="text-15" x="70" y="1119" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="135">Detail Lab</text>
+<text id="text-16" x="70" y="1139" font-family="Inter" font-size="11" font-weight="400" fill="#8996AE" text-anchor="start" data-max-width="130">Владелец</text>
+<g id="icon-chevron-down-17" transform="translate(190 1116) scale(0.6666666666666666)" fill="none" stroke="#8996AE" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></g>
+</g>
+<g id="Header">
+<rect x="232" y="0" width="1208" height="80" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-18" x="280" y="35" font-family="Inter" font-size="21" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="600">Настройки</text>
+<text id="text-19" x="280" y="59" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="680">Компания, услуги, уведомления и доступ</text>
+<rect x="1190" y="24" width="202" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-20" x="1291" y="42" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="186">Telegram подключён</text>
+</g>
+<text id="text-21" x="280" y="136" font-family="Inter" font-size="29" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="1050">Команда и доступ</text>
+<text id="text-22" x="280" y="164" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1070">Каждый сотрудник видит только разрешённое рабочее пространство.</text>
+<text id="text-23" x="292" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="170">Компания и график</text>
+<text id="text-24" x="494" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="76">Услуги</text>
+<text id="text-25" x="602" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="138">Уведомления</text>
+<text id="text-26" x="772" y="200" font-family="Inter" font-size="13" font-weight="650" fill="#5640D8" text-anchor="start" data-max-width="88">Команда</text>
+<rect x="760" y="216" width="108" height="3" rx="2" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-27" x="892" y="200" font-family="Inter" font-size="13" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="76">Данные</text>
+<line x1="280" y1="219" x2="1392" y2="219" stroke="#E1E7F0" stroke-width="1"/>
+<rect x="280" y="249" width="1112" height="320" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-28" x="304" y="283" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="1064">Участники компании</text>
+<text id="text-29" x="304" y="306" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1064">Доступ можно отозвать, не теряя историю действий.</text>
+<text id="text-30" x="304" y="354" font-family="Inter" font-size="10" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="425">СОТРУДНИК</text>
+<text id="text-31" x="791" y="354" font-family="Inter" font-size="10" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="235">РОЛЬ</text>
+<text id="text-32" x="960" y="354" font-family="Inter" font-size="10" font-weight="650" fill="#63718A" text-anchor="start" data-max-width="220">ДОСТУП</text>
+<circle cx="324" cy="391" r="18" fill="#F0EDFF" stroke="none" stroke-width="1"/>
+<text id="text-33" x="324" y="395" font-family="Inter" font-size="10" font-weight="650" fill="#5640D8" text-anchor="middle" data-max-width="30">МВ</text>
+<text id="text-34" x="354" y="389" font-family="Inter" font-size="14" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="400">Мария Владелец · вы</text>
+<text id="text-35" x="354" y="407" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="400">owner@example.test</text>
+<rect x="791" y="377" width="120" height="28" rx="14" fill="#F0EDFF" stroke="none" stroke-width="1"/>
+<text id="text-36" x="851" y="395" font-family="Inter" font-size="11" font-weight="600" fill="#5640D8" text-anchor="middle" data-max-width="104">Владелец</text>
+<rect x="960" y="377" width="96" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-37" x="1008" y="395" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="80">Активен</text>
+<rect x="1100" y="373" width="170" height="32" rx="10" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-38" x="1185" y="393" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="150">Сделать менеджером</text>
+<rect x="1280" y="373" width="100" height="32" rx="10" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-39" x="1330" y="393" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="80">Отозвать</text>
+<circle cx="324" cy="447" r="18" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-40" x="324" y="451" font-family="Inter" font-size="10" font-weight="650" fill="#5640D8" text-anchor="middle" data-max-width="30">АС</text>
+<text id="text-41" x="354" y="445" font-family="Inter" font-size="14" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="400">Анна Смирнова</text>
+<text id="text-42" x="354" y="463" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="400">manager@example.test</text>
+<rect x="791" y="433" width="120" height="28" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-43" x="851" y="451" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="104">Менеджер</text>
+<rect x="960" y="433" width="96" height="28" rx="14" fill="#ECFBF3" stroke="none" stroke-width="1"/>
+<text id="text-44" x="1008" y="451" font-family="Inter" font-size="11" font-weight="600" fill="#087D50" text-anchor="middle" data-max-width="80">Активен</text>
+<g id="button-45">
+<rect x="1100" y="429" width="170" height="32" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-46" x="1185" y="449.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="146">Сделать владельцем</text>
+</g>
+<g id="button-47">
+<rect x="1280" y="429" width="100" height="32" rx="11" fill="#FFF3F2" stroke="none" stroke-width="1"/>
+<text id="text-48" x="1330" y="449.5" font-family="Inter" font-size="13" font-weight="600" fill="#D22A25" text-anchor="middle" data-max-width="76">Отозвать</text>
+</g>
+<circle cx="324" cy="503" r="18" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-49" x="324" y="507" font-family="Inter" font-size="10" font-weight="650" fill="#5640D8" text-anchor="middle" data-max-width="30">ПБ</text>
+<text id="text-50" x="354" y="501" font-family="Inter" font-size="14" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="400">Пётр Бывший</text>
+<text id="text-51" x="354" y="519" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="400">former@example.test</text>
+<rect x="791" y="489" width="120" height="28" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-52" x="851" y="507" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="104">Менеджер</text>
+<rect x="960" y="489" width="140" height="28" rx="14" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<text id="text-53" x="1030" y="507" font-family="Inter" font-size="11" font-weight="600" fill="#63718A" text-anchor="middle" data-max-width="124">Доступ отозван</text>
+<text id="text-54" x="304" y="548" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1064">Единственный активный владелец: «Сделать менеджером» и «Отозвать» недоступны, пока нет второго владельца.</text>
+<rect x="280" y="593" width="540" height="250" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-55" x="304" y="627" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="492">Приглашения</text>
+<text id="text-56" x="304" y="650" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="492">Код показывается один раз при выпуске и действует 7 дней.</text>
+<rect x="304" y="670" width="492" height="150" rx="12" fill="#FFF6E8" stroke="#F1D2A5" stroke-width="1"/>
+<text id="text-57" x="324" y="700" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="450">Код приглашения — показывается один раз</text>
+<rect x="324" y="716" width="452" height="40" rx="8" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text id="text-58" x="338" y="741" font-family="Inter" font-size="12" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="420">e2e-invitation-code-xxxxxxxxxxxxxxxxxxxxxxx</text>
+<g id="button-59">
+<rect x="324" y="768" width="150" height="36" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-copy-60" transform="translate(340 777) scale(0.75)" fill="none" stroke="#191E2B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g>
+<text id="text-61" x="367" y="790.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="94">Скопировать</text>
+</g>
+<text id="text-62" x="488" y="791" font-family="Inter" font-size="12" font-weight="500" fill="#087D50" text-anchor="start" data-max-width="120">Скопировано</text>
+<rect x="844" y="593" width="548" height="250" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-63" x="868" y="627" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="500">Роли</text>
+<g id="icon-check-64" transform="translate(868 660) scale(0.75)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-65" x="899" y="675" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Владелец: всё, включая команду и интеграции</text>
+<g id="icon-check-66" transform="translate(868 700) scale(0.75)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-67" x="899" y="715" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Менеджер: риски, диалоги, действия, исходы, оплаты</text>
+<g id="icon-check-68" transform="translate(868 740) scale(0.75)" fill="none" stroke="#087D50" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></g>
+<text id="text-69" x="899" y="755" font-family="Inter" font-size="13" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="470">Владелец и менеджер: личные уведомления и согласие</text>
+<rect x="0" y="0" width="1440" height="1180" fill="#0E1422" opacity="0.46"/>
+<rect x="280" y="660" width="540" height="330" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-70" x="312" y="706" font-family="Inter" font-size="22" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="440">Сделать менеджером?</text>
+<g id="icon-x-71" transform="translate(768 687) scale(0.8333333333333334)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
+<text id="text-72" x="312" y="740" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">Анна Смирнова (manager@example.test) потеряет</text>
+<text id="text-73" x="312" y="761" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">доступ к настройкам компании, интеграциям и составу</text>
+<text id="text-74" x="312" y="782" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">команды. Работа с рисками и диалогами сохранится.</text>
+<text id="text-75" x="312" y="826" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">Сейчас: Владелец → станет: Менеджер.</text>
+<text id="text-76" x="312" y="846" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">Переход записывается в аудит.</text>
+<g id="button-77">
+<rect x="312" y="926" width="120" height="40" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-78" x="372" y="950.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="96">Отмена</text>
+</g>
+<g id="button-79">
+<rect x="648" y="926" width="140" height="40" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-80" x="718" y="950.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="116">Подтвердить</text>
+</g>
+<rect x="852" y="660" width="540" height="400" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-81" x="884" y="706" font-family="Inter" font-size="22" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="440">Отозвать доступ?</text>
+<g id="icon-x-82" transform="translate(1340 687) scale(0.8333333333333334)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
+<text id="text-83" x="884" y="740" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">Пётр Бывший (former@example.test) больше не сможет</text>
+<text id="text-84" x="884" y="761" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">войти в организацию. История действий и подтверждений</text>
+<text id="text-85" x="884" y="782" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">сохранится; вернуть доступ можно новым кодом</text>
+<text id="text-86" x="884" y="803" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">приглашения. Отзыв собственного доступа закрывает</text>
+<text id="text-87" x="884" y="824" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="476">организацию для вас.</text>
+<rect x="884" y="856" width="476" height="100" rx="12" fill="#FFF6E8" stroke="none" stroke-width="1"/>
+<g id="icon-circle-help-88" transform="translate(900 874) scale(0.8333333333333334)" fill="none" stroke="#AD5B11" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></g>
+<text id="text-89" x="932" y="886" font-family="Inter" font-size="13" font-weight="600" fill="#AD5B11" text-anchor="start" data-max-width="410">409 при гонке</text>
+<text id="text-90" x="932" y="908" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="410">Если роль или доступ изменили параллельно,</text>
+<text id="text-91" x="932" y="927" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="410">диалог показывает конфликт, список перечитывается,</text>
+<text id="text-92" x="932" y="946" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="410">успех не заявляется.</text>
+<g id="button-93">
+<rect x="884" y="996" width="120" height="40" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-94" x="944" y="1020.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="96">Отмена</text>
+</g>
+<g id="button-95">
+<rect x="1196" y="996" width="164" height="40" rx="11" fill="#FFF3F2" stroke="none" stroke-width="1"/>
+<text id="text-96" x="1278" y="1020.5" font-family="Inter" font-size="13" font-weight="600" fill="#D22A25" text-anchor="middle" data-max-width="140">Отозвать доступ</text>
+</g></svg>

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1180" viewBox="0 0 1440 1180" fill="none" role="img" aria-labelledby="title desc"><title id="title">Состояния форм</title><desc id="desc">Валидация, конфликт, потеря права, неизвестный результат, офлайн и блокировка на время отправки — шесть композиций. Демонстрационные данные. Макет для компьютера.</desc><rect x="0" y="0" width="1440" height="1180" rx="0" fill="#F5F7FB" stroke="none" stroke-width="1"/>
+<g id="icon-radar-1" transform="translate(48 36) scale(1.0416666666666667)" fill="none" stroke="#6C55FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></g>
+<text id="text-2" x="82" y="55" font-family="Inter" font-size="21" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="140">LidRadar</text>
+<text id="text-3" x="48" y="126" font-family="Inter" font-size="32" font-weight="700" fill="#191E2B" text-anchor="start" data-max-width="1300">Состояния форм и команд</text>
+<text id="text-4" x="48" y="160" font-family="Inter" font-size="14" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="1300">Каждая мутация имеет состояния ожидания, успеха и ошибки с объявлением в live region и защитой от двойной отправки.</text>
+<rect x="48" y="208" width="432" height="440" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-5" x="72" y="242" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="384">Подключение источника</text>
+<text id="text-6" x="72" y="265" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Токен вводится один раз; ошибка связана с полем.</text>
+<text id="text-7" x="72" y="300" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="384">Название подключения</text>
+<rect x="72" y="312" width="384" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-8" x="86" y="341" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="356">Telegram Business</text>
+<text id="text-9" x="72" y="404" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="384">Токен бота</text>
+<rect x="72" y="416" width="384" height="46" rx="10" fill="#FFFFFF" stroke="#D22A25" stroke-width="1"/>
+<text id="text-10" x="86" y="445" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="356">not-a-token</text>
+<text id="text-11" x="72" y="483" font-family="Inter" font-size="11" font-weight="500" fill="#D22A25" text-anchor="start" data-max-width="384">Токен имеет вид «123456789:AAH…» — скопируйте из BotFather</text>
+<text id="text-12" x="72" y="528" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Секрет уходит один раз по TLS, не возвращается</text>
+<text id="text-13" x="72" y="546" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">в чтение настроек и очищается после отправки.</text>
+<g id="button-14">
+<rect x="72" y="572" width="384" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-15" x="264" y="598.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="360">Подключить</text>
+</g>
+<rect x="504" y="208" width="432" height="440" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-16" x="528" y="242" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="384">Конфликт 409</text>
+<text id="text-17" x="528" y="265" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Состояние изменилось параллельно; успех не заявлен.</text>
+<rect x="528" y="290" width="384" height="86" rx="12" fill="#FFF6E8" stroke="none" stroke-width="1"/>
+<g id="icon-circle-help-18" transform="translate(544 308) scale(0.8333333333333334)" fill="none" stroke="#AD5B11" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></g>
+<text id="text-19" x="576" y="320" font-family="Inter" font-size="13" font-weight="600" fill="#AD5B11" text-anchor="start" data-max-width="318">Последний владелец</text>
+<text id="text-20" x="576" y="342" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="318">В организации должен остаться</text>
+<text id="text-21" x="576" y="361" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="318">хотя бы один активный владелец.</text>
+<rect x="528" y="392" width="384" height="100" rx="12" fill="#FFF6E8" stroke="none" stroke-width="1"/>
+<g id="icon-circle-help-22" transform="translate(544 410) scale(0.8333333333333334)" fill="none" stroke="#AD5B11" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></g>
+<text id="text-23" x="576" y="422" font-family="Inter" font-size="13" font-weight="600" fill="#AD5B11" text-anchor="start" data-max-width="318">Возвращённая выручка уже учтена</text>
+<text id="text-24" x="576" y="444" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="318">Дополнительные оплаты подтверждаются</text>
+<text id="text-25" x="576" y="463" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="318">как обычные — явным выбором и новым ключом.</text>
+<text id="text-26" x="528" y="520" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">После 409 данные перечитываются;</text>
+<text id="text-27" x="528" y="538" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">решение принимается заново.</text>
+<g id="button-28">
+<rect x="528" y="572" width="120" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-29" x="588" y="598.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="96">Отмена</text>
+</g>
+<g id="button-30">
+<rect x="664" y="572" width="248" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<text id="text-31" x="788" y="598.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="224">Учесть как обычную оплату</text>
+</g>
+<rect x="960" y="208" width="432" height="440" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-32" x="984" y="242" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="384">Потеря права</text>
+<text id="text-33" x="984" y="265" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">403 на команду перечитывает сессию и признак админа.</text>
+<g id="icon-shield-check-34" transform="translate(984 290) scale(1.3333333333333333)" fill="none" stroke="#63718A" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g>
+<text id="text-35" x="984" y="362" font-family="Inter" font-size="20" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="384">Раздел недоступен</text>
+<text id="text-36" x="984" y="392" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Право отозвали, пока вы работали.</text>
+<text id="text-37" x="984" y="413" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Скрытые кнопки не заменяют проверку сервера:</text>
+<text id="text-38" x="984" y="434" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">интерфейс перестаёт предлагать команду</text>
+<text id="text-39" x="984" y="455" font-family="Inter" font-size="13" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">после перечитывания, а не по догадке.</text>
+<g id="button-40">
+<rect x="984" y="572" width="220" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-arrow-left-41" transform="translate(1000 585) scale(0.75)" fill="none" stroke="#191E2B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></g>
+<text id="text-42" x="1027" y="598.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="164">Вернуться в Radar</text>
+</g>
+<rect x="48" y="672" width="432" height="440" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-43" x="72" y="706" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="384">Неизвестный результат</text>
+<text id="text-44" x="72" y="729" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Сеть оборвалась после отправки записи с ключом.</text>
+<rect x="72" y="754" width="384" height="100" rx="12" fill="#FFF6E8" stroke="none" stroke-width="1"/>
+<g id="icon-circle-help-45" transform="translate(88 772) scale(0.8333333333333334)" fill="none" stroke="#AD5B11" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></g>
+<text id="text-46" x="120" y="784" font-family="Inter" font-size="13" font-weight="600" fill="#AD5B11" text-anchor="start" data-max-width="318">Результат неизвестен</text>
+<text id="text-47" x="120" y="806" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="318">Повторите с тем же ключом: сервер вернёт</text>
+<text id="text-48" x="120" y="825" font-family="Inter" font-size="12" font-weight="400" fill="#AD5B11" text-anchor="start" data-max-width="318">прежнюю запись (200), а не создаст вторую (201).</text>
+<text id="text-49" x="72" y="880" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Черновик заморожен: тело и ключ не меняются до ответа.</text>
+<g id="button-50">
+<rect x="72" y="916" width="384" height="44" rx="11" fill="#6C55FF" stroke="none" stroke-width="1"/>
+<g id="icon-refresh-cw-51" transform="translate(88 929) scale(0.75)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g>
+<text id="text-52" x="115" y="942.5" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="start" data-max-width="328">Повторить тем же ключом</text>
+</g>
+<g id="button-53">
+<rect x="72" y="972" width="384" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-54" x="264" y="998.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="middle" data-max-width="360">Изменить и отправить заново</text>
+</g>
+<rect x="504" y="672" width="432" height="440" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-55" x="528" y="706" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="384">Офлайн и устаревший снимок</text>
+<text id="text-56" x="528" y="729" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Поток оборвался: данные остаются, время снимка видно.</text>
+<rect x="528" y="754" width="340" height="28" rx="14" fill="#FFF6E8" stroke="none" stroke-width="1"/>
+<text id="text-57" x="698" y="772" font-family="Inter" font-size="11" font-weight="600" fill="#AD5B11" text-anchor="middle" data-max-width="324">Обновления недоступны: обновляйте вручную</text>
+<text id="text-58" x="528" y="812" font-family="Inter" font-size="13" font-weight="500" fill="#191E2B" text-anchor="start" data-max-width="384">Последний успешный снимок: сегодня, 13:41</text>
+<text id="text-59" x="528" y="836" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Значения не заменяются нулями</text>
+<text id="text-60" x="528" y="854" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">и не помечаются ошибкой.</text>
+<rect x="528" y="880" width="384" height="86" rx="12" fill="#FFF3F2" stroke="none" stroke-width="1"/>
+<g id="icon-circle-alert-61" transform="translate(544 898) scale(0.8333333333333334)" fill="none" stroke="#D22A25" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></g>
+<text id="text-62" x="576" y="910" font-family="Inter" font-size="13" font-weight="600" fill="#D22A25" text-anchor="start" data-max-width="318">Нет связи с сервером</text>
+<text id="text-63" x="576" y="932" font-family="Inter" font-size="12" font-weight="400" fill="#D22A25" text-anchor="start" data-max-width="318">Проверьте подключение. Чтение повторится</text>
+<text id="text-64" x="576" y="951" font-family="Inter" font-size="12" font-weight="400" fill="#D22A25" text-anchor="start" data-max-width="318">при возврате сети и фокусе вкладки.</text>
+<g id="button-65">
+<rect x="528" y="990" width="384" height="44" rx="11" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<g id="icon-refresh-cw-66" transform="translate(544 1003) scale(0.75)" fill="none" stroke="#191E2B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g>
+<text id="text-67" x="571" y="1016.5" font-family="Inter" font-size="13" font-weight="600" fill="#191E2B" text-anchor="start" data-max-width="328">Обновить</text>
+</g>
+<rect x="960" y="672" width="432" height="440" rx="18" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-68" x="984" y="706" font-family="Inter" font-size="17" font-weight="650" fill="#191E2B" text-anchor="start" data-max-width="384">Отправка</text>
+<text id="text-69" x="984" y="729" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Кнопка занята, поля отключены, диалог не закрыть до ответа.</text>
+<text id="text-70" x="984" y="754" font-family="Inter" font-size="12" font-weight="600" fill="#63718A" text-anchor="start" data-max-width="384">Сумма оплаты</text>
+<rect x="984" y="766" width="384" height="46" rx="10" fill="#FFFFFF" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-71" x="998" y="795" font-family="Inter" font-size="14" font-weight="400" fill="#191E2B" text-anchor="start" data-max-width="356">31 000,00</text>
+<rect x="984" y="834" width="384" height="44" rx="11" fill="#B8ACFF" stroke="none" stroke-width="1"/>
+<text id="text-72" x="1176" y="862" font-family="Inter" font-size="13" font-weight="600" fill="#FFFFFF" text-anchor="middle" data-max-width="300">Подтверждаем…</text>
+<text id="text-73" x="984" y="906" font-family="Inter" font-size="11" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">aria-busy · disabled · role=&quot;status&quot; объявляет итог один раз</text>
+<line x1="984" y1="930" x2="1368" y2="930" stroke="#E1E7F0" stroke-width="1"/>
+<text id="text-74" x="984" y="962" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Двойная отправка невозможна: замок в обработчике</text>
+<text id="text-75" x="984" y="980" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">плюс isSubmitting формы.</text>
+<text id="text-76" x="984" y="1008" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Успех: «Оценка записана» в live region</text>
+<text id="text-77" x="984" y="1026" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">politeness=polite.</text>
+<text id="text-78" x="984" y="1054" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">Ошибка: role=&quot;alert&quot; с кодом и traceId,</text>
+<text id="text-79" x="984" y="1072" font-family="Inter" font-size="12" font-weight="400" fill="#63718A" text-anchor="start" data-max-width="384">без серверного текста.</text>
+<text id="text-80" x="48" y="1150" font-family="Inter" font-size="12" font-weight="500" fill="#63718A" text-anchor="start" data-max-width="1340">Единый порядок при сбое мутации: ожидание → ответ → 409 перечитать → 403 перечитать сессию → сеть после отправки: повтор тем же ключом.</text></svg>

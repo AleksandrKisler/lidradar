@@ -31,8 +31,9 @@ session expired во время работы; forbidden route; no-platform-admin
 выполнять 401→refresh loop; не показывать stale tenant content под новым
 названием; logout чистит cache и persisted context.
 
-**Зависимости.** Макеты registration/workspace отсутствуют —
-[GAP-DESIGN-014](08-readiness-gaps.md#gap-design-014).
+**Макеты.** Регистрация, выбор пространства и принятие приглашения —
+[лист 20](mockups/svg/20-registraciia-i-prostranstva.svg)
+([GAP-DESIGN-014](08-readiness-gaps.md#gap-design-014) закрыт 2026-09-25).
 
 <a id="block-auth"></a>
 ## 2. Вход и регистрация
@@ -126,9 +127,11 @@ denied.
 `contact`, `service`, `channel`, `lastMessage`, `externalLink` в `RiskDetail`
 ([GAP-API-004](08-readiness-gaps.md#gap-api-004) закрыт); имя услуги приходит в
 карточке и MANAGER не обращается к каталогу
-([GAP-API-012](08-readiness-gaps.md#gap-api-012) закрыт). Остаётся дизайн:
-доступен только empty Radar [макет](mockups/svg/14-radar-bez-riskov.svg);
-основной лист v0.1 отсутствует (GAP-DESIGN-014).
+([GAP-API-012](08-readiness-gaps.md#gap-api-012) закрыт). Макеты: основная
+лента [лист 17](mockups/svg/17-radar-osnovnoi.svg), пустое состояние
+[лист 14](mockups/svg/14-radar-bez-riskov.svg), узкий экран
+[лист 29](mockups/svg/29-uzkii-ekran-navigaciia-radar.svg) (GAP-DESIGN-014
+закрыт 2026-09-25).
 
 <a id="block-risk-workspace"></a>
 ## 5. Risk Workspace
@@ -161,8 +164,11 @@ terminal state сохраняет read-only history.
 **Блокеры.** API-блокеры сняты 2026-09-18: detail read model обогащён и все
 связи явно nullable (GAP-API-004, GAP-CONTRACT-002 закрыты); внешний переход
 — по `externalLink.url` из ответа с честным `unavailableReason`
-(GAP-API-006 закрыт). Остаётся дизайн: утверждённый макет недоступен —
-GAP-DESIGN-014.
+(GAP-API-006 закрыт). Макеты: активный риск
+[лист 18](mockups/svg/18-kartochka-riska.svg), состояния
+[лист 19](mockups/svg/19-kartochka-riska-sostoianiia.svg), оплата
+[лист 13](mockups/svg/13-podtverzhdenie-oplaty.svg) (GAP-DESIGN-014 закрыт
+2026-09-25).
 
 <a id="block-conversations"></a>
 ## 6. Диалоги
@@ -281,9 +287,9 @@ PATCH; deactivate через DELETE с confirmation; reactivate через PATCH
 использует float; обе границы одной currency; location выбирается только из
 текущего tenant; duplicate/validation error остаётся в форме.
 
-**Макеты.** [Настройки услуг](mockups/svg/10-nastroiki-uslug.svg) и
-[onboarding-список](mockups/svg/04-uslugi-i-ceny.svg); add/edit dialog не
-утверждён — GAP-DESIGN-014.
+**Макеты.** [Настройки услуг](mockups/svg/10-nastroiki-uslug.svg),
+[onboarding-список](mockups/svg/04-uslugi-i-ceny.svg) и диалоги создания,
+изменения и отключения — [лист 22](mockups/svg/22-uslugi-dialogi.svg).
 
 <a id="block-team"></a>
 ## 11. Команда
@@ -304,8 +310,9 @@ UI показывает один раз с кнопкой копирования
 memberships текущего пользователя.
 
 **Блокер.** Снят 2026-09-18 ([GAP-API-008](08-readiness-gaps.md#gap-api-008)
-закрыт); confirmations и last-owner protection ждут макетов (GAP-DESIGN-014).
-Макет: [Команда](mockups/svg/12-komanda.svg).
+закрыт). Макеты: [Команда](mockups/svg/12-komanda.svg), подтверждения смены
+роли и отзыва, защита последнего владельца, одноразовый код —
+[лист 24](mockups/svg/24-komanda-podtverzhdeniia.svg).
 
 <a id="block-privacy"></a>
 ## 12. Privacy / ML consent
@@ -319,7 +326,8 @@ POST даёт или подтверждает consent, DELETE отзывает. 
 backend-политики.
 
 **Состояния.** Active/inactive, mutation pending, permission lost, error;
-`consent=null` при inactive нормален. Макета нет — GAP-DESIGN-014.
+`consent=null` при inactive нормален. Макет:
+[лист 25](mockups/svg/25-dannye-i-soglasie.svg).
 
 <a id="block-analytics"></a>
 ## 13. Аналитика и precision
@@ -406,8 +414,11 @@ cursor pagination.
 semantic trust/evidence и business artifacts. Не показывать message text,
 prompt/raw model output — их нет в контракте намеренно.
 
-**Зависимость.** API готов, но все admin designs отсутствуют —
-[GAP-DESIGN-014](08-readiness-gaps.md#gap-design-014).
+**Макеты.** Обзор [лист 26](mockups/svg/26-admin-obzor.svg), мёртвые письма
+и подтверждение [лист 27](mockups/svg/27-admin-mertvye-pisma.svg),
+трассировка, факты AI и администраторы
+[лист 28](mockups/svg/28-admin-trassirovka-i-ai.svg); остальные списки
+используют ту же оболочку (GAP-DESIGN-014 закрыт 2026-09-25).
 
 <a id="block-cross-cutting"></a>
 ## 17. Сквозные продуктовые правила

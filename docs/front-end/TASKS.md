@@ -15,12 +15,21 @@ test infrastructure: пользователь подтвердил, что эт�
 > [08-readiness-gaps.md](08-readiness-gaps.md)). Зависимые frontend-карточки
 > переходят из `BLOCKED` в `READY` после регенерации клиента (LR-API-001);
 > LR-BE-015 (in-app feed) остаётся `DECISION`.
+>
+> **Обновление 2026-09-25.** Design prerequisites LR-DS-001 … LR-DS-004
+> выполнены комплектом макетов v0.3 (листы 17–32 в
+> [`mockups/`](mockups/), [карта](06-design-map.md)); GAP-DESIGN-014/015/018
+> закрыты. Веб-клиент к этому моменту реализовал все функциональные блоки и
+> карточки укрепления LR-FE-031…033 (отчёт — `docs/validation.md`
+> веб-репозитория), поэтому статусы `BLOCKED` ниже описывают исходный порядок
+> зависимостей, а не текущее состояние работ.
 
 <a id="task-rules"></a>
 ## 1. Правила выполнения
 
 Статусы:
 
+- `DONE` — выполнено, с датой и ссылкой на артефакт;
 - `READY` — можно брать при выполненных зависимостях;
 - `BLOCKED` — сначала закрыть перечисленные задачи/gaps;
 - `DECISION` — первый deliverable включает явное product/security/design
@@ -419,7 +428,8 @@ API instances, 503, tenant isolation, bounded load/backoff.
 <a id="lr-ds-001"></a>
 ### LR-DS-001 — Основной Radar и полный Risk Workspace
 
-**Статус:** `DECISION` · **Оценка:** 4 дня, 40–48 ч · **Зависимости:** LR-BE-005.
+**Статус:** `DONE` (2026-09-25, листы 17–19 v0.3) · **Оценка:** 4 дня, 40–48 ч ·
+**Зависимости:** LR-BE-005.
 
 **Ссылки:** [Backend: Risk API](../backend/04-api.md),
 [Frontend: Radar/Risk blocks](04-feature-blocks.md#block-radar),
@@ -439,8 +449,8 @@ null/unknown, visual state inventory.
 <a id="lr-ds-002"></a>
 ### LR-DS-002 — Недостающие формы, settings и admin desktop states
 
-**Статус:** `DECISION` · **Оценка:** 4 дня, 40–48 ч · **Зависимости:** LR-BE-010,
-LR-BE-012, LR-BE-013.
+**Статус:** `DONE` (2026-09-25, листы 20–28 и 32 v0.3) · **Оценка:** 4 дня,
+40–48 ч · **Зависимости:** LR-BE-010, LR-BE-012, LR-BE-013.
 
 **Ссылки:** [Backend: browser API inventory](../backend/04-api.md),
 [Frontend: routes](01-architecture.md#routes),
@@ -459,8 +469,8 @@ destructive confirmations, local export/link availability.
 <a id="lr-ds-003"></a>
 ### LR-DS-003 — Responsive спецификация P0 workflows
 
-**Статус:** `BLOCKED` · **Оценка:** 4 дня, 40–48 ч · **Зависимости:** LR-DS-001,
-LR-DS-002.
+**Статус:** `DONE` (2026-09-25, листы 29–31 v0.3 и §7 карты макетов) ·
+**Оценка:** 4 дня, 40–48 ч · **Зависимости:** LR-DS-001, LR-DS-002.
 
 **Ссылки:** [Backend: API boundaries](../backend/04-api.md),
 [Frontend: responsive rules](07-quality.md#responsive),
@@ -479,7 +489,9 @@ content stress.
 <a id="lr-ds-004"></a>
 ### LR-DS-004 — IA личных уведомлений и единый story dataset
 
-**Статус:** `DECISION` · **Оценка:** 2 дня, 20–24 ч · **Зависимости:** LR-BE-015.
+**Статус:** `DONE` (2026-09-25: «Уведомления» доступны OWNER и MANAGER с
+2026-09-24, единый демонстрационный набор — §6 карты макетов) · **Оценка:**
+2 дня, 20–24 ч · **Зависимости:** LR-BE-015.
 
 **Ссылки:** [Backend: notification permissions](../backend/04-api.md),
 [Frontend: notification entities](02-entities.md#notifications),
