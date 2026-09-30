@@ -37,7 +37,7 @@ func TestOpportunityStageSevenExitGateThroughRealMessageFlow(t *testing.T) {
 
 	commercial := canonicalWebhook(
 		"opportunity-event-1", "message.received.v1", "commercial-dialog", "commercial-message", "commercial-contact",
-		"INCOMING", "TEXT", "Здравствуйте, нужна полировка кузова", "2026-08-25T12:00:00Z", "",
+		"INCOMING", "TEXT", "Здравствуйте, хочу записаться на полировку кузова", "2026-08-25T12:00:00Z", "",
 	)
 	requireStatus(t, webhookRequest(t, fixture.handler, webhookPath, commercial, "X-LidRadar-Webhook-Secret", secret), http.StatusAccepted)
 	processExactly(t, fixture, 1)

@@ -64,7 +64,7 @@ func TestSemanticBookingRiskFlow(t *testing.T) {
 	baselineAt := time.Now().UTC().Add(-61 * time.Minute).Format(time.RFC3339Nano)
 	baseline := canonicalWebhook(
 		"booking-event-baseline", "message.received.v1", "booking-dialog-strong", "booking-message-baseline",
-		"booking-contact-strong", "INCOMING", "TEXT", "Нужна полировка", baselineAt, "",
+		"booking-contact-strong", "INCOMING", "TEXT", "Подскажите стоимость полировки", baselineAt, "",
 	)
 	requireStatus(t, webhookRequest(t, fixture.handler, path, baseline, "X-LidRadar-Webhook-Secret", webhookSecret), http.StatusAccepted)
 	processExactly(t, fixture, 3)

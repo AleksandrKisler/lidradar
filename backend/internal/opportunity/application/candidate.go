@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"time"
-	"unicode"
 
 	catalogdomain "lidradar/backend/internal/catalog/domain"
 	conversationdomain "lidradar/backend/internal/conversation/domain"
@@ -41,9 +40,10 @@ func NewCandidateProcessor(
 	}
 }
 
-// Evaluate применяет намеренно точное правило: новое коммерческое намерение
+// Evaluate применяет консервативное правило: новое коммерческое намерение
 // подтверждается одним недвусмысленным совпадением активной услуги во входящем
-// текстовом сообщении. Неуверенный случай остаётся без Opportunity.
+// текстовом сообщении с учётом регулярных падежных форм названия.
+// Неуверенный случай остаётся без Opportunity.
 func (processor CandidateProcessor) Evaluate(
 	ctx context.Context,
 	tenantID, conversationID string,
@@ -117,36 +117,4 @@ func (processor CandidateProcessor) Evaluate(
 		return domain.Opportunity{}, false, mapDomainError(err)
 	}
 	return created, wasCreated, nil
-}
-
-func matchingServices(
-	text string,
-	locationID *string,
-	items []catalogdomain.ServiceCatalogItem,
-) []catalogdomain.ServiceCatalogItem {
-	normalizedText := normalizeWords(text)
-	if normalizedText == "" {
-		return nil
-	}
-	matches := make([]catalogdomain.ServiceCatalogItem, 0, 1)
-	for _, item := range items {
-		if !item.Active || !locationApplies(locationID, item.LocationID) {
-			continue
-		}
-		name := normalizeWords(item.NormalizedName)
-		if name != "" && strings.Contains(" "+normalizedText+" ", " "+name+" ") {
-			matches = append(matches, item)
-		}
-	}
-	return matches
-}
-
-func locationApplies(conversationLocation, serviceLocation *string) bool {
-	return serviceLocation == nil || (conversationLocation != nil && *conversationLocation == *serviceLocation)
-}
-
-func normalizeWords(value string) string {
-	return strings.Join(strings.FieldsFunc(strings.ToLower(value), func(character rune) bool {
-		return !unicode.IsLetter(character) && !unicode.IsDigit(character)
-	}), " ")
 }

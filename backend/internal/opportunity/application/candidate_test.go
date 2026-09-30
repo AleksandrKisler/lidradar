@@ -63,7 +63,7 @@ func (ids *sequenceIDs) NewID() (string, error) {
 
 func TestCandidateProcessorCreatesOnlyUnambiguousCommercialOpportunity(t *testing.T) {
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	text := "Здравствуйте! Нужна полировка, когда можно приехать?"
+	text := "Здравствуйте! Хочу записаться на полировку завтра в 16:00. Запишите меня, пожалуйста."
 	snapshot := commercialSnapshot(text, now)
 	price, _ := catalogdomain.ParsePrice("5000")
 	item, err := catalogdomain.NewServiceCatalogItem("service", "tenant", "Полировка", nil, &price, &price, "RUB", now)
@@ -102,6 +102,8 @@ func TestCandidateProcessorRejectsNoiseAndAmbiguityWithoutCreatingLead(t *testin
 		{"SQL-подобный мусор", `' OR 1=1; DROP TABLE opportunities; --`, []catalogdomain.ServiceCatalogItem{polishing}},
 		{"пустая строка", "\x00\n\t", []catalogdomain.ServiceCatalogItem{polishing}},
 		{"двусмысленные услуги", "Нужна полировка кузова", []catalogdomain.ServiceCatalogItem{polishing, bodyPolishing}},
+		{"двусмысленные услуги в косвенном падеже", "Запишите на полировку кузова", []catalogdomain.ServiceCatalogItem{polishing, bodyPolishing}},
+		{"точное совпадение не скрывает вторую услугу", "Нужна полировка, есть вопрос по полировке кузова", []catalogdomain.ServiceCatalogItem{polishing, bodyPolishing}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repository := &candidateRepository{}
