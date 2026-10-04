@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,5 +118,62 @@ func TestServiceRejectsPermissionAndInvalidRanges(t *testing.T) {
 	allowed := NewService(newTestRepository(), testAuthorizer{allowed: true}, testIDs{}, func() time.Time { return now })
 	if _, err := allowed.Create(context.Background(), "owner", "tenant", CreateCommand{Name: "Service", PriceFrom: &from, PriceTo: &to}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid Create() error = %v", err)
+	}
+}
+
+func TestServiceNameLengthCountsUnicodeAfterWhitespaceCleanup(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string // Empty means invalid.
+	}{
+		{name: "empty"},
+		{name: "whitespace", input: " \t\u0085\u00a0\u2003 "},
+		{name: "ascii limit", input: strings.Repeat("A", 200), want: strings.Repeat("A", 200)},
+		{name: "ascii over limit", input: strings.Repeat("A", 201)},
+		{name: "QA-04 cyrillic", input: strings.Repeat("Я", 101), want: strings.Repeat("Я", 101)},
+		{name: "cyrillic limit", input: strings.Repeat("Я", 200), want: strings.Repeat("Я", 200)},
+		{name: "cyrillic over limit", input: strings.Repeat("Я", 201)},
+		{name: "emoji limit", input: strings.Repeat("🚗", 200), want: strings.Repeat("🚗", 200)},
+		{name: "emoji over limit", input: strings.Repeat("🚗", 201)},
+		{name: "mixed limit", input: strings.Repeat("Я🚗", 100), want: strings.Repeat("Я🚗", 100)},
+		{name: "combining code points", input: strings.Repeat("е\u0301", 100), want: strings.Repeat("е\u0301", 100)},
+		{name: "combining over limit", input: strings.Repeat("е\u0301", 100) + "Я"},
+		{name: "clean before counting", input: "\u0085" + strings.Repeat("Я", 99) + " \t\u00a0\u2003 " + strings.Repeat("Я", 100) + "\n", want: strings.Repeat("Я", 99) + " " + strings.Repeat("Я", 100)},
+	} {
+		for _, operation := range []string{"create", "update"} {
+			t.Run(test.name+"/"+operation, func(t *testing.T) {
+				repository := newTestRepository()
+				service := NewService(repository, testAuthorizer{allowed: true}, testIDs{}, time.Now)
+				ctx := context.Background()
+				var err error
+				wantStored := test.want
+				if operation == "create" {
+					_, err = service.Create(ctx, "owner", "tenant", CreateCommand{Name: test.input})
+				} else {
+					if _, err := service.Create(ctx, "owner", "tenant", CreateCommand{Name: "Мойка"}); err != nil {
+						t.Fatal(err)
+					}
+					_, err = service.Update(ctx, "owner", "tenant", "service-id", UpdateCommand{Name: &test.input})
+					if test.want == "" {
+						wantStored = "Мойка"
+					}
+				}
+				if test.want == "" {
+					if !errors.Is(err, ErrInvalid) {
+						t.Fatalf("%s() error = %v, want ErrInvalid", operation, err)
+					}
+				} else if err != nil {
+					t.Fatalf("%s() error = %v", operation, err)
+				}
+				stored, found := repository.items["service-id"]
+				if found != (wantStored != "") || stored.Name != wantStored {
+					t.Fatalf("stored name = %q, found %v, want %q", stored.Name, found, wantStored)
+				}
+				if found && stored.NormalizedName != domain.NormalizeName(wantStored) {
+					t.Fatalf("normalized name = %q", stored.NormalizedName)
+				}
+			})
+		}
 	}
 }

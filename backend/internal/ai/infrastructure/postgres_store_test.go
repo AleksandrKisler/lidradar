@@ -67,6 +67,12 @@ func TestPostgresAIQueuePersistsLifecycleAndSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.AnalysisPrompt(ctx, tenants.B.TenantID, job.ID); !errors.Is(err, application.ErrNotFound) {
+		t.Fatalf("foreign tenant obtained job context: %v", err)
+	}
+	if prompt, err := store.AnalysisPrompt(ctx, tenants.A.TenantID, job.ID); err != nil || prompt != command.Prompt {
+		t.Fatalf("job context mismatch: %v", err)
+	}
 	repeated, err := service.Enqueue(ctx, command)
 	if err != nil || repeated.ID != job.ID {
 		t.Fatalf("idempotent enqueue = %#v, %v", repeated, err)
@@ -416,7 +422,24 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 		output      func(string) string
 		wantStatus  domain.ApplicationStatus
 		wantSummary int
+		body        string
 	}{
+		{
+			name: "QA-06 invented price rejected",
+			body: "Здравствуйте, подскажите стоимость полировки.",
+			output: func(messageID string) string {
+				return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Клиент спросил стоимость услуги.","facts":[{"type":"PRICE_MENTIONED","value":true,"confidence":0.99,"evidenceMessageIds":["` + messageID + `"],"amount":"0","currency":"RUB"}]}`
+			},
+			wantStatus: domain.ApplicationRejected,
+		},
+		{
+			name: "explicit price preserved",
+			body: "Полировка стоит 3 500,50 рублей.",
+			output: func(messageID string) string {
+				return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Названа цена услуги.","facts":[{"type":"PRICE_MENTIONED","value":true,"confidence":0.99,"evidenceMessageIds":["` + messageID + `"],"amount":"3500.50","currency":"RUB"}]}`
+			},
+			wantStatus: domain.ApplicationApplied, wantSummary: 1,
+		},
 		{
 			name: "invalid",
 			output: func(string) string {
@@ -443,7 +466,11 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			conversationID, messageID := insertAIConversation(t, pool, tenant, "Можно записаться завтра?")
+			body := testCase.body
+			if body == "" {
+				body = "Можно записаться завтра?"
+			}
+			conversationID, messageID := insertAIConversation(t, pool, tenant, body)
 			opportunityID := mustID(t)
 			if _, err := pool.Exec(ctx, `
 				INSERT INTO opportunities(
@@ -483,6 +510,13 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 			completed, err := service.Complete(ctx, node.ID, secret, job.ID, run.ID, testCase.output(messageID))
 			if err != nil || completed.ApplicationStatus != testCase.wantStatus {
 				t.Fatalf("завершение = %#v, %v", completed, err)
+			}
+			var appliedEvents int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE tenant_id=$1 AND aggregate_id=$2 AND event_type='ai.analysis.applied'`, tenant.TenantID, run.ID).Scan(&appliedEvents); err != nil {
+				t.Fatal(err)
+			}
+			if appliedEvents != testCase.wantSummary {
+				t.Fatalf("applied events = %d, want %d", appliedEvents, testCase.wantSummary)
 			}
 
 			var stage string

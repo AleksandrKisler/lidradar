@@ -58,6 +58,20 @@ func TestLoadRejectsUnknownEvidenceAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestBenchmarkRejectsUngroundedPriceLikeProduction(t *testing.T) {
+	cases, digest, err := Load(strings.NewReader(dataset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases[0].Input.Messages[0].Body = "Подскажите стоимость полировки."
+	cases[0].Expected = nil
+	provider := infrastructure.FakeProvider{Output: `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"message-1","summary":"Вопрос о цене.","facts":[{"type":"PRICE_MENTIONED","value":true,"confidence":0.99,"amount":"0","currency":"RUB","evidenceMessageIds":["message-1"]}]}`}
+	report, err := Run(context.Background(), provider, cases, digest, Thresholds{MinimumValidRate: 1})
+	if err != nil || report.Invalid != 1 || report.Passed {
+		t.Fatalf("report = %#v, error = %v", report, err)
+	}
+}
+
 func TestAuditRejectsConversationLeakage(t *testing.T) {
 	cases, _, err := Load(strings.NewReader(dataset))
 	if err != nil {

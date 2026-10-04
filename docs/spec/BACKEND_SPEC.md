@@ -108,8 +108,11 @@ resource. Catalog management requires the centralized `service.manage`
 permission, which is granted to OWNER and not to MANAGER.
 
 Names are stored in cleaned display form and with a deterministic lowercase,
-whitespace-collapsed `normalized_name` for later matching. Price boundaries are
-optional exact decimals: PostgreSQL stores `NUMERIC(14,2)`, Go uses a decimal
+whitespace-collapsed `normalized_name` for later matching. On both creation and
+update, the cleaned display name must contain 1–200 Unicode code points, matching
+OpenAPI `maxLength` and PostgreSQL `char_length`; UTF-8 bytes and UTF-16 code units
+do not determine the limit. Whitespace is trimmed and collapsed before counting.
+Price boundaries are optional exact decimals: PostgreSQL stores `NUMERIC(14,2)`, Go uses a decimal
 value, and REST sends strings with exactly two fractional digits. JSON numbers,
 negative prices, more than two fractional digits, and a lower boundary above
 the upper boundary are rejected. Currency defaults to `RUB` and is normalized
@@ -887,6 +890,19 @@ Opportunity внутри своей организации отклоняетс�
 передаются предметным правилам. Версии модели, инструкции, схемы, revision и
 последнего анализируемого сообщения сохраняются в заданиях, попытках и
 производных резюме.
+
+Перед применением положительного `PRICE_MENTIONED` Cloud Core дополнительно
+сверяет сумму с каждым указанным сообщением из сохранённого контекста именно
+этого AI-задания. Каталог, прежнее резюме и неуказанные сообщения не являются
+доказательством суммы. Число сравнивается целиком, без округления: допустимы
+группы тысяч через обычный/неразрывный/узкий неразрывный пробел, точка или
+запятая для дробной части. Придуманный ноль в вопросе без суммы, неизвестный ID
+или неподтверждённая сумма переводят весь результат в `REJECTED`, сохраняют
+сырой ответ и безопасную причину, но не обновляют резюме и не публикуют событие
+применения. Явно указанная нулевая цена допустима. Эту же проверку выполняет
+benchmark. Числовая проверка необходима, но не заменяет смысловую оценку:
+контекст цены и валюта остаются ответственностью модели. Суммы словами и
+множители вроде «5 тыс.» автоматически не преобразуются.
 
 Свежесть проверяется одновременно по revision переписки и последнему
 анализируемому текстовому сообщению. Материал без текста учитывается revision,

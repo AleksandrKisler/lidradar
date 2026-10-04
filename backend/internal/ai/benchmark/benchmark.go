@@ -179,6 +179,9 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 			continue
 		}
 		result, err := application.ValidateAnalysisResultV1(raw, c.Input.AnalysisThroughMessageID)
+		if err == nil {
+			err = application.ValidatePriceEvidence(result, prompt)
+		}
 		if err != nil {
 			report.Invalid++
 			report.FalseNegative += len(c.Expected)

@@ -1662,7 +1662,7 @@ components:
       required: [rawEventId, status, duplicate]
       properties:
         rawEventId: { type: string, format: uuid }
-        status: { type: string, enum: [RECEIVED, FAILED] }
+        status: { type: string, enum: [RECEIVED, PROCESSED, FAILED], description: 'Current persisted state; a duplicate receipt may already be PROCESSED by the asynchronous worker.' }
         duplicate: { type: boolean }
     Contact:
       type: object

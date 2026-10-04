@@ -66,6 +66,7 @@ type Store interface {
 	Claim(context.Context, string, time.Time, time.Time) (domain.Job, bool, error)
 	Start(context.Context, domain.Run, time.Time) (domain.Run, error)
 	Run(context.Context, string) (domain.Run, error)
+	AnalysisPrompt(context.Context, string, string) (string, error)
 	ConversationSnapshot(context.Context, string, string) (domain.ConversationSnapshot, error)
 	Finalize(context.Context, Finalization) (domain.Run, error)
 }
@@ -344,6 +345,13 @@ func (s Service) Complete(ctx context.Context, id, secret, jobID, runID, output 
 		return domain.Run{}, ErrLeaseLost
 	}
 	result, validationErr := ValidateAnalysisResultV1(output, run.AnalysisThroughMessageID)
+	if validationErr == nil && hasPositivePrice(result) {
+		prompt, promptErr := s.store.AnalysisPrompt(ctx, run.TenantID, run.JobID)
+		if promptErr != nil {
+			return domain.Run{}, promptErr
+		}
+		validationErr = ValidatePriceEvidence(result, prompt)
+	}
 	applicationStatus := domain.ApplicationApplied
 	validationMessage := ""
 	if validationErr != nil {

@@ -534,6 +534,23 @@ func (store *PostgresStore) Run(ctx context.Context, id string) (domain.Run, err
 	return run, nil
 }
 
+// AnalysisPrompt reads the immutable input of a claimed job owned by this
+// module. Tenant scoping remains explicit even on the platform connection.
+func (store *PostgresStore) AnalysisPrompt(ctx context.Context, tenantID, jobID string) (string, error) {
+	if store == nil || store.pool == nil || tenantID == "" || jobID == "" {
+		return "", application.ErrInvalid
+	}
+	var prompt string
+	err := store.pool.QueryRow(ctx, `SELECT payload ->> 'prompt' FROM ai_jobs WHERE tenant_id = $1 AND id = $2`, tenantID, jobID).Scan(&prompt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", application.ErrNotFound
+	}
+	if err != nil {
+		return "", mapAIStoreError("чтение контекста AI-задания", err)
+	}
+	return prompt, nil
+}
+
 func (store *PostgresStore) ConversationSnapshot(ctx context.Context, tenantID, conversationID string) (domain.ConversationSnapshot, error) {
 	if store == nil || store.pool == nil || tenantID == "" || conversationID == "" {
 		return domain.ConversationSnapshot{}, application.ErrInvalid

@@ -293,6 +293,16 @@ func (store *MemoryStore) Run(_ context.Context, id string) (domain.Run, error) 
 	return run, nil
 }
 
+func (store *MemoryStore) AnalysisPrompt(_ context.Context, tenantID, jobID string) (string, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	job, ok := store.jobs[jobID]
+	if !ok || job.TenantID != tenantID {
+		return "", application.ErrNotFound
+	}
+	return job.Prompt, nil
+}
+
 func (store *MemoryStore) ConversationSnapshot(_ context.Context, tenantID, conversationID string) (domain.ConversationSnapshot, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
 )
@@ -82,7 +83,8 @@ func NewServiceCatalogItem(
 }
 
 func (item ServiceCatalogItem) Validate() error {
-	if item.ID == "" || item.TenantID == "" || item.Name == "" || len(item.Name) > 200 ||
+	// OpenAPI maxLength and PostgreSQL char_length count Unicode code points.
+	if item.ID == "" || item.TenantID == "" || item.Name == "" || utf8.RuneCountInString(item.Name) > 200 ||
 		item.Name != cleanName(item.Name) || item.NormalizedName != NormalizeName(item.Name) ||
 		len(item.Currency) != 3 || item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() {
 		return ErrInvalid
