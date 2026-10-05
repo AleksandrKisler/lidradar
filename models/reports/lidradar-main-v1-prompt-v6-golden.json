@@ -1,0 +1,479 @@
+{
+  "promptVersions": [
+    "analyze-conversation.prompt.v6"
+  ],
+  "datasetSha256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34",
+  "cases": 400,
+  "truePositive": 352,
+  "falsePositive": 17,
+  "falseNegative": 15,
+  "invalid": 0,
+  "exact": 373,
+  "precision": 0.9539295392953929,
+  "recall": 0.9591280653950953,
+  "f1": 0.9565217391304348,
+  "exactRate": 0.9325,
+  "validRate": 1,
+  "evidenceExactRate": 0.9857954545454546,
+  "p50Ms": 1948,
+  "p95Ms": 4219,
+  "p99Ms": 4342,
+  "throughputCasesPerSecond": 0.4749623650842518,
+  "byFactType": {
+    "BOOKING_INTENT": {
+      "truePositive": 127,
+      "falsePositive": 7,
+      "falseNegative": 15,
+      "precision": 0.9477611940298507,
+      "recall": 0.8943661971830986,
+      "f1": 0.9202898550724637
+    },
+    "BUSINESS_COMMITMENT": {
+      "truePositive": 55,
+      "falsePositive": 3,
+      "falseNegative": 0,
+      "precision": 0.9482758620689655,
+      "recall": 1,
+      "f1": 0.9734513274336283
+    },
+    "FOLLOW_UP_CANDIDATE": {
+      "truePositive": 56,
+      "falsePositive": 5,
+      "falseNegative": 0,
+      "precision": 0.9180327868852459,
+      "recall": 1,
+      "f1": 0.9572649572649573
+    },
+    "PRICE_MENTIONED": {
+      "truePositive": 114,
+      "falsePositive": 2,
+      "falseNegative": 0,
+      "precision": 0.9827586206896551,
+      "recall": 1,
+      "f1": 0.991304347826087
+    }
+  },
+  "failures": [
+    {
+      "caseId": "booking-direct-golden-16",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-016-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-01",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-073-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-08",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-080-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-10",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-082-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-11",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-083-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-16",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-088-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-17",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-089-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-19",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-091-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-20",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-092-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-21",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-093-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-23",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-095-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-24",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-096-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-25",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-097-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-27",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-099-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-golden-28",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-100-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-negative-golden-01",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-109-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-negative-golden-03",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-111-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-negative-golden-07",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-115-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "commitment-negative-golden-03",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BUSINESS_COMMITMENT",
+          "value": true,
+          "confidence": 0.95,
+          "evidenceMessageIds": [
+            "case-273-message-2"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "commitment-negative-golden-23",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BUSINESS_COMMITMENT",
+          "value": true,
+          "confidence": 0.85,
+          "evidenceMessageIds": [
+            "case-293-message-2"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "followup-refusal-golden-07",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "FOLLOW_UP_CANDIDATE",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-347-message-2"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "followup-refusal-golden-12",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-352-message-2"
+          ]
+        },
+        {
+          "type": "FOLLOW_UP_CANDIDATE",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-352-message-2"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "followup-refusal-golden-18",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-358-message-2"
+          ]
+        },
+        {
+          "type": "FOLLOW_UP_CANDIDATE",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-358-message-2"
+          ]
+        },
+        {
+          "type": "BUSINESS_COMMITMENT",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-358-message-2"
+          ]
+        },
+        {
+          "type": "PRICE_MENTIONED",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-358-message-2"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "followup-refusal-golden-19",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-359-message-2"
+          ]
+        },
+        {
+          "type": "FOLLOW_UP_CANDIDATE",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-359-message-2"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "followup-refusal-golden-27",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "FOLLOW_UP_CANDIDATE",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-367-message-2"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "noise-adversarial-golden-07",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "PRICE_MENTIONED",
+          "value": true,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-382-message-1"
+          ],
+          "amount": "99999",
+          "currency": "RUB"
+        }
+      ]
+    },
+    {
+      "caseId": "noise-adversarial-golden-08",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-383-message-1"
+          ]
+        }
+      ]
+    }
+  ],
+  "passed": true
+}

@@ -144,3 +144,36 @@ func TestAnalysisSystemPromptIsVersioned(t *testing.T) {
 		t.Fatal("неизвестная версия инструкции должна отклоняться")
 	}
 }
+
+func TestLlamaPriceEvidencePromptAndSamplingAreVersioned(t *testing.T) {
+	for _, tc := range []struct {
+		version              string
+		temperature, penalty float64
+	}{
+		{application.AnalysisPromptV5, 0.7, 1.5}, {application.AnalysisPromptV6, 0.2, 0},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			var body struct {
+				Temperature float64             `json:"temperature"`
+				Penalty     float64             `json:"presence_penalty"`
+				Messages    []map[string]string `json:"messages"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				w.Write([]byte(`{"choices":[{"message":{"content":"{\"facts\":[]}"}}]}`))
+			}))
+			defer srv.Close()
+			if _, err := (LlamaProvider{URL: srv.URL}).Infer(context.Background(), `{"promptVersion":"`+tc.version+`","analysisThroughMessageId":"m1","messages":[{"id":"m1","direction":"OUTGOING","body":"Стоимость 5000 рублей"}]}`); err != nil {
+				t.Fatal(err)
+			}
+			if body.Temperature != tc.temperature || body.Penalty != tc.penalty {
+				t.Fatalf("sampling = %#v", body)
+			}
+			if tc.version == application.AnalysisPromptV6 && (!strings.Contains(body.Messages[0]["content"], "справка, не доказательства") || !strings.Contains(body.Messages[3]["content"], "4200 RUB")) {
+				t.Fatal("missing grounding instructions and counterexample")
+			}
+		})
+	}
+}

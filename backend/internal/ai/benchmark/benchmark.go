@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,6 +64,7 @@ type Thresholds struct {
 }
 
 type Report struct {
+	PromptVersions           []string               `json:"promptVersions"`
 	DatasetSHA256            string                 `json:"datasetSha256"`
 	Cases                    int                    `json:"cases"`
 	TruePositive             int                    `json:"truePositive"`
@@ -161,6 +163,9 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	matchedFacts := 0
 	exactEvidence := 0
 	for _, c := range cases {
+		if !slices.Contains(report.PromptVersions, c.Input.PromptVersion) {
+			report.PromptVersions = append(report.PromptVersions, c.Input.PromptVersion)
+		}
 		prompt, err := application.EncodeAnalysisRequest(c.Input)
 		if err != nil {
 			return report, err
@@ -278,7 +283,7 @@ func AuditCases(cases []Case) (Audit, error) {
 
 func validateCase(c Case) error {
 	input := c.Input
-	if input.Task != "ANALYZE_CONVERSATION" || input.SchemaVersion != application.AnalysisSchemaV1 || input.PromptVersion != application.CurrentAnalysisPrompt {
+	if input.Task != "ANALYZE_CONVERSATION" || input.SchemaVersion != application.AnalysisSchemaV1 || !application.SupportedAnalysisPrompt(input.PromptVersion) {
 		return errors.New("несовместимый входной контракт")
 	}
 	if input.ConversationID == "" || input.BaseConversationRevision < 1 || len(input.Messages) == 0 || len(input.Messages) > application.MaxContextMessages {

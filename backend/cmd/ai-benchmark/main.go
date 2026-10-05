@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"lidradar/backend/internal/ai/application"
 	"lidradar/backend/internal/ai/benchmark"
 	"lidradar/backend/internal/ai/infrastructure"
 )
@@ -20,6 +21,7 @@ func main() {
 	digestPath := flag.String("checksum", "models/datasets/golden_v1.sha256", "путь к утверждённой контрольной сумме")
 	endpoint := flag.String("endpoint", "http://127.0.0.1:8080/v1/chat/completions", "маршрут llama.cpp")
 	timeout := flag.Duration("timeout", 30*time.Minute, "предельная длительность всей проверки")
+	promptVersion := flag.String("prompt-version", "", "версия инструкции для сравнения; файл и контрольная сумма набора не меняются")
 	precision := flag.Float64("minimum-precision", 0, "минимальная общая точность, обязательно")
 	factPrecision := flag.Float64("minimum-fact-precision", 0, "минимальная точность каждого типа факта, обязательно")
 	recall := flag.Float64("minimum-recall", 0, "минимальная полнота, обязательно")
@@ -29,6 +31,9 @@ func main() {
 	evidence := flag.Float64("minimum-evidence-exact-rate", 0, "минимальная точность ссылок на доказательства, обязательно")
 	p95 := flag.Int64("maximum-p95-ms", 0, "предельная задержка p95 в миллисекундах, обязательно")
 	flag.Parse()
+	if *promptVersion != "" && !application.SupportedAnalysisPrompt(*promptVersion) {
+		fatal(fmt.Errorf("неподдерживаемая версия инструкции"))
+	}
 	if *precision <= 0 || *factPrecision <= 0 || *recall <= 0 || *f1 <= 0 || *exact <= 0 || *valid <= 0 || *evidence <= 0 || *p95 <= 0 {
 		fatal(fmt.Errorf("все пороги качества и производительности должны быть заданы явно"))
 	}
@@ -55,6 +60,11 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
+	if *promptVersion != "" {
+		for i := range cases {
+			cases[i].Input.PromptVersion = *promptVersion
+		}
+	}
 	report, err := benchmark.Run(ctx, infrastructure.LlamaProvider{URL: *endpoint}, cases, digest, benchmark.Thresholds{
 		MinimumPrecision: *precision, MinimumFactPrecision: *factPrecision, MinimumRecall: *recall, MinimumF1: *f1, MinimumExactRate: *exact, MinimumValidRate: *valid, MinimumEvidenceExactRate: *evidence, MaximumP95MS: *p95,
 	})

@@ -1,0 +1,123 @@
+{
+  "promptVersions": [
+    "analyze-conversation.prompt.v6"
+  ],
+  "datasetSha256": "b4b83c909c7dd814e25e068ea0be3c851575ae42a578a5335ef8f98a4e29d238",
+  "cases": 100,
+  "truePositive": 90,
+  "falsePositive": 2,
+  "falseNegative": 3,
+  "invalid": 0,
+  "exact": 96,
+  "precision": 0.9782608695652174,
+  "recall": 0.967741935483871,
+  "f1": 0.972972972972973,
+  "exactRate": 0.96,
+  "validRate": 1,
+  "evidenceExactRate": 0.9666666666666667,
+  "p50Ms": 1919,
+  "p95Ms": 4150,
+  "p99Ms": 4314,
+  "throughputCasesPerSecond": 0.4736779903871373,
+  "byFactType": {
+    "BOOKING_INTENT": {
+      "truePositive": 33,
+      "falsePositive": 1,
+      "falseNegative": 3,
+      "precision": 0.9705882352941176,
+      "recall": 0.9166666666666666,
+      "f1": 0.9428571428571428
+    },
+    "BUSINESS_COMMITMENT": {
+      "truePositive": 15,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    "FOLLOW_UP_CANDIDATE": {
+      "truePositive": 14,
+      "falsePositive": 1,
+      "falseNegative": 0,
+      "precision": 0.9333333333333333,
+      "recall": 1,
+      "f1": 0.9655172413793104
+    },
+    "PRICE_MENTIONED": {
+      "truePositive": 28,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    }
+  },
+  "failures": [
+    {
+      "caseId": "booking-direct-dev-07",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-036-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-dev-04",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-105-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "booking-question-dev-07",
+      "reason": "факты не совпали с разметкой",
+      "expectedFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": true,
+          "confidence": 1,
+          "evidenceMessageIds": [
+            "case-108-message-1"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "followup-refusal-dev-04",
+      "reason": "факты не совпали с разметкой",
+      "actualFacts": [
+        {
+          "type": "BOOKING_INTENT",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-372-message-2"
+          ]
+        },
+        {
+          "type": "FOLLOW_UP_CANDIDATE",
+          "value": false,
+          "confidence": 0.99,
+          "evidenceMessageIds": [
+            "case-372-message-2"
+          ]
+        }
+      ]
+    }
+  ],
+  "passed": true
+}

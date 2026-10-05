@@ -23,6 +23,7 @@ func TestPriceFactRequiresAmountInCitedMessage(t *testing.T) {
 		{"fraction of decimal", "Цена 3500,50 ₽", "3500", false},
 		{"integer", "Полировка стоит 5000 рублей.", "5000.00", true},
 		{"comma decimal", "Стоимость 3500,50 ₽", "3500.50", true},
+		{"comma model output", "Стоимость 3500,50 ₽", "3500,50", true},
 		{"dot decimal", "Стоимость 3500.50 RUB", "3500.5", true},
 		{"grouped", "Цена 3 500 руб.", "3500", true},
 		{"nonbreaking space", "Цена 3\u00a0500,50 руб.", "3500.50", true},
@@ -103,6 +104,9 @@ func checkPriceCompletion(t *testing.T, messages []application.ContextMessage, e
 	}
 	if accept && (len(summary.Facts) != 1 || !summary.Facts[0].Trusted) {
 		t.Fatalf("lost positive price: %#v", summary.Facts)
+	}
+	if done.Output != string(raw) {
+		t.Fatal("original model response must be preserved for audit")
 	}
 	if !accept && done.ValidationError == "" {
 		t.Fatal("rejection must be auditable")

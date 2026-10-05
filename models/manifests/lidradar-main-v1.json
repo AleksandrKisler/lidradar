@@ -2,7 +2,7 @@
   "name": "lidradar-main-v1",
   "status": "FROZEN",
   "contractVersion": "analyze-conversation.v1",
-  "promptVersion": "analyze-conversation.prompt.v5",
+  "promptVersion": "analyze-conversation.prompt.v6",
   "datasetVersion": "lidradar-ai-benchmark.v1",
   "dataset": {
     "cases": 500,
@@ -10,9 +10,10 @@
     "devCases": 100,
     "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34",
     "measuredOn": {
-      "note": "Результаты ниже получены до LR-BE-RM-024 на golden_v1 из 60 случаев (сплит 180/60/60). Повторный прогон на 400 случаях обязателен перед сменой статуса манифеста.",
-      "goldenCases": 60,
-      "goldenSHA256": "c85cd54d3c6f43134c509381247a278c4f8ec05975acf1f6a3f54aa90e55e4f2"
+      "devCases": 100,
+      "devSHA256": "b4b83c909c7dd814e25e068ea0be3c851575ae42a578a5335ef8f98a4e29d238",
+      "goldenCases": 400,
+      "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34"
     }
   },
   "runtime": "llama.cpp",
@@ -23,11 +24,11 @@
     "fit": "Qwen3-8B Q4_K_M ≈ 4.9 GB весов + KV-кэш ≈ 0.5 GB при контексте 4096; наблюдаемый пик 5360 MiB; контекст 4096 и parallel 1 — потолок"
   },
   "generation": {
-    "temperature": 0.7,
+    "temperature": 0.2,
     "topP": 0.8,
     "topK": 20,
     "minP": 0,
-    "presencePenalty": 1.5,
+    "presencePenalty": 0,
     "seed": 42,
     "thinking": false,
     "contextSize": 4096,
@@ -51,32 +52,43 @@
   "modelArtifact": "Qwen3-8B-Q4_K_M.gguf",
   "modelSHA256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
   "validationResult": {
-    "report": "models/reports/lidradar-main-v1-validation.json",
-    "precision": 0.9622641509433962,
-    "recall": 0.9807692307692307,
-    "f1": 0.9714285714285714,
-    "exactRate": 0.95,
+    "split": "DEV",
+    "report": "models/reports/lidradar-main-v1-prompt-v6-dev.json",
+    "cases": 100,
+    "precision": 0.9782608695652174,
+    "recall": 0.967741935483871,
+    "f1": 0.972972972972973,
+    "exactRate": 0.96,
     "validRate": 1,
-    "evidenceExactRate": 0.9411764705882353,
-    "p95Ms": 4038,
+    "evidenceExactRate": 0.9666666666666667,
+    "p95Ms": 4150,
     "passed": true
   },
   "goldenResult": {
-    "report": "models/reports/lidradar-main-v1-golden.json",
-    "precision": 1,
-    "recall": 0.9807692307692307,
-    "f1": 0.9902912621359223,
-    "exactRate": 0.9833333333333333,
+    "report": "models/reports/lidradar-main-v1-prompt-v6-golden.json",
+    "cases": 400,
+    "precision": 0.9539295392953929,
+    "recall": 0.9591280653950953,
+    "f1": 0.9565217391304348,
+    "exactRate": 0.9325,
     "validRate": 1,
-    "evidenceExactRate": 0.9411764705882353,
-    "p95Ms": 3848,
+    "evidenceExactRate": 0.9857954545454546,
+    "p95Ms": 4219,
     "passed": true
   },
   "hardwareResult": {
+    "report": "models/reports/lidradar-main-v1-prompt-v6-hardware.json",
     "peakObservedVRAMMiB": 5360,
     "oom": 0,
-    "minimumObservedTokensPerSecond": 46.66,
+    "minimumObservedTokensPerSecond": 47.16644505273208,
     "passed": true
   },
-  "frozenAt": "2026-09-01T18:36:00Z"
+  "frozenAt": "2026-10-05T00:10:46.366523+00:00",
+  "previousQualification": "models/reports/lidradar-main-v1-prompt-v5-manifest.json",
+  "candidateSelection": "models/reports/lidradar-main-v1-prompt-v6-selection.json",
+  "knownLimitations": [
+    "GOLDEN: 27 из 400 случаев не совпали со строгой разметкой; 15 пропущенных намерений записи.",
+    "GOLDEN: один положительный PRICE_MENTIONED на adversarial-сообщении с явной числовой суммой; числовой guard не заменяет смысловую защиту от prompt injection.",
+    "Дополнительная QA-06 выборка: 3 явных отрицательных факта вместо ожидаемого пустого списка; это несовпадения строгой разметки."
+  ]
 }

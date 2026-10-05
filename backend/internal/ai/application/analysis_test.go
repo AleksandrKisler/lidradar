@@ -116,3 +116,26 @@ func TestConfidencePolicyExcludesOnlyUntrustedFacts(t *testing.T) {
 		t.Fatalf("trusted = %#v", trusted)
 	}
 }
+
+func TestAnalysisNormalizesOnlyUnambiguousDecimalComma(t *testing.T) {
+	for _, tc := range []struct{ amount, want string }{
+		{"3500,50", "3500.50"}, {"3500,5", "3500.5"}, {"0,00", "0.00"},
+		{"3500.50", "3500.50"}, {"3500", "3500"},
+		{"3,500", ""}, {"3,500.50", ""}, {"3.500,50", ""}, {"3,5,0", ""},
+		{",50", ""}, {"3500,", ""}, {"-3500,50", ""}, {"3500,50 RUB", ""},
+	} {
+		t.Run(tc.amount, func(t *testing.T) {
+			raw := validResult(`[{"type":"PRICE_MENTIONED","value":true,"confidence":0.99,"evidenceMessageIds":["m2"],"amount":"` + tc.amount + `","currency":"RUB"}]`)
+			result, err := application.ValidateAnalysisResultV1(raw, "m2")
+			if tc.want == "" {
+				if !errors.Is(err, application.ErrInvalidAIOutput) {
+					t.Fatalf("ambiguous amount accepted: %v", err)
+				}
+				return
+			}
+			if err != nil || result.Facts[0].Amount == nil || *result.Facts[0].Amount != tc.want {
+				t.Fatalf("result = %#v, error = %v", result, err)
+			}
+		})
+	}
+}

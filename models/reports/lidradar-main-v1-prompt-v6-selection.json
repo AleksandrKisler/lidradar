@@ -1,0 +1,12 @@
+{
+  "selectedAt": "2026-10-04T23:54:50.435481+00:00",
+  "promptVersion": "analyze-conversation.prompt.v6",
+  "devReport": "v6-dev4.json",
+  "sha256": {
+    "backend/internal/ai/infrastructure/provider.go": "28659b131c45983d7acca5ba80b1ebacbf959283b0bf96643edfba1a3f27f450",
+    "backend/internal/ai/infrastructure/generation_schema.go": "097a793b52984b902657317c4b982d32f77071bd13d564da901233e10c86e4c6",
+    "backend/internal/ai/application/price_evidence.go": "6d69733df3e65f999a0bedecf2d1580f1d4423aff2d996bd88b6592eebc1af1c",
+    "runtime/frontend/qa-ai-quality-runner": "ca469322d9ad78a154ac273c647215da7b51d07452a6eee127a64552e8e2fc59"
+  },
+  "note": "Selected before opening GOLDEN; prompt and sampling frozen."
+}

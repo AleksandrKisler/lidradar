@@ -1,0 +1,12 @@
+{
+  "gpu": "NVIDIA GeForce RTX 4060",
+  "samples": 8,
+  "peakObservedVRAMMiB": 5360,
+  "oom": 0,
+  "restartsDuringRun": 0,
+  "minimumObservedTokensPerSecond": 47.16644505273208,
+  "responsesWithTimings": 500,
+  "maximumPromptTokens": 2568,
+  "passed": true,
+  "note": "GPU memory sampled from model container; host NVML has a pre-existing library/driver mismatch."
+}

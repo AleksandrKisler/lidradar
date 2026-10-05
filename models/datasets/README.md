@@ -56,12 +56,28 @@ make ai-benchmark-dev \
   AI_BENCHMARK_ENDPOINT=http://llama-server:8080/v1/chat/completions
 ```
 
+`make ai-benchmark-dev` и `make ai-benchmark-golden` проверяют инструкцию v6.
+Историческую версию можно выбрать через
+`AI_BENCHMARK_PROMPT_VERSION=analyze-conversation.prompt.v5`.
+В CLI для того же выбора используется `-prompt-version`. Подмена версии
+происходит только после проверки SHA-256 и записывается в `promptVersions`
+отчёта. Сами данные v1 и их генератор сохраняют исходную инструкцию v5;
+обновление рабочего промпта не меняет защищённый набор.
+
+`qa06_v1.jsonl` — отдельные 37 регрессионных примеров: вопросы о цене,
+справочные суммы, явные цены, десятичная запятая и контрольные примеры остальных
+типов фактов. Они использовались при настройке и не входят в независимые 500
+случаев. Строгая разметка ожидает пустой список при отсутствии фактов; явное
+`value=false` также считается несовпадением, хотя не подтверждает положительный
+факт.
+
 Проверка на DEV не использует контрольную сумму golden-файла:
 
 ```sh
 go run ./backend/cmd/ai-benchmark \
   -dataset models/datasets/dev_v1.jsonl \
   -checksum '' \
+  -prompt-version analyze-conversation.prompt.v6 \
   -endpoint http://127.0.0.1:8080/v1/chat/completions \
   -minimum-precision 0.90 \
   -minimum-fact-precision 0.85 \
@@ -79,6 +95,7 @@ go run ./backend/cmd/ai-benchmark \
 go run ./backend/cmd/ai-benchmark \
   -dataset models/datasets/golden_v1.jsonl \
   -checksum models/datasets/golden_v1.sha256 \
+  -prompt-version analyze-conversation.prompt.v6 \
   -endpoint http://127.0.0.1:8080/v1/chat/completions \
   -minimum-precision 0.90 \
   -minimum-fact-precision 0.85 \

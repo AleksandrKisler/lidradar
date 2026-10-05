@@ -6,6 +6,7 @@ BUILD_VERSION ?= development
 BUILD_REVISION ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_LDFLAGS := -X lidradar/backend/platform/buildinfo.Version=$(BUILD_VERSION) -X lidradar/backend/platform/buildinfo.Revision=$(BUILD_REVISION)
 AI_BENCHMARK_ENDPOINT ?= http://127.0.0.1:8080/v1/chat/completions
+AI_BENCHMARK_PROMPT_VERSION ?= analyze-conversation.prompt.v6
 AI_BENCHMARK_GATES := -minimum-precision 0.90 \
 	-minimum-fact-precision 0.85 \
 	-minimum-recall 0.90 \
@@ -47,6 +48,7 @@ ai-benchmark-dev:
 		-dataset models/datasets/dev_v1.jsonl \
 		-checksum '' \
 		-endpoint $(AI_BENCHMARK_ENDPOINT) \
+		-prompt-version $(AI_BENCHMARK_PROMPT_VERSION) \
 		$(AI_BENCHMARK_GATES)
 
 # Контрольная выборка защищена суммой и открывается только для окончательного
@@ -56,6 +58,7 @@ ai-benchmark-golden:
 		-dataset models/datasets/golden_v1.jsonl \
 		-checksum models/datasets/golden_v1.sha256 \
 		-endpoint $(AI_BENCHMARK_ENDPOINT) \
+		-prompt-version $(AI_BENCHMARK_PROMPT_VERSION) \
 		$(AI_BENCHMARK_GATES)
 
 fmt:

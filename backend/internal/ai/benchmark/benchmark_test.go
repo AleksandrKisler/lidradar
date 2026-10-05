@@ -31,6 +31,9 @@ func TestLoadRunAndGoldenProtection(t *testing.T) {
 	if !report.Passed || report.Exact != 1 || report.F1 != 1 {
 		t.Fatalf("unexpected report: %+v", report)
 	}
+	if len(report.PromptVersions) != 1 || report.PromptVersions[0] != cases[0].Input.PromptVersion {
+		t.Fatal("report must record evaluated prompt version")
+	}
 }
 
 func TestLoadRejectsDuplicateAndRunCountsInvalid(t *testing.T) {
@@ -55,6 +58,17 @@ func TestLoadRejectsUnknownEvidenceAndTrailingJSON(t *testing.T) {
 	withTrailingJSON := strings.TrimSpace(dataset) + `{}` + "\n"
 	if _, _, err := Load(strings.NewReader(withTrailingJSON)); err == nil {
 		t.Fatal("expected trailing JSON rejection")
+	}
+}
+
+func TestLoadPreservesHistoricalPromptAndRejectsUnknownVersion(t *testing.T) {
+	cases, _, err := Load(strings.NewReader(dataset))
+	if err != nil || cases[0].Input.PromptVersion != "analyze-conversation.prompt.v5" {
+		t.Fatalf("historical dataset changed: %v", err)
+	}
+	unknown := strings.ReplaceAll(dataset, "analyze-conversation.prompt.v5", "analyze-conversation.prompt.unknown")
+	if _, _, err := Load(strings.NewReader(unknown)); err == nil {
+		t.Fatal("unknown prompt version accepted")
 	}
 }
 

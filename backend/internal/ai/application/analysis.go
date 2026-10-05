@@ -19,13 +19,23 @@ const (
 	AnalysisPromptV3      = "analyze-conversation.prompt.v3"
 	AnalysisPromptV4      = "analyze-conversation.prompt.v4"
 	AnalysisPromptV5      = "analyze-conversation.prompt.v5"
-	CurrentAnalysisPrompt = AnalysisPromptV5
+	AnalysisPromptV6      = "analyze-conversation.prompt.v6"
+	CurrentAnalysisPrompt = AnalysisPromptV6
 	DefaultModelVersion   = "lidradar-main-v1"
 	MaxContextMessages    = 20
 	MaxContextRunes       = 12000 // консервативная оценка для цели в 3000 токенов
 )
 
 var ErrInvalidAIOutput = errors.New("invalid AI output")
+
+func SupportedAnalysisPrompt(version string) bool {
+	switch version {
+	case AnalysisPromptV1, AnalysisPromptV2, AnalysisPromptV3, AnalysisPromptV4, AnalysisPromptV5, AnalysisPromptV6:
+		return true
+	default:
+		return false
+	}
+}
 
 type ContextMessage struct {
 	ID        string `json:"id"`
@@ -151,6 +161,10 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 		}
 		fact.EvidenceMessageIDs = normalizedEvidence
 		if fact.Type == domain.FactPriceMentioned {
+			if fact.Value && fact.Amount != nil {
+				amount := normalizeModelAmount(*fact.Amount)
+				fact.Amount = &amount
+			}
 			if fact.Value && (fact.Amount == nil || !validDecimalAmount(*fact.Amount) || !validCurrency(fact.Currency)) {
 				return result, fmt.Errorf("%w: mentioned price lacks amount/currency", ErrInvalidAIOutput)
 			}
@@ -214,6 +228,22 @@ func validDecimalAmount(value string) bool {
 		}
 	}
 	return digitSeen
+}
+
+// Accept a decimal comma only with one or two fractional digits. Multiple
+// separators and ambiguous thousands notation remain invalid. The original
+// Run.Output is untouched; only the parsed fact becomes canonical.
+func normalizeModelAmount(value string) string {
+	if strings.Count(value, ",") == 1 && !strings.Contains(value, ".") {
+		_, fraction, _ := strings.Cut(value, ",")
+		if len(fraction) >= 1 && len(fraction) <= 2 {
+			candidate := strings.Replace(value, ",", ".", 1)
+			if validDecimalAmount(candidate) {
+				return candidate
+			}
+		}
+	}
+	return value
 }
 
 func appendUnique(values []string, additional ...string) []string {

@@ -58,6 +58,33 @@ func ValidatePriceEvidence(result domain.AnalysisResultV1, prompt string) error 
 }
 
 func containsEvidenceAmount(body, amount string) bool {
+	for _, candidate := range evidenceAmounts(body) {
+		if candidate == normalizedEvidenceAmount(amount) {
+			return true
+		}
+	}
+	return false
+}
+
+// PriceEvidenceAmounts supplies generation with numeric candidates from message
+// text only. Monetary meaning still belongs to the model; the server validates
+// the selected amount against every cited message before applying a fact.
+func PriceEvidenceAmounts(messages []ContextMessage) []string {
+	seen := map[string]bool{}
+	amounts := make([]string, 0)
+	for _, message := range messages {
+		for _, amount := range evidenceAmounts(message.Body) {
+			if !seen[amount] {
+				amounts = append(amounts, amount)
+				seen[amount] = true
+			}
+		}
+	}
+	return amounts
+}
+
+func evidenceAmounts(body string) []string {
+	amounts := make([]string, 0)
 	for _, span := range evidenceNumber.FindAllStringIndex(body, -1) {
 		if span[0] > 0 {
 			previous, _ := utf8.DecodeLastRuneInString(body[:span[0]])
@@ -71,11 +98,9 @@ func containsEvidenceAmount(body, amount string) bool {
 				continue
 			}
 		}
-		if normalizedEvidenceAmount(body[span[0]:span[1]]) == normalizedEvidenceAmount(amount) {
-			return true
-		}
+		amounts = append(amounts, normalizedEvidenceAmount(body[span[0]:span[1]]))
 	}
-	return false
+	return amounts
 }
 
 // Decimal string normalization avoids floating-point rounding and preserves

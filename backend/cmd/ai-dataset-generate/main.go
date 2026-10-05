@@ -192,9 +192,11 @@ func makeCase(slug string, position, ordinal int, split benchmark.Split, current
 		ID:      fmt.Sprintf("%s-%s-%02d", slug, strings.ToLower(string(split)), position+1),
 		Split:   split,
 		Input: application.AnalyzeConversationRequestV1{
-			Task:                     "ANALYZE_CONVERSATION",
-			SchemaVersion:            application.AnalysisSchemaV1,
-			PromptVersion:            application.CurrentAnalysisPrompt,
+			Task:          "ANALYZE_CONVERSATION",
+			SchemaVersion: application.AnalysisSchemaV1,
+			// Dataset v1 is immutable across runtime prompt upgrades. Select a
+			// candidate with ai-benchmark -prompt-version, not by rewriting data.
+			PromptVersion:            application.AnalysisPromptV5,
 			ConversationID:           "synthetic-" + prefix,
 			BaseConversationRevision: int64(len(contextMessages)),
 			AnalysisThroughMessageID: contextMessages[len(contextMessages)-1].ID,

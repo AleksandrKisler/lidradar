@@ -423,6 +423,7 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 		wantStatus  domain.ApplicationStatus
 		wantSummary int
 		body        string
+		wantAmount  string
 	}{
 		{
 			name: "QA-06 invented price rejected",
@@ -436,9 +437,9 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 			name: "explicit price preserved",
 			body: "Полировка стоит 3 500,50 рублей.",
 			output: func(messageID string) string {
-				return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Названа цена услуги.","facts":[{"type":"PRICE_MENTIONED","value":true,"confidence":0.99,"evidenceMessageIds":["` + messageID + `"],"amount":"3500.50","currency":"RUB"}]}`
+				return `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Названа цена услуги.","facts":[{"type":"PRICE_MENTIONED","value":true,"confidence":0.99,"evidenceMessageIds":["` + messageID + `"],"amount":"3500,50","currency":"RUB"}]}`
 			},
-			wantStatus: domain.ApplicationApplied, wantSummary: 1,
+			wantStatus: domain.ApplicationApplied, wantSummary: 1, wantAmount: "3500.50",
 		},
 		{
 			name: "invalid",
@@ -517,6 +518,18 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 			}
 			if appliedEvents != testCase.wantSummary {
 				t.Fatalf("applied events = %d, want %d", appliedEvents, testCase.wantSummary)
+			}
+			if testCase.wantAmount != "" {
+				var amount, rawOutput string
+				if err := pool.QueryRow(ctx, `SELECT semantic_facts -> 0 ->> 'amount' FROM conversation_summaries WHERE tenant_id=$1 AND conversation_id=$2`, tenant.TenantID, conversationID).Scan(&amount); err != nil {
+					t.Fatal(err)
+				}
+				if err := pool.QueryRow(ctx, `SELECT raw_output FROM ai_runs WHERE id=$1`, run.ID).Scan(&rawOutput); err != nil {
+					t.Fatal(err)
+				}
+				if amount != testCase.wantAmount || rawOutput != testCase.output(messageID) {
+					t.Fatal("canonical amount or original response lost")
+				}
 			}
 
 			var stage string
