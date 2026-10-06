@@ -15,19 +15,19 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_DB: lidradar
+          POSTGRES_DB: lidradar_frontend
           POSTGRES_USER: lidradar
           POSTGRES_PASSWORD: lidradar
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U lidradar -d lidradar"
+          --health-cmd "pg_isready -U lidradar -d lidradar_frontend"
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
     env:
       LIDRADAR_ENV: test
-      LIDRADAR_DATABASE_URL: postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable
+      LIDRADAR_DATABASE_URL: postgres://lidradar:lidradar@127.0.0.1:5432/lidradar_frontend?sslmode=disable
       LIDRADAR_HTTP_ADDRESS: 127.0.0.1:8080
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +43,40 @@ jobs:
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...
       - name: Full tests with PostgreSQL
         run: make test-db GO_TEST_FLAGS="-race -count=1"
+      - name: Preserve database test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-tests-${{ github.sha }}
+          path: runtime/test-db/
+          if-no-files-found: error
+      - name: Unavailable database must fail the gate
+        run: |
+          if LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:1/lidradar_frontend?sslmode=disable&connect_timeout=1' go run ./backend/tools/testgate -output runtime/test-db-unavailable; then
+            echo 'DB gate accepted an unavailable PostgreSQL' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('runtime/test-db-unavailable/summary.json').read_text())
+          assert result['status'] == 'FAIL', result
+          assert result['failure'] == 'mandatory PostgreSQL is unavailable', result
+          PY
+      - name: Preserve negative database gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-unavailable-${{ github.sha }}
+          path: runtime/test-db-unavailable/
+          if-no-files-found: error
+      - name: Documentation and recovery helper tests
+        run: |
+          python3 -m unittest discover -s docs/notion -p test_build.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          python3 docs/notion/build.py
+          python3 docs/notion/build.py --check
+          git diff --exit-code -- docs/notion
       - name: Architecture check
         run: go run ./backend/tools/archcheck -root backend
       - name: Migration smoke

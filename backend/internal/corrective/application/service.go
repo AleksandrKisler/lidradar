@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	ErrForbidden = errors.New("нет разрешения на корректирующую операцию")
-	ErrNotFound  = errors.New("связанный объект не найден")
-	ErrInvalid   = errors.New("некорректная корректирующая команда")
-	ErrConflict  = errors.New("конфликт ключа идемпотентности")
+	ErrForbidden  = errors.New("нет разрешения на корректирующую операцию")
+	ErrNotFound   = errors.New("связанный объект не найден")
+	ErrInvalid    = errors.New("некорректная корректирующая команда")
+	ErrConflict   = errors.New("конфликт ключа идемпотентности")
+	ErrRiskClosed = errors.New("закрытый риск не принимает новые действия")
 )
 
 // Права корректирующих операций: рекомендация остаётся частью работы с
@@ -52,6 +53,8 @@ type Store interface {
 	Risk(ctx context.Context, tenantID, riskID string) (RiskReference, bool, error)
 	OpportunityExists(ctx context.Context, tenantID, opportunityID string) (bool, error)
 	EnsureRecommendation(ctx context.Context, recommendation domain.Recommendation) (domain.Recommendation, bool, error)
+	// AppendAction returns exact replays even after closure. For new requests,
+	// check current risk status atomically with the action, key and audit write.
 	AppendAction(ctx context.Context, action domain.Action, key string, requestHash [32]byte, audit AuditRecord) (domain.Action, bool, error)
 	AppendOutcome(ctx context.Context, outcome domain.Outcome, key string, requestHash [32]byte, audit AuditRecord) (domain.Outcome, bool, error)
 }

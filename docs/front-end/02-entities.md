@@ -1,8 +1,8 @@
 # Сущности и типы фронтенда
 
 Этот документ фиксирует форму данных, которую frontend получает и отправляет
-через HTTP. Полные machine-readable ограничения находятся в
-[OpenAPI](../../contracts/openapi/openapi.yaml), семантика — в
+через HTTP. Полные machine-readable ограничения должны проверяться по
+[OpenAPI и результатам сверки](../engineering/EXTERNAL_ARTIFACTS.md#openapi), семантика описана в
 [backend API](../backend/04-api.md). Ниже приведены все browser-facing модели,
 их связи и правила безопасного отображения.
 
@@ -11,8 +11,9 @@
 
 В таблицах `T?` означает, что поле может отсутствовать в JSON, `T | null` —
 поле присутствует, но может содержать `null`. Эти состояния не взаимозаменяемы.
-Поля без отметки обязательны в ответе текущего OpenAPI, если рядом явно не
-зафиксирован runtime-разрыв.
+Поля без отметки обязательны по документированному контракту, если рядом явно
+не зафиксирован разрыв. Соответствие текущему машинному OpenAPI требует
+отдельной сверки после получения его версии.
 
 | Тип | Представление | Правило frontend |
 |---|---|---|
@@ -355,7 +356,10 @@ SSE требует полного refetch, а не локального `+1/-1`.
 `FALSE_POSITIVE` причина обязательна. Ответ `RiskFeedback` содержит `id`,
 `riskId`, `opportunityId`, `actorId`, `verdict`, optional `reason`, `note`,
 snapshot `context`, `datasetEligible`, `createdAt`. `datasetEligible` отражает
-согласие в момент записи и не меняется задним числом.
+согласие в момент записи и не меняется задним числом. Это исторический признак,
+не разрешение на будущий экспорт: дополнительно проверяются действующее
+согласие нужной области, отзыв и retention по
+[политике данных](../backend/13-data-lifecycle.md#consent).
 
 `RiskFeedbackContext`: type, severity, status, source, policyVersion, optional
 aiRunId, triggerMessageId, opportunityStage, detectedAt.
@@ -389,9 +393,11 @@ Action и Outcome append-only. Outcome `PAID` не создаёт деньги �
 | Тип | Требования |
 |---|---|
 | `RECOVERED` | Risk, Action и Outcome обязательны; одна tenant/opportunity; Action и Outcome существуют до revenue; окно не более 30 дней |
-| `ORGANIC` | ссылки необязательны; не считается возвращённой выручкой |
-| `UNKNOWN` | ссылки необязательны; причина возврата не доказана |
+| `ORGANIC` | `riskId`, `actionId`, `outcomeId` запрещены; не считается возвращённой выручкой |
+| `UNKNOWN` | `riskId`, `actionId`, `outcomeId` запрещены; причина возврата не доказана |
 
+Запрос моделируется discriminated union по `attributionType`; смена типа
+очищает несовместимые ссылки, а не сохраняет их как «необязательные».
 На opportunity допустима только одна атрибуция `RECOVERED`; последующие
 платежи фиксируются `ORGANIC`. `RevenueEvent`: `id`, `opportunityId`, `amount`,
 `currency`, `status: CONFIRMED`, `source: USER_CONFIRMED`, `confirmedBy`,

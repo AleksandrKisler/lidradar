@@ -1,5 +1,10 @@
 # Тестирование и качество
 
+Сверка runtime 2026-10-06: исходники, CI и обязательный DB gate доступны.
+Текущий прогон: 568 pass events (включая subtests), 0 failed, один ожидаемый
+skip служебного дочернего теста. [Машинные доказательства](../engineering/evidence/2026-10-06/db-summary.json)
+и [границы допуска](../engineering/HIGH_REVIEW_2026_10_06.md) отделены от списка тестов.
+
 ## 1. Пирамида проверок
 
 | Уровень | Что проверяет | Где |
@@ -23,10 +28,18 @@ make test
 пропускает тесты с базой, если `LIDRADAR_DATABASE_URL` не задан;
 
 ```bash
-LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable' make test-db GO_TEST_FLAGS='-race -count=1'
+LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar_frontend?sslmode=disable' make test-db GO_TEST_FLAGS='-race -count=1'
 ```
 
-намеренно падает без адреса базы и запускает всё с детектором гонок.
+запускает `backend/tools/testgate`, который требует выделенную БД
+`lidradar_frontend`, выставляет `LIDRADAR_TEST_DATABASE_REQUIRED=1`, собирает
+`go test -json` в `runtime/test-db/events.jsonl` и `summary.json`. Отсутствие/
+недоступность PostgreSQL, setup failure, неожиданный skip или отсутствие
+обязательного sentinel-теста дают failure. Helper разрешает skip при отсутствии
+DSN только в необязательном `go test ./...`; заданный недоступный DSN всегда failure.
+Единственное исключение — helper crash-test: родитель реально выполняет его
+в дочернем процессе и сам входит в обязательные проверки. CI хранит положительный
+и отрицательный артефакты отдельно. Требования: [RG-TESTS](../engineering/RELEASE_GATES.md#rg-tests).
 
 ## 2. Инфраструктура тестов
 
@@ -37,7 +50,12 @@ LIDRADAR_DATABASE_URL='postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslm
 - **Схема на тест**: `test_<16 hex>` через `CREATE SCHEMA` и `search_path`;
   миграции применяются **дважды** (проверка идемпотентности); `t.Cleanup`
   закрывает пулы и делает `DROP SCHEMA … CASCADE`.
-- Без `LIDRADAR_DATABASE_URL` — `t.Skip`; при недоступной базе — `t.Skipf`.
+- Историческое поведение helper: без `LIDRADAR_DATABASE_URL` используется
+  `t.Skip`, при недоступной базе `t.Skipf`. Оно допустимо только для явно
+  необязательного локального unit-only запуска, который нельзя назвать
+  полной проверкой. В обязательном DB/CI режиме обе ситуации должны давать
+  failure. Наличие URL и поздний smoke миграций не доказывают выполнение
+  ранее пропущенных тестов.
 - `TwoTenants(t, ctx, pool)` — две организации с владельцем, точкой
   (`Europe/Moscow`, порог 45) и членством.
 - `LoadTrace` — `pgx.QueryTracer` (включается `LIDRADAR_LOAD_TRACE=1`),
@@ -127,7 +145,11 @@ Workflow `Backend` (`.github/workflows/backend.yml`) на `pull_request` и
 1. `gofmt -l backend` пуст;
 2. `go vet ./...`;
 3. `staticcheck@v0.6.1 ./...`;
-4. `make test-db GO_TEST_FLAGS="-race -count=1"`;
+4. `make test-db GO_TEST_FLAGS="-race -count=1"` в обязательном режиме:
+   PostgreSQL доступен, схема подготовлена, все обязательные RLS, money,
+   lease/freshness и crash-recovery сценарии реально выполнены; неожиданных
+   skips нет. Сохраняются machine-readable test events, число выполненных,
+   список skips с причинами и привязка к build/schema;
 5. `archcheck -root backend`;
 6. `go run ./backend/cmd/migrate` (smoke миграций);
 7. запуск собранного API и проверка `/health/ready` на строку
@@ -143,6 +165,11 @@ Workflow `Architecture` дополнительно гоняет тесты са�
 
 Правила archcheck — [02-architecture.md](02-architecture.md) § 3.
 
+Негативная проверка CI: временно недоступный PostgreSQL должен делать именно
+DB-test job красным, а не оставлять зелёный exit code с `SKIP`. Затем
+повторяется успешный прогон и сверяется ожидаемый набор сценариев. До
+получения обоих результатов H-17 не закрыт на уровне реализации.
+
 ## 7. Правила для новых изменений
 
 Из `docs/engineering/CODEX_RULES.md` и `DEFINITION_OF_DONE.md`: изменения в
@@ -150,7 +177,8 @@ Workflow `Architecture` дополнительно гоняет тесты са�
 данными и источник истины — только через принятый ADR; доменная логика
 независима от транспорта и хранения; новая зависимость объясняется; тесты и
 документация обновляются вместе с поведением; секреты и реквизиты не
-коммитятся; `go test ./...` проходит из корня; ошибки и журналы не
+коммитятся; `go test ./...` проходит из корня, но не заменяет обязательный
+DB gate без пропусков; ошибки и журналы не
 раскрывают секретов; итог называет выполненную проверку и известные
 ограничения. Практические соглашения этого репозитория: новая таблица с
 `tenant_id` получает RLS в своей миграции; новое событие или задание — новая

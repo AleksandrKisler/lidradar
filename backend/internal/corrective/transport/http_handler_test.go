@@ -66,3 +66,46 @@ func TestHTTPRejectsUnknownAndTrailingJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPClosedRiskRejectsNewActionsButKeepsIdempotentReplay(t *testing.T) {
+	for _, status := range []string{"OPEN", "ACKNOWLEDGED", "ACTED", "RESOLVED", "FALSE_POSITIVE", "IGNORED", "EXPIRED"} {
+		t.Run(status, func(t *testing.T) {
+			store := infrastructure.NewTestMemoryStore()
+			store.AddRisk("tenant", "risk", "opportunity")
+			handler := transport.NewHandler(application.NewService(store, allow{}, &ids{}, time.Now), principal{}).Router()
+			send := func(key, kind string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest("POST", "/risks/risk/actions", strings.NewReader(`{"type":"`+kind+`"}`))
+				req.Header.Set("Idempotency-Key", key)
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				return rec
+			}
+			original := send("original", "CALL")
+			if original.Code != http.StatusCreated {
+				t.Fatal(original.Body.String())
+			}
+			store.SetRiskStatus("tenant", "risk", status)
+			for _, kind := range []string{"OPEN_CONVERSATION", "COPY_REPLY", "MARK_CONTACTED", "CALL", "SEND_MESSAGE", "OTHER"} {
+				response := send("new-"+kind, kind)
+				if status == "OPEN" || status == "ACKNOWLEDGED" || status == "ACTED" {
+					if response.Code != http.StatusCreated {
+						t.Fatalf("active risk rejected: %s", response.Body.String())
+					}
+				} else {
+					if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"RISK_CLOSED"`) {
+						t.Fatalf("closed risk: status=%d body=%s", response.Code, response.Body.String())
+					}
+					if len(store.Actions()) != 1 || len(store.Audits()) != 1 {
+						t.Fatal("closed request wrote action or audit")
+					}
+				}
+			}
+			if replay := send("original", "CALL"); replay.Code != http.StatusOK || replay.Body.String() != original.Body.String() {
+				t.Fatalf("replay: %d %s", replay.Code, replay.Body.String())
+			}
+			if conflict := send("original", "OTHER"); conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "IDEMPOTENCY_CONFLICT") {
+				t.Fatal(conflict.Body.String())
+			}
+		})
+	}
+}

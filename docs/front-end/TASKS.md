@@ -10,7 +10,7 @@ test infrastructure: пользователь подтвердил, что эт�
 сохраняя самостоятельный проверяемый результат.
 
 > **Обновление 2026-09-18.** Backend/contract prerequisites LR-API-002,
-> LR-API-003, LR-BE-004 … LR-BE-014, LR-API-016, LR-API-017 и LR-BE-018
+> LR-API-003, LR-BE-004 … LR-BE-014, LR-API-016 и LR-API-017
 > выполнены на стороне сервера (ADR 0044, ADR 0045; реестр
 > [08-readiness-gaps.md](08-readiness-gaps.md)). Зависимые frontend-карточки
 > переходят из `BLOCKED` в `READY` после регенерации клиента (LR-API-001);
@@ -24,6 +24,13 @@ test infrastructure: пользователь подтвердил, что эт�
 > веб-репозитория), поэтому статусы `BLOCKED` ниже описывают исходный порядок
 > зависимостей, а не текущее состояние работ.
 
+Уточнение 2026-10-05: это исторические сообщения о выполнении, не новый
+release verdict. LR-BE-018 закрыт лишь в части buffer overflow и остаётся
+`PARTIAL_REQUIRES_VERIFICATION` для lost NOTIFY. Перед приёмкой обязательны
+[RG-MONEY](../engineering/RELEASE_GATES.md#rg-money) для replay/закрытого
+Risk/double-submit и [RG-SSE](../engineering/RELEASE_GATES.md#rg-sse) для
+ограниченной устарелости. Нового runtime-прогона в документационном комплекте нет.
+
 <a id="task-rules"></a>
 ## 1. Правила выполнения
 
@@ -32,6 +39,8 @@ test infrastructure: пользователь подтвердил, что эт�
 - `DONE` — выполнено, с датой и ссылкой на артефакт;
 - `READY` — можно брать при выполненных зависимостях;
 - `BLOCKED` — сначала закрыть перечисленные задачи/gaps;
+- `PARTIAL_REQUIRES_VERIFICATION`: реализован или описан только поднабор
+  сценариев; полный gate не пройден;
 - `DECISION` — первый deliverable включает явное product/security/design
   решение; implementation не начинается без него.
 
@@ -75,7 +84,7 @@ runtime + contract + design, где это указано.
 
 **Статус:** `READY` · **Оценка:** 2 дня, 20–24 ч · **Зависимости:** нет.
 
-**Ссылки:** [Backend: OpenAPI и CI](../../contracts/openapi/openapi.yaml),
+**Ссылки:** [Backend: OpenAPI, отсутствующая зависимость](../engineering/EXTERNAL_ARTIFACTS.md#openapi),
 [Frontend: contract checks](07-quality.md#contract-tests),
 [Макет: основы не зависят от demo API](mockups/svg/16-osnovy-interfeisa.svg).
 
@@ -406,7 +415,9 @@ OWNER/MANAGER и synthetic future-role authorization, OpenAPI generation.
 <a id="lr-be-018"></a>
 ### LR-BE-018 — Гарантированный resync после потерянного SSE signal
 
-**Статус:** `DECISION` · **Оценка:** 3 дня, 30–36 ч · **Зависимости:** LR-API-002.
+**Статус:** `PARTIAL_REQUIRES_VERIFICATION` (2026-10-05);
+численный freshness SLA `BLOCKED_DECISION`. Историческая оценка: 3 дня,
+30–36 ч. Зависимости: LR-API-002, product/reliability decision.
 
 **Ссылки:** [Backend: SSE semantics](../backend/04-api.md),
 [Frontend: realtime architecture](01-architecture.md#realtime),
@@ -416,9 +427,11 @@ OWNER/MANAGER и synthetic future-role authorization, OpenAPI generation.
 silent NOTIFY/subscriber-buffer loss: close slow client, explicit marker,
 revision либо согласованный safety refetch. Описать SSE `503` и safe code.
 
-**Приёмка.** Живое соединение не может оставлять Radar бесконечно stale без
-observable recovery path; frontend знает, когда выполнить full refetch;
-GAP-RELIABILITY-020 закрыт.
+**Приёмка.** Lost NOTIFY при живом соединении автоматически устраняется
+в пределах утверждённого численного SLA без focus/клика/reconnect;
+frontend выполняет full refetch и показывает устарелость при недоступном REST.
+Отдельно подтверждены buffer overflow, multiple API и ограничение нагрузки.
+Только после всех проверок GAP-RELIABILITY-020 можно перевести в `CLOSED`.
 
 **Проверки.** Переполнение 16 signals, lost NOTIFY, reconnect/resync, multiple
 API instances, 503, tenant isolation, bounded load/backoff.
@@ -514,7 +527,7 @@ OWNER+MANAGER, отдельно оставить business source OWNER-only, и 
 **Статус:** `BLOCKED` · **Оценка:** 4 дня, 40–48 ч · **Зависимости:** LR-API-001,
 LR-API-002, LR-API-003.
 
-**Ссылки:** [Backend: OpenAPI](../../contracts/openapi/openapi.yaml),
+**Ссылки:** [Backend: OpenAPI, отсутствующая зависимость](../engineering/EXTERNAL_ARTIFACTS.md#openapi),
 [Frontend: HTTP client](01-architecture.md#api-client),
 [Макет: interface states](mockups/svg/15-sostoianiia.svg).
 
@@ -913,7 +926,9 @@ idempotency draft. Не записывать OPEN_CONVERSATION при failed/blo
 только технически, но не дублируется; timeout повторяет K1/body; history refetch.
 
 **Проверки.** Existing/new recommendation, all ActionType, copy/open failure,
-201/200/timeouts/409, changed body new key, XSS-like text/note, role/a11y.
+201/200/timeouts/409, запрет changed body/new key до reconciliation,
+replay после закрытия и `RISK_CLOSED` для нового Action,
+XSS-like text/note, role/a11y.
 
 <a id="lr-fe-021"></a>
 ### LR-FE-021 — Opportunity history, stage и Outcome
@@ -950,7 +965,9 @@ evidence selection; RECOVERED только с Risk+Action+Outcome этой oppor
 K3/body survives unknown result; conflicts не меняют attribution автоматически.
 
 **Приёмка.** PAID не создаёт Revenue; success показывает formal attribution;
-second RECOVERED предлагает осознанный ORGANIC path; duplicate payment исключён.
+конфликт RECOVERED сначала сверяется с существующими фактами. ORGANIC с новым
+ключом допускается только для подтверждённого отдельного платежа после
+разрешения прежнего unknown result; повтор той же оплаты исключён.
 
 **Проверки.** Decimal limits, each attribution, missing/foreign/mismatched/
 older-than-30d evidence, 201/200/timeouts/both 409, invalidations, roles/a11y.

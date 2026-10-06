@@ -10,6 +10,17 @@ import (
 
 var ErrInvalid = errors.New("некорректный корректирующий факт")
 
+// CanRecordAction limits new corrective facts to risks still being worked on.
+// Persistence checks this against locked, current state, after replay lookup.
+func CanRecordAction(riskStatus string) bool {
+	switch riskStatus {
+	case "OPEN", "ACKNOWLEDGED", "ACTED":
+		return true
+	default:
+		return false
+	}
+}
+
 const maximumTextLength = 2000
 
 type ActionType string

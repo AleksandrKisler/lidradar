@@ -4,7 +4,9 @@
 
 Before changing backend code, read in this order:
 
-1. the root [`AGENTS.md`](../../AGENTS.md);
+1. the root implementation-repository rules, currently an
+   [explicit missing dependency](EXTERNAL_ARTIFACTS.md#repo-rules), and the
+   [documentation governance](DOCS_GOVERNANCE.md) for this snapshot;
 2. [`../architecture/ARCHITECTURE.md`](../architecture/ARCHITECTURE.md);
 3. [`../spec/BACKEND_SPEC.md`](../spec/BACKEND_SPEC.md);
 4. relevant accepted records in [`../adr/`](../adr/README.md);
@@ -26,7 +28,7 @@ Before changing backend code, read in this order:
 
 ## Verification
 
-The canonical repository verification command is:
+The baseline local repository verification command is:
 
 ```sh
 go test ./...
@@ -34,4 +36,9 @@ go test ./...
 
 Run it from the repository root. If repository scaffolding or an environment
 limitation prevents it from running, report that limitation explicitly; do not
-claim successful verification.
+claim successful verification. This command alone is not the production
+quality gate: mandatory database tests must execute without unexpected skips,
+and missing/unreachable PostgreSQL or setup errors must fail their job.
+See [testing](../backend/11-testing.md) and [RG-TESTS](RELEASE_GATES.md#rg-tests).
+Preserve machine-readable results and release identifiers, and never report
+product tests as executed from a documentation-only checkout.

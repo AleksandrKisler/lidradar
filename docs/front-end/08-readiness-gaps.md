@@ -7,6 +7,13 @@ API-разрывов на стороне сервера (ADR 0044, ADR 0045) и 
 предположения: если экрану не хватает данных или решения, это prerequisite, а
 не повод для N+1, hardcode или фиктивного client-side результата.
 
+Коррекция 2026-10-05: указанные выше даты относятся к историческим проверкам,
+не к новому подтверждению runtime. High-проверки денежных команд, двойного
+submit, consent/retention и SSE из
+[реестра выпуска](../engineering/RELEASE_GATES.md) обязательны дополнительно.
+Полное закрытие GAP-RELIABILITY-020 отозвано: подтверждение buffer overflow
+не покрывает silent NOTIFY loss.
+
 <a id="readiness-levels"></a>
 ## 1. Приоритет и статус
 
@@ -21,6 +28,7 @@ API-разрывов на стороне сервера (ADR 0044, ADR 0045) и 
 | `OPEN` | контракт/решение отсутствует |
 | `READY_FOR_FIX` | причина и целевой результат ясны, можно брать prerequisite |
 | `DECISION_REQUIRED` | требуется product/security/design решение до кода |
+| `PARTIALLY_CLOSED` | подтверждена только часть сценариев; полный release gate остаётся открытым |
 | `CLOSED` | runtime, OpenAPI, docs, tests и frontend adapter согласованы |
 
 Закрытие gap требует доказательства по всем затронутым источникам, а не только
@@ -31,20 +39,20 @@ API-разрывов на стороне сервера (ADR 0044, ADR 0045) и 
 
 | Блок | Сейчас | Что можно делать | Что нельзя принимать |
 |---|---|---|---|
-| Transport/generated API | контракт согласован (2026-09-18) | генерация клиента, tenant interceptor как единая точка | ручные patch схемы |
+| Transport/generated API | контракт найден и типы сверены 2026-10-06; см. актуальный реестр артефактов | подготовка адаптера, tenant interceptor; генерация после получения versioned OpenAPI | утверждать текущую согласованность без контракта и build |
 | Login | API и макеты готовы (01, 20) | login, registration, выбор пространства | — |
 | Onboarding | API и макеты готовы (02–05, 21) | формы и resume по `GET /organization/onboarding` | — |
-| Radar | API и макеты готовы (14, 17) | active feed, enriched cards, summary | — |
-| Risk Workspace | API и макеты готовы (13, 18, 19) | полный read composition, команды, deeplink | — |
+| Radar | функциональный baseline описан; RG-SSE открыт | active feed, enriched cards, summary, явная устарелость | неограниченно stale snapshot при живом соединении |
+| Risk Workspace | baseline описан; RG-MONEY открыт | read composition, команды по актуальному контракту, deeplink | новый Action закрытого Risk или новый key вместо сверки неизвестного результата |
 | Conversations | API и макеты готовы (06, 23) | enriched list, search, «С риском», deeplink | — |
 | Integrations | API готов (ADR 0045), макеты 05, 08, 32 | connect с серверным секретом, live check | — |
 | Personal notifications | API готов | link/preferences | owner-only placement без решения |
-| Company/location/services | API и макеты готовы (09, 10, 22) | формы/списки/диалоги | — |
+| Company/location/services | baseline описан; double-submit High не подтверждён исправленным | формы/списки/диалоги с синхронной submit-защитой | дубли на одно намерение, закрытие дефекта только отключением кнопки после await |
 | Team | API и макеты готовы (12, 24) | list, invite code, role, revoke, accept | — |
-| Privacy | API и макет готовы (25) | behavior | — |
-| Revenue | API готов | idempotent dialog/command | создание RECOVERED без evidence |
+| Privacy | baseline описан; RG-DATA открыт | управление согласием и отражение его текущего состояния | экспорт по историческому flag после отзыва, неутверждённый retention |
+| Revenue | контракт уточнён; RG-MONEY открыт | replay неизменяемой пары key/body и reconciliation | новый платёж ради обхода conflict, RECOVERED без evidence |
 | Analytics | API готов | cards, precision, series chart, attribution, payments | смешение валют в таблице оплат |
-| SSE | API готов | lifecycle/parser, `resync.required` | локальный `+1/-1` вместо refetch |
+| SSE | `PARTIALLY_CLOSED`: только buffer-overflow recovery описан | lifecycle/parser, `resync.required`, full refetch | считать heartbeat/focus гарантией freshness, закрыть RG-SSE без lost-NOTIFY теста |
 | Admin | API и макеты готовы (26–28) | data/command implementation | — |
 
 <a id="contract-gaps"></a>
@@ -272,17 +280,25 @@ interim:** frontend не отправляет `active` при POST и меняе
 <a id="gap-reliability-020"></a>
 ### GAP-RELIABILITY-020 — SSE может потерять сигнал без resync marker
 
-**P1 · CLOSED (2026-09-18).** Решение ADR 0044: при переполнении буфера подписчика сервер отбрасывает сигналы и посылает `resync.required` (`{"reason":"BUFFER_OVERFLOW"}`); `503 UNAVAILABLE` описан в OpenAPI; тест `TestSSEEmitsResyncMarkerWhenSubscriberBufferOverflows`. Исходное описание: SSE намеренно не имеет replay, PostgreSQL NOTIFY
-best-effort, а заполненный buffer подписчика молча отбрасывает signal. Текущий
-client узнаёт о потере только при разрыве/reconnect; живое соединение может
-оставить долгий Radar snapshot устаревшим.
+**P1 · PARTIALLY_CLOSED (сверка 2026-10-05).** Исторически по ADR 0044
+добавлен `resync.required` с `{"reason":"BUFFER_OVERFLOW"}` и тест
+`TestSSEEmitsResyncMarkerWhenSubscriberBufferOverflows`; `503 UNAVAILABLE`
+описан в контракте. Это закрывает только переполнение subscriber buffer.
+SSE не имеет replay, NOTIFY best-effort: сигнал может потеряться до хаба,
+когда соединение браузера остаётся живым. Подтверждения ограниченной
+устарелости для этого сценария нет.
 
-**Нужно.** Утвердить freshness SLA и один механизм: закрывать slow subscriber,
-посылать `resync.required`, давать monotonic revision либо выполнять
-low-frequency REST safety refetch. Также описать runtime `503 UNAVAILABLE` при
-неинициализированном hub в OpenAPI/error registry. **Safe interim:** refetch on
-window focus/online/manual refresh и явное время snapshot; SSE остаётся только
-ускорителем. **Владелец:** reliability/Risk backend + frontend.
+**Нужно.** Проверить утверждённый SLA 30 секунд и механизм автоматического
+восстановления именно silent loss: например bounded REST safety refetch
+либо контроль версии с проверенной доставкой/обнаружением пропуска.
+Маркер, отправляемый только при overflow, не решает потерю до хаба.
+Проверки по [RG-SSE](../engineering/RELEASE_GATES.md#rg-sse) включают живой
+stream без focus/reconnect, несколько API, восстановление LISTEN и предел
+нагрузки. **Safe interim:** focus/online/manual refetch и время snapshot
+уменьшают риск, но не закрывают gate. **Владелец:** product + reliability/Risk
+backend + frontend; SLA 30 секунд утверждён владельцем 2026-10-05. Safety refetch
+каждые 15 секунд и ручной silent-NOTIFY тест добавлены 2026-10-06; multi-API/LISTEN
+и нагрузка остаются в RG-SSE.
 
 <a id="gap-contract-021"></a>
 ### GAP-CONTRACT-021 — named Action/Outcome permissions не являются runtime gate

@@ -32,7 +32,7 @@ test-db:
 		echo "LIDRADAR_DATABASE_URL обязателен для make test-db" >&2; \
 		exit 1; \
 	}
-	go test $(GO_TEST_FLAGS) ./...
+	go run ./backend/tools/testgate -output runtime/test-db -- $(GO_TEST_FLAGS)
 
 # Набор создаётся воспроизводимо только из синтетических шаблонов. Команда
 # перезаписывает выборки GOLDEN (400) и DEV (100) и контрольную сумму golden-файла.

@@ -1,0 +1,12 @@
+{
+  "committedAtEpochMs": 1791238172193,
+  "marker": "QA H-16 silent NOTIFY 2026-10-06",
+  "sentNotify": false,
+  "observedAtEpochMs": 1791238178515,
+  "upperBoundSeconds": 6.322,
+  "result": "PASS",
+  "onlineIndicator": "Обновления онлайн",
+  "userActionsAfterCommit": [],
+  "restored": true,
+  "scope": "single dev API, visible Radar, synthetic QA row; no application NOTIFY emitted"
+}

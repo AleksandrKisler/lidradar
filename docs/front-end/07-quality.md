@@ -84,8 +84,11 @@ fixture matrix. Backend-окружение описано в
 - unknown status не активирует command;
 - false-positive reason обязательна; `NOT_A_LEAD` copy предупреждает о LOST;
 - notification preference PUT строит полное тело;
-- idempotency draft сохраняет key/body при timeout и сбрасывает при изменении
-  body или однозначном success/cancel.
+- idempotency draft сохраняет key/body при timeout, reload и отмене формы
+  после отправки. Изменённый body нельзя отправить новым ключом до
+  reconciliation исходного намерения; утрата draft блокирует автоповтор.
+  После однозначного success новый key означает только отдельное новое
+  намерение, не повтор прежнего платежа.
 
 <a id="component-matrix"></a>
 ## 4. Component и page-state matrix
@@ -114,12 +117,19 @@ fixture matrix. Backend-окружение описано в
 double click, Enter, route leave с dirty draft, permission loss и response после
 unmount.
 
+Для H-03 обязательны два клика до завершения async validation, Enter+click
+и задержка ответа 1,5 с: synchronous in-flight guard выставляется до первого
+`await`. Приёмка требует один созданный объект на намерение, а не только
+визуально disabled кнопку. Денежные тесты дополнительно включают lost response
+после commit, сохранение пары key/body и replay после закрытия Risk.
+
 <a id="contract-tests"></a>
 ## 5. Contract checks
 
-- TypeScript client генерируется из
-  [`contracts/openapi/openapi.yaml`](../../contracts/openapi/openapi.yaml) одной
+- TypeScript client генерируется из versioned машинного OpenAPI одной
   закреплённой командой; CI генерирует повторно и требует zero diff.
+  [Текущий OpenAPI и доказательства генерации](../engineering/EXTERNAL_ARTIFACTS.md#openapi),
+  сверяются для конкретной сборки; наличие документа не заменяет генерацию.
 - Все используемые operationId доступны через один browser facade; webhook/
   internal AI operations не экспортируются application code.
 - Contract fixture проходит schema validation для success и Error envelope.
@@ -327,6 +337,8 @@ feature-задачи.
 - Все permissions, tenant headers, errors, null/money/time cases проверены.
 - Нет regressions для OWNER/MANAGER/guest/PLATFORM_ADMIN согласно scope.
 - Добавлены tests пропорционально риску и приложены команды/результаты.
+- Выполнены применимые [release gates](../engineering/RELEASE_GATES.md);
+  старый QA-отчёт и исправление текста не выдаются за новые продуктовые тесты.
 - Visual/a11y/manual checks приложены для UI change.
 - Локальные docs ссылки валидны; изменённые API/design gaps обновлены.
 - PR не содержит runtime credentials, generated fixture secrets или лишние

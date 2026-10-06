@@ -368,8 +368,11 @@ frontend разрешает только записи этой opportunity из 
 
 **Отправка.** Key генерируется до первого POST. Pending блокирует duplicate;
 timeout переводит draft в unknown и предлагает безопасный retry тем же key/body.
-`RECOVERED_ALREADY_ATTRIBUTED` предлагает `ORGANIC`, но не меняет выбор без
-подтверждения пользователя.
+`RECOVERED_ALREADY_ATTRIBUTED` сначала требует сверить исходное намерение
+с существующими оплатами. `ORGANIC` разрешён только для действительно
+отдельного дополнительного платежа, не для обхода ошибки прежней оплаты.
+Смена типа очищает risk/action/outcome IDs; unknown body/key не меняются
+до reconciliation. Полный контракт: [критические команды](../backend/12-critical-commands.md).
 
 **Успех.** Показать amount+currency+attribution, закрыть dialog только после
 однозначного ответа и refetch. Макет:
@@ -387,6 +390,11 @@ Heartbeat не считается business activity. После offline/reconnec
 
 **UI.** Потеря SSE не блокирует работу: показывается ненавязчивый stale badge и
 manual refresh. Никогда не выводить «данные актуальны» только по живому TCP.
+
+Ручное обновление не закрывает silent NOTIFY loss при живом stream.
+Обязательны численный SLA и автоматическая сверка по
+[RG-SSE](../engineering/RELEASE_GATES.md#rg-sse); до этого гарантия bounded
+freshness не считается реализованной.
 
 **Security.** Streaming fetch передаёт tenant header/cookie, поддерживает abort,
 ограничивает buffer и не логирует raw chunks.

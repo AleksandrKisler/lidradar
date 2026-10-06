@@ -177,7 +177,9 @@ const radar = await fetch("/api/v1/radar", {
 потоковый `fetch`): встроенный `EventSource` не умеет задавать этот заголовок.
 Сигнал — повод перечитать REST-данные, не самостоятельная копия состояния.
 
-Контракт: [OpenAPI](../../contracts/openapi/openapi.yaml). Основные точки чтения:
+Контракт: [OpenAPI и актуальный реестр артефактов](../engineering/EXTERNAL_ARTIFACTS.md#openapi).
+До генерации клиента требуется получить сам versioned YAML из репозитория
+реализации; страница реестра не является входом генератора. Основные точки чтения:
 `/radar`, `/risks`, `/conversations`, `/analytics/summary`, `/organization`,
 `/locations`, `/services`, `/integrations`, `/notifications/preferences`
 с префиксом `/api/v1`. Списки используют `limit` и непрозрачный `cursor`,

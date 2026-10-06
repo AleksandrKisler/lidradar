@@ -136,6 +136,8 @@ func handle(w http.ResponseWriter, r *http.Request, err error) bool {
 		writeError(w, r, 404, "NOT_FOUND", "объект не найден")
 	case errors.Is(err, application.ErrConflict):
 		writeError(w, r, 409, "IDEMPOTENCY_CONFLICT", "ключ идемпотентности уже использован для другого запроса")
+	case errors.Is(err, application.ErrRiskClosed):
+		writeError(w, r, 409, "RISK_CLOSED", "риск закрыт; новые действия недоступны")
 	case errors.Is(err, application.ErrInvalid), errors.Is(err, domain.ErrInvalid):
 		writeError(w, r, 400, "INVALID_ARGUMENT", "некорректный запрос")
 	default:

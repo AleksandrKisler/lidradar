@@ -48,6 +48,9 @@ func frontendPool(t *testing.T) testsupport.Pools {
 	// Обычный make test остаётся пригодным без базы. Полный прогон этого
 	// набора: LIDRADAR_DATABASE_URL указывает на отдельный стенд фронтенда.
 	if err := ValidateTarget(config.EnvironmentTest, testingDatabaseURL()); err != nil {
+		if os.Getenv("LIDRADAR_TEST_DATABASE_REQUIRED") == "1" {
+			t.Fatal("mandatory devdata tests require database lidradar_frontend")
+		}
 		t.Skip("нужна отдельная база lidradar_frontend; см. frontend-development.md")
 	}
 	return testsupport.PostgresRoles(t)

@@ -1,236 +1,254 @@
 #!/usr/bin/env python3
-"""Сборка издания документации для Notion.
-
-Рисует графики в images/, проверяет относительные ссылки и картинки во всех
-страницах и собирает zip для импорта. Запуск из корня репозитория или из
-каталога docs/notion; нужен matplotlib (см. README.md).
-"""
-
+"""One-way documentation views and reproducible local handover (stdlib only)."""
 from __future__ import annotations
 
+import argparse
+import hashlib
+import io
+import json
+import os
 import re
 import sys
 import zipfile
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote, urlsplit
 
-ROOT = Path(__file__).resolve().parent
-IMAGES = ROOT / "images"
-ARCHIVE = ROOT / "lidradar-backend-notion.zip"
-
-# Палитра: одна серия — один цвет (слот 1 эталонной палитры), хром — чернила
-# и hairline-сетка; текст никогда не окрашивается в цвет серии.
-SERIES = "#2a78d6"
-SURFACE = "#fcfcfb"
-INK = "#0b0b0b"
-INK_SECONDARY = "#52514e"
-INK_MUTED = "#898781"
-GRID = "#e1e0d9"
-BASELINE = "#c3c2b7"
-
-
-def configure_matplotlib():
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    plt.rcParams.update(
-        {
-            "font.family": "sans-serif",
-            "font.sans-serif": ["Helvetica Neue", "Arial", "DejaVu Sans"],
-            "font.size": 10,
-            "axes.edgecolor": BASELINE,
-            "axes.labelcolor": INK_SECONDARY,
-            "axes.titlecolor": INK,
-            "axes.titleweight": "semibold",
-            "axes.titlesize": 12,
-            "axes.titlelocation": "left",
-            "xtick.color": INK_MUTED,
-            "ytick.color": INK_MUTED,
-            "xtick.labelcolor": INK_SECONDARY,
-            "ytick.labelcolor": INK_SECONDARY,
-            "figure.facecolor": SURFACE,
-            "axes.facecolor": SURFACE,
-            "savefig.facecolor": SURFACE,
-            "savefig.dpi": 200,
-        }
-    )
-    return plt
+REPO = Path(__file__).resolve().parents[2]
+ROOT = REPO / "docs/notion"
+BATCH_FILES = 90  # Local batch size, not a claim about a Notion service limit.
+VIEWS = {
+    "LidRadar Backend.md": "backend/README.md",
+    "01 Обзор системы.md": "backend/01-overview.md",
+    "02 Глоссарий.md": "backend/00-glossary.md",
+    "03 Архитектура.md": "backend/02-architecture.md",
+    "04 Модули и зоны ответственности.md": "backend/03-modules.md",
+    "05 HTTP API.md": "backend/04-api.md",
+    "06 Модель данных.md": "backend/05-data-model.md",
+    "07 Фоновая обработка.md": "backend/06-async-processing.md",
+    "08 AI-контур.md": "backend/07-ai.md",
+    "09 Защищённость.md": "backend/08-security.md",
+    "10 Отказоустойчивость.md": "backend/09-reliability.md",
+    "11 Эксплуатация и ёмкость.md": "backend/10-operations.md",
+    "12 Тестирование и качество.md": "backend/11-testing.md",
+    "13 Архитектурные решения ADR.md": "adr/README.md",
+}
+LINK = re.compile(r'!?\[[^\]\n]*\]\((<[^>]+>|[^)\n]+)\)')
+FENCE = re.compile(r'^\s{0,3}(`{3,}|~{3,})')
 
 
-def style_axes(ax, *, horizontal: bool):
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    if horizontal:
-        ax.spines["left"].set_visible(False)
-        ax.xaxis.grid(True, color=GRID, linewidth=0.8)
-        ax.set_axisbelow(True)
-        ax.tick_params(axis="y", length=0)
-        ax.tick_params(axis="x", length=0)
-    else:
-        ax.spines["bottom"].set_visible(False)
-        ax.yaxis.grid(True, color=GRID, linewidth=0.8)
-        ax.set_axisbelow(True)
-        ax.tick_params(axis="x", length=0)
-        ax.tick_params(axis="y", length=0)
+def prose(text, strip_inline=True):
+    """Ignore fenced and inline code; preserve lines for useful diagnostics."""
+    result, fence = [], None
+    for line in text.splitlines(keepends=True):
+        match = FENCE.match(line)
+        if match:
+            marker = match.group(1)
+            if fence is None:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence):
+                fence = None
+            result.append("\n")
+        elif fence:
+            result.append("\n")
+        else:
+            result.append(re.sub(r'(`+).*?\1', '', line) if strip_inline else line)
+    return ''.join(result), fence is not None
 
 
-def subtitle(fig, text: str):
-    fig.text(0.01, 0.905, text, color=INK_SECONDARY, fontsize=9, ha="left", va="top")
+def anchors(text):
+    text, _ = prose(text, strip_inline=False)
+    found = set(re.findall(r'<a\s+(?:id|name)=[\"\']([^\"\']+)', text))
+    counts = {}
+    for line in text.splitlines():
+        match = re.match(r'^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?$', line)
+        if not match:
+            continue
+        title = re.sub(r'<[^>]*>', '', match.group(1)).lower()
+        title = re.sub(r'[^\w\- ]', '', title, flags=re.UNICODE).replace(' ', '-')
+        count = counts.get(title, 0)
+        counts[title] = count + 1
+        found.add(title + (f'-{count}' if count else ''))
+    return found
 
 
-def chart_api_p95(plt):
-    endpoints = [
-        ("GET /analytics/summary", 122.7),
-        ("GET /radar", 49.2),
-        ("GET /risks", 21.6),
-        ("GET /conversations/{id}/messages", 19.0),
-        ("GET /opportunities/{id}", 13.3),
-        ("GET /conversations", 5.2),
-    ]
-    endpoints.sort(key=lambda item: item[1])
-    labels = [name for name, _ in endpoints]
-    values = [value for _, value in endpoints]
-    fig, ax = plt.subplots(figsize=(8, 4.2))
-    fig.subplots_adjust(left=0.36, right=0.97, top=0.78, bottom=0.14)
-    bars = ax.barh(labels, values, color=SERIES, height=0.55)
-    style_axes(ax, horizontal=True)
-    ax.set_xlim(0, 320)
-    ax.set_xlabel("p95, мс", color=INK_SECONDARY)
-    ax.axvline(300, color=INK_SECONDARY, linewidth=1)
-    ax.text(300, len(labels) - 0.45, "цель < 300 мс", color=INK_SECONDARY, fontsize=9, ha="right", va="bottom")
-    for bar, value in zip(bars, values):
-        ax.text(bar.get_width() + 4, bar.get_y() + bar.get_height() / 2, f"{value:.1f}".replace(".", ","), va="center", color=INK, fontsize=9)
-    fig.suptitle("API без AI: p95 по конечным точкам", x=0.01, ha="left", color=INK, fontsize=12, fontweight="semibold")
-    subtitle(fig, "300 запросов на точку, 16 параллельных, 100 организаций × 500 переписок × 10 сообщений")
-    fig.savefig(IMAGES / "api-p95.png")
-    plt.close(fig)
+def destination(raw):
+    return raw[1:-1] if raw.startswith('<') and raw.endswith('>') else re.split(r'\s+[\"\']', raw, maxsplit=1)[0]
 
 
-def chart_worker_throughput(plt):
-    labels = ["1 процесс worker", "4 процесса worker"]
-    values = [170.9, 479.8]
-    fig, ax = plt.subplots(figsize=(6.4, 4.0))
-    fig.subplots_adjust(left=0.12, right=0.97, top=0.78, bottom=0.14)
-    bars = ax.bar(labels, values, color=SERIES, width=0.45)
-    style_axes(ax, horizontal=False)
-    ax.set_ylim(0, 560)
-    ax.set_ylabel("заданий в секунду", color=INK_SECONDARY)
-    for bar, value in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 10, f"{value:.0f}", ha="center", color=INK, fontsize=10)
-    fig.suptitle("Пропускная способность обработчика заданий", x=0.01, ha="left", color=INK, fontsize=12, fontweight="semibold")
-    subtitle(fig, "1 600 заданий одного всплеска из 400 вебхуков; рост в 2,8 раза при четырёх процессах")
-    fig.savefig(IMAGES / "worker-throughput.png")
-    plt.close(fig)
+def local_target(page, raw):
+    url = urlsplit(destination(raw))
+    if url.scheme or url.netloc:
+        return None
+    return ((page.parent / unquote(url.path)).resolve() if url.path else page.resolve(), unquote(url.fragment))
 
 
-def chart_ai_capacity(plt):
-    labels = [
-        "ёмкость узла при p50 вывода (1,8 с)",
-        "ёмкость узла при p95 вывода (3,85 с)",
-        "средняя нагрузка (500 000 сообщений в месяц)",
-        "вечерний пик (в 3 раза выше среднего)",
-    ]
-    values = [0.56, 0.26, 0.19, 0.57]
-    fig, ax = plt.subplots(figsize=(8, 4.0))
-    fig.subplots_adjust(left=0.47, right=0.97, top=0.78, bottom=0.16)
-    bars = ax.barh(labels[::-1], values[::-1], color=SERIES, height=0.5)
-    style_axes(ax, horizontal=True)
-    ax.set_xlim(0, 0.7)
-    from matplotlib.ticker import FuncFormatter
-
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:.1f}".replace(".", ",")))
-    ax.set_xlabel("заданий анализа в секунду", color=INK_SECONDARY)
-    for bar, value in zip(bars, values[::-1]):
-        ax.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2, f"{value:.2f}".replace(".", ","), va="center", color=INK, fontsize=9)
-    fig.suptitle("AI-узел: ёмкость и нагрузка", x=0.01, ha="left", color=INK, fontsize=12, fontweight="semibold")
-    subtitle(fig, "RTX 4060, один слот; пик превышает ёмкость — очередь растёт до конца пика")
-    fig.savefig(IMAGES / "ai-capacity.png")
-    plt.close(fig)
-
-
-def chart_retry_schedule(plt):
-    labels = ["попытка 2", "попытка 3", "попытка 4", "попытка 5"]
-    seconds = [5, 30, 120, 600]
-    texts = ["5 с", "30 с", "2 мин", "10 мин"]
-    fig, ax = plt.subplots(figsize=(6.4, 4.0))
-    fig.subplots_adjust(left=0.12, right=0.97, top=0.78, bottom=0.14)
-    bars = ax.bar(labels, seconds, color=SERIES, width=0.45)
-    style_axes(ax, horizontal=False)
-    ax.set_ylim(0, 680)
-    ax.set_ylabel("задержка перед попыткой, с", color=INK_SECONDARY)
-    for bar, text in zip(bars, texts):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 12, text, ha="center", color=INK, fontsize=10)
-    fig.suptitle("Расписание повторов", x=0.01, ha="left", color=INK, fontsize=12, fontweight="semibold")
-    subtitle(fig, "одно расписание для событий outbox, заданий и доставок; после пятой попытки — DEAD")
-    fig.savefig(IMAGES / "retry-schedule.png")
-    plt.close(fig)
-
-
-def render_charts():
-    plt = configure_matplotlib()
-    IMAGES.mkdir(exist_ok=True)
-    chart_api_p95(plt)
-    chart_worker_throughput(plt)
-    chart_ai_capacity(plt)
-    chart_retry_schedule(plt)
-
-
-def pages() -> list[Path]:
-    return sorted(
-        path
-        for path in ROOT.glob("*.md")
-        if path.name != "README.md" and not path.name.startswith("_")
-    )
-
-
-LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
-
-
-def check_links() -> list[str]:
-    problems: list[str] = []
-    for page in pages():
-        text = page.read_text(encoding="utf-8")
+def validate_markdown(pages, root, allowed=None):
+    root = root.resolve()
+    errors, stats = [], {"pagesChecked": 0, "linksChecked": 0, "anchorsChecked": 0}
+    for page in sorted(pages):
+        text, unclosed = prose(page.read_text(encoding='utf-8'))
+        stats['pagesChecked'] += 1
+        if unclosed:
+            errors.append(f'{page}: unclosed fence')
         for match in LINK.finditer(text):
-            target = match.group(1)
-            if target.startswith(("http://", "https://", "mailto:")):
+            target = local_target(page, match.group(1))
+            if target is None:
                 continue
-            path = unquote(target.split("#", 1)[0])
-            if not path:
+            stats['linksChecked'] += 1
+            path, anchor = target
+            if not path.is_relative_to(root):
+                errors.append(f'{page}: outside root: {match.group(1)}')
+            elif not path.exists():
+                errors.append(f'{page}: missing target: {match.group(1)}')
+            elif allowed is not None and path not in allowed and not (path.is_dir() and any(p.is_relative_to(path) for p in allowed)):
+                errors.append(f'{page}: excluded target: {match.group(1)}')
+            elif anchor and path.suffix == '.md':
+                stats['anchorsChecked'] += 1
+                if anchor not in anchors(path.read_text(encoding='utf-8')):
+                    errors.append(f'{page}: missing anchor: {match.group(1)}')
+    return errors, stats
+
+
+def derived_text(source, target):
+    data = source.read_bytes()
+    fence = None
+    def rebase(match):
+        raw = match.group(1)
+        resolved = local_target(source, raw)
+        if resolved is None or not urlsplit(destination(raw)).path:
+            return match.group(0)
+        path, _ = resolved
+        url = urlsplit(destination(raw))
+        link = quote(os.path.relpath(path, target.parent.resolve()), safe='/.-_')
+        if url.fragment:
+            link += '#' + url.fragment
+        return match.group(0).replace(raw, link)
+    lines = []
+    for line in data.decode('utf-8').splitlines(keepends=True):
+        match = FENCE.match(line)
+        if match:
+            marker = match.group(1)
+            if fence is None:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence):
+                fence = None
+            lines.append(line)
+        elif fence:
+            lines.append(line)
+        else:
+            pieces = re.split(r'(`+.*?`+)', line)
+            lines.append(''.join(piece if piece.startswith('`') else LINK.sub(rebase, piece) for piece in pieces))
+    origin = quote(os.path.relpath(source, target.parent), safe='/.-_')
+    return f'<!-- GENERATED; source-sha256: {hashlib.sha256(data).hexdigest()} -->\n> Источник: [канонический документ]({origin}). Правки вносятся в источник.\n\n' + ''.join(lines)
+
+
+def zip_bytes(entries):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for name, data in sorted(entries.items()):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, data)
+    return buffer.getvalue()
+
+
+def emit(path, data, check):
+    if path.exists() and path.read_bytes() == data:
+        return
+    if check:
+        raise ValueError(f'stale or missing generated artifact: {path.relative_to(REPO)}')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def partition(entries, metadata):
+    if set(entries) & set(metadata):
+        raise ValueError('metadata collides with source')
+    ordered = sorted(entries.items())
+    return [dict(ordered[start:start + BATCH_FILES]) for start in range(0, len(ordered), BATCH_FILES)]
+
+
+def eligible(path):
+    relative = path.relative_to(REPO)
+    return not any(p.startswith('.') or p in ('runtime', 'backups', '__pycache__', 'node_modules') for p in relative.parts) and path.suffix not in ('.pyc', '.dump')
+
+
+def collect():
+    sources = {p.resolve() for p in (REPO / 'docs').rglob('*') if p.is_file() and eligible(p) and not (p.parent == ROOT and p.suffix == '.zip')}
+    for name in ('AGENTS.md', 'README.md'):
+        if (REPO / name).exists():
+            sources.add(REPO / name)
+    visited = set()
+    while sources - visited:
+        page = (sources - visited).pop()
+        visited.add(page)
+        if page.suffix != '.md':
+            continue
+        text, _ = prose(page.read_text(encoding='utf-8'))
+        for match in LINK.finditer(text):
+            target = local_target(page, match.group(1))
+            if target is None:
                 continue
-            if not (ROOT / path).exists():
-                problems.append(f"{page.name}: ссылка на отсутствующий файл {target}")
-        if text.count("```") % 2:
-            problems.append(f"{page.name}: незакрытый блок кода")
-    return problems
+            path, _ = target
+            if path.is_relative_to(REPO) and path.is_file() and eligible(path):
+                sources.add(path)
+    return sources
 
 
-def build_archive() -> int:
-    if ARCHIVE.exists():
-        ARCHIVE.unlink()
-    count = 0
-    with zipfile.ZipFile(ARCHIVE, "w", zipfile.ZIP_DEFLATED) as archive:
-        for page in pages():
-            archive.write(page, page.name)
-            count += 1
-        for image in sorted(IMAGES.glob("*.png")):
-            archive.write(image, f"images/{image.name}")
-            count += 1
-    return count
-
-
-def main() -> int:
-    render_charts()
-    problems = check_links()
-    if problems:
-        for problem in problems:
-            print("ОШИБКА:", problem, file=sys.stderr)
-        return 1
-    files = build_archive()
-    print(f"страниц: {len(pages())}, файлов в архиве: {files}, архив: {ARCHIVE}")
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check', action='store_true', help='verify without modifying anything')
+    args = parser.parse_args()
+    for name, canonical in VIEWS.items():
+        target = ROOT / name
+        emit(target, derived_text(REPO / 'docs' / canonical, target).encode(), args.check)
+    sources = collect()
+    errors, stats = validate_markdown([p for p in sources if p.suffix == '.md'], REPO, sources)
+    entries = {p.relative_to(REPO).as_posix(): p.read_bytes() for p in sources}
+    for name, data in entries.items():
+        if data.startswith(b'version https://git-lfs.github.com/spec/v1'):
+            errors.append(f'LFS pointer instead of content: {name}')
+    if errors:
+        raise ValueError('\n'.join(errors))
+    inventory = []
+    for name, data in sorted(entries.items()):
+        kind = 'canonical'
+        if name.startswith('docs/audit/legacy/') or name.startswith('docs/notion/images/'):
+            kind = 'historical'
+        elif name in {'docs/notion/' + view for view in VIEWS}:
+            kind = 'generated'
+        elif Path(name).suffix != '.md':
+            kind = 'tool' if Path(name).suffix in ('.py', '.sh') else 'attachment'
+        inventory.append({'path': name, 'kind': kind, 'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)})
+    manifest = {'schemaVersion': 1, 'scope': 'local documentation; not runtime release approval',
+                'notionImportStatus': 'NOT_EXECUTED', 'generatedViews': len(VIEWS), 'files': inventory}
+    encode = lambda value: (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + '\n').encode()
+    metadata = {'MANIFEST.json': encode(manifest)}
+    output = REPO / 'runtime/docs-package'
+    emit(output / 'MANIFEST.json', metadata['MANIFEST.json'], args.check)
+    emit(output / 'handover.zip', zip_bytes({**entries, **metadata}), args.check)
+    batches = partition(entries, metadata)
+    for index, batch in enumerate(batches, 1):
+        emit(output / f'batch-{index:02}.zip', zip_bytes({**batch, **metadata}), args.check)
+    # Do not leave obsolete batches after the source set shrinks.
+    expected = {f'batch-{index:02}.zip' for index in range(1, len(batches) + 1)}
+    for old in output.glob('batch-*.zip'):
+        if old.name not in expected:
+            if args.check:
+                raise ValueError(f'obsolete batch: {old}')
+            old.unlink()
+    report = {**stats, 'files': len(entries), 'batches': len(batches), 'generatedViews': len(VIEWS),
+              'localStatus': 'PASS', 'handoverSha256': hashlib.sha256(zip_bytes({**entries, **metadata})).hexdigest()}
+    emit(output / 'BUILD_REPORT.json', encode(report), args.check)
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (ValueError, OSError) as error:
+        print(error, file=sys.stderr)
+        sys.exit(1)

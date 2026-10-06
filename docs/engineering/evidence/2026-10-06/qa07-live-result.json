@@ -1,0 +1,181 @@
+{
+  "result": "PASS",
+  "tenantId": "01a0da58-d02d-76a8-9897-b9967c9d4889",
+  "riskId": "01a109d5-21b4-7821-b5a3-da36aa53ac4a",
+  "newActions": [
+    {
+      "actionType": "OPEN_CONVERSATION",
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "RISK_CLOSED",
+          "message": "риск закрыт; новые действия недоступны",
+          "traceId": "218cb130df7efd11d96086593bf6ded2"
+        }
+      }
+    },
+    {
+      "actionType": "COPY_REPLY",
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "RISK_CLOSED",
+          "message": "риск закрыт; новые действия недоступны",
+          "traceId": "976cabf9a44e80554f39087c1445406f"
+        }
+      }
+    },
+    {
+      "actionType": "MARK_CONTACTED",
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "RISK_CLOSED",
+          "message": "риск закрыт; новые действия недоступны",
+          "traceId": "c41245f8ee241a463cd151fb9e02b597"
+        }
+      }
+    },
+    {
+      "actionType": "CALL",
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "RISK_CLOSED",
+          "message": "риск закрыт; новые действия недоступны",
+          "traceId": "34bd16508c73871795c78c42b60383ce"
+        }
+      }
+    },
+    {
+      "actionType": "SEND_MESSAGE",
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "RISK_CLOSED",
+          "message": "риск закрыт; новые действия недоступны",
+          "traceId": "793e785087c9b495ba41a28d1735dc60"
+        }
+      }
+    },
+    {
+      "actionType": "OTHER",
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "RISK_CLOSED",
+          "message": "риск закрыт; новые действия недоступны",
+          "traceId": "8e5935f13958f7aa1cc33cea871ca6a6"
+        }
+      }
+    }
+  ],
+  "replay": {
+    "status": 200,
+    "body": {
+      "id": "01a10bff-5272-7ae3-9b03-0f6f7b2069ae",
+      "riskId": "01a109d5-21b4-7821-b5a3-da36aa53ac4a",
+      "actorId": "01a0da58-cfbe-7071-8fe9-8938783eb238",
+      "type": "CALL",
+      "note": "QA-07: проверка повтора после закрытия",
+      "createdAt": "2026-10-05T12:17:24.594003555Z"
+    }
+  },
+  "changedReplay": {
+    "status": 409,
+    "body": {
+      "error": {
+        "code": "IDEMPOTENCY_CONFLICT",
+        "message": "ключ идемпотентности уже использован для другого запроса",
+        "traceId": "d0ade3ac35fe41f0e5efe4ab1b2fb295"
+      }
+    }
+  },
+  "beforeRejectedRequests": {
+    "status": "RESOLVED",
+    "actions": 2,
+    "tenantAudits": 14,
+    "tenantKeys": 2
+  },
+  "afterRejectedRequests": {
+    "status": "RESOLVED",
+    "actions": 2,
+    "tenantAudits": 14,
+    "tenantKeys": 2
+  },
+  "detail": {
+    "risk": {
+      "id": "01a109d5-21b4-7821-b5a3-da36aa53ac4a",
+      "opportunityId": "01a10967-44bd-7498-a837-3b79ad773e87",
+      "locationId": "01a0da5e-218f-7f26-a5c0-497a0e133ef2",
+      "type": "NO_RESPONSE",
+      "severity": "CRITICAL",
+      "status": "RESOLVED",
+      "source": "RULE",
+      "policyVersion": "no-response/v1",
+      "triggerMessageId": "01a10967-44aa-780b-b442-5121064ffe69",
+      "reasonCode": "NO_RESPONSE_THRESHOLD_EXCEEDED",
+      "reason": "Бизнес не ответил клиенту в течение 120 рабочих минут",
+      "detectedAt": "2026-10-05T02:12:05.172721Z",
+      "dueAt": "2026-10-05T02:12:04.987365Z",
+      "updatedAt": "2026-10-05T16:57:00.856749Z",
+      "acknowledgedAt": "2026-10-05T12:17:24.594003Z",
+      "actedAt": "2026-10-05T12:17:24.594003Z",
+      "resolvedAt": "2026-10-05T16:57:00.856749Z"
+    },
+    "opportunity": {
+      "id": "01a10967-44bd-7498-a837-3b79ad773e87",
+      "stage": "NEW",
+      "locationId": "01a0da5e-218f-7f26-a5c0-497a0e133ef2",
+      "serviceId": "01a0da5e-2194-719e-a9e4-d221a1cda227",
+      "potentialRevenue": "5000.00",
+      "currency": "RUB"
+    },
+    "conversation": {
+      "id": "01a10967-44aa-789b-b87a-0a980c8f4c64",
+      "contactId": "01a10967-44aa-7fe9-86f2-d01a99aa3bee",
+      "lastMessage": {
+        "id": "01a10967-44aa-780b-b442-5121064ffe69",
+        "direction": "INCOMING",
+        "type": "TEXT",
+        "preview": "Здравствуйте, подскажите стоимость полировки.",
+        "sentAt": "2026-10-05T00:12:04.987365Z"
+      }
+    },
+    "contact": {
+      "id": "01a10967-44aa-7fe9-86f2-d01a99aa3bee",
+      "displayName": "QA-06 question"
+    },
+    "service": {
+      "id": "01a0da5e-2194-719e-a9e4-d221a1cda227",
+      "name": "Полировка",
+      "active": true
+    },
+    "channel": {
+      "connectionId": "01a10967-43f7-7218-a968-13e1e7b68d26",
+      "provider": "GENERIC_WEBHOOK",
+      "name": "QA-06 AI v6 05.10",
+      "status": "DISCONNECTED"
+    },
+    "externalLink": {
+      "url": null,
+      "kind": null,
+      "unavailableReason": "PROVIDER_UNSUPPORTED"
+    },
+    "recommendation": null,
+    "actions": [
+      {
+        "id": "01a10bff-5272-7ae3-9b03-0f6f7b2069ae",
+        "type": "CALL",
+        "createdAt": "2026-10-05T12:17:24.594003Z"
+      },
+      {
+        "id": "01a10cff-2650-72bf-8203-83fdfbc87e5a",
+        "type": "OTHER",
+        "createdAt": "2026-10-05T16:56:50.512854Z"
+      }
+    ],
+    "outcome": null,
+    "revenue": null
+  }
+}

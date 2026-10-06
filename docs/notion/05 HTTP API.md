@@ -1,293 +1,348 @@
-# 05 HTTP API
+<!-- GENERATED; source-sha256: 98a6ec319f3a60c08d2d334f32ba1ba4b93c8cbe336ca01e5d7ae3c305ce29bb -->
+> Источник: [канонический документ](../backend/04-api.md). Правки вносятся в источник.
 
-Нормативный контракт — файл OpenAPI 3.1 в репозитории
-(`contracts/openapi/openapi.yaml`); все описанные пути подключены к рабочему
-API, контракт проверяется в CI. Здесь — соглашения, которых OpenAPI не
-показывает, и каталог конечных точек с правами и кодами.
+# HTTP API
 
-## Аутентификация и выбор организации
+Машинный контракт: OpenAPI 3.1 из репозитория реализации; его snapshot
+в этом комплекте отсутствует, см. [внешнюю зависимость](../engineering/EXTERNAL_ARTIFACTS.md#openapi).
+Перечень ниже является документационным контрактом, а не новым доказательством
+подключения и проверки всех путей текущей сборки. Этот документ
+описывает соглашения, которых контракт не показывает, и даёт каталог
+конечных точек с правами и кодами.
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant F as Фронтенд
-  participant A as api
-  F->>A: POST /api/v1/auth/login
-  A-->>F: 200 {user} + cookie lidradar_session (HttpOnly, SameSite=Strict)
-  F->>A: GET /api/v1/auth/me
-  A-->>F: {user, memberships: [{tenantId, organizationName, role}]}
-  Note over F: пользователь выбирает организацию
-  F->>A: GET /api/v1/radar (X-Tenant-ID: <tenantId>)
-  A->>A: middleware: UUID заголовка → контекст RLS
-  A->>A: сервис: членство ACTIVE + право risks.read
-  A-->>F: 200 сводка
-```
+## 1. Соглашения
 
-- **Сессия** — cookie `lidradar_session`; заголовок `Authorization` для
-  пользовательского API не используется. Срок 30 суток по умолчанию,
-  `refresh` ротирует токен, `logout` отзывает.
-- **Организация** выбирается заголовком `X-Tenant-ID`. Без него маршруты
-  организации отвечают `400 TENANT_REQUIRED`, невалидный UUID → `400
-  INVALID_TENANT`. Не требуют заголовка: `/health/*`, `/api/v1/auth/*`,
-  создание организации, `/api/v1/admin/*`, вебхуки, API узла.
-- **Права** проверяются по роли членства (полная таблица — в разделе
-  04). Чужой `X-Tenant-ID` → `403 FORBIDDEN`; чужой идентификатор внутри
+### 1.1. Аутентификация и выбор организации
+
+- **Браузерная сессия** — cookie `lidradar_session` (`HttpOnly`,
+  `SameSite=Strict`, `Path=/`, `Secure` при `LIDRADAR_COOKIE_SECURE`,
+  `Max-Age` = `LIDRADAR_SESSION_TTL`, по умолчанию 30 суток). Значение —
+  непрозрачный токен, сервер хранит только его SHA-256. Заголовок
+  `Authorization` для пользовательского API не используется.
+- **Организация** выбирается заголовком `X-Tenant-ID` (UUID из
+  `GET /api/v1/auth/me`). Без него маршруты организации отвечают
+  `400 TENANT_REQUIRED`; невалидный UUID → `400 INVALID_TENANT` ещё в
+  middleware. Тот же заголовок задаёт контекст RLS для запроса.
+- Не требуют `X-Tenant-ID`: `/health/*`, `/api/v1/auth/*`,
+  `POST /api/v1/organizations`, `/api/v1/admin/*`, вебхуки, API AI-узла.
+- **Права** проверяются в прикладном слое по роли членства (OWNER —
+  все; MANAGER — `risks.read`, `risks.manage`, `conversation.read`,
+  `opportunity.manage`, `action.manage`, `outcome.manage`, `revenue.confirm`).
+  Чужой `X-Tenant-ID` → `403 FORBIDDEN`; чужой идентификатор ресурса внутри
   своей организации → `404 NOT_FOUND` без раскрытия данных.
-- **API AI-узла** (`/internal/v1/ai/*`) — `Authorization: Bearer <секрет>`
-  плюс подписанные заголовки, см. раздел 08.
-- **Вебхуки** — без сессии, секрет подключения в заголовке провайдера.
+- **API AI-узла** (`/internal/v1/ai/*`) — `Authorization: Bearer <секрет узла>`
+  плюс подписанные заголовки `X-LidRadar-*` (см. [../backend/07-ai.md](../backend/07-ai.md)).
+- **Вебхуки** — без сессии; секрет подключения в заголовке провайдера.
 
-## Формат данных
+### 1.2. Тела запросов и ответов
 
-| Правило | Как |
-|---|---|
-| Тело | JSON, ≤ 64 КиБ (вебхуки и API узла ≤ 1 МиБ); неизвестные поля, второе значение, `\x00` и невалидный UTF-8 → `400` |
-| Деньги | строки с двумя знаками: `"1200.00"`; число вместо строки отвергается |
-| Уверенность | число 0…1 с тремя знаками |
-| Время | RFC 3339 в UTC; даты аналитики `YYYY-MM-DD` в часовом поясе организации |
-| Идентификаторы | UUID (у новых записей UUIDv7) |
-| Списки | всегда `items: []`; `nextCursor` только при наличии следующей страницы |
-| Организация | `tenantId` в ответах не возвращается |
+- JSON, `Content-Type: application/json`. Разбор строгий: тело ≤ 64 КиБ
+  (вебхуки ≤ 1 МиБ, API узла ≤ 1 МиБ), неизвестные поля и второе
+  JSON-значение в теле отвергаются, строки с `\x00` отвергаются, тело обязано
+  быть валидным UTF-8 → иначе `400 INVALID_ARGUMENT`.
+- Деньги — **строки** с двумя знаками (`"1200.00"`), никогда не числа;
+  числовое значение цены отвергается. Уверенность (`confidence`) — число.
+- Время — RFC 3339 в UTC; даты аналитики — `YYYY-MM-DD` в часовом поясе
+  организации.
+- Идентификаторы — UUID (UUIDv7 у новых записей).
+- Списки всегда отдают `items: []`, а не `null`; `nextCursor` присутствует
+  только при наличии следующей страницы.
+- Идентификатор организации в ответах не возвращается.
 
-## Ошибки
+### 1.3. Ошибки
 
 Единый конверт:
 
 ```json
-{"error":{"code":"INVALID_ARGUMENT","message":"Invalid request","details":{},"traceId":"7f0c…"}}
+{"error":{"code":"INVALID_ARGUMENT","message":"Invalid request","details":{},"traceId":"<32 hex>"}}
 ```
 
-| HTTP | Код | Когда |
+| HTTP | code | Когда |
 |---|---|---|
-| 400 | `INVALID_ARGUMENT` | неверное тело, параметр, недопустимое значение |
+| 400 | `INVALID_ARGUMENT` | неверное тело, параметр, переход или идентификатор в пути не в формате UUID |
 | 400 | `TENANT_REQUIRED` | нет `X-Tenant-ID` на маршруте организации |
 | 400 | `INVALID_TENANT` | `X-Tenant-ID` не UUID |
 | 401 | `UNAUTHENTICATED` | нет или истекла сессия; узел не прошёл подпись |
-| 401 | `INVALID_CREDENTIALS` | вход: неверные данные, нет пользователя, отключён |
+| 401 | `INVALID_CREDENTIALS` | вход: неверные данные, нет пользователя, `DISABLED` |
 | 401 | `WEBHOOK_UNAUTHENTICATED` | секрет вебхука не совпал |
-| 403 | `FORBIDDEN` | нет права, членства или статуса администратора |
+| 403 | `FORBIDDEN` | нет права, нет членства, не платформенный администратор |
 | 403 | `ORIGIN_NOT_ALLOWED` | мутация с недоверенного `Origin` |
 | 404 | `NOT_FOUND` | ресурс не найден в организации |
 | 404 | `ROUTE_NOT_FOUND` | нет такого маршрута |
-| 405 | `METHOD_NOT_ALLOWED` | метод не поддержан |
-| 409 | `CONFLICT` | конфликт состояния (дубликат, неподходящий статус очереди, чужая переписка у контакта) |
+| 405 | `METHOD_NOT_ALLOWED` | |
+| 409 | `CONFLICT` | конфликт состояния (дубликат email-подключения, неподходящий статус очереди, чужая переписка у контакта) |
 | 409 | `EMAIL_ALREADY_REGISTERED` | регистрация |
 | 409 | `INVALID_STAGE_TRANSITION` | недопустимый переход этапа сделки |
 | 409 | `IDEMPOTENCY_CONFLICT` | тот же `Idempotency-Key` с другим содержимым |
+| 409 | `RISK_CLOSED` | новый Action по `RESOLVED`, `FALSE_POSITIVE`, `IGNORED`, `EXPIRED`; успешный точный replay возвращает `200` |
 | 409 | `RECOVERED_ALREADY_ATTRIBUTED` | вторая атрибуция `RECOVERED` на сделку |
+| 409 | `LAST_OWNER` | понижение или отзыв последнего активного владельца |
+| 409 | `MEMBER_DISABLED` | смена роли отозванного членства |
+| 409 | `INVITATION_EXPIRED` / `INVITATION_REVOKED` / `INVITATION_USED` | код приглашения больше не действует |
+| 409 | `ALREADY_MEMBER` | принимающий уже активный участник организации |
 | 409 | `LEASE_LOST` | API узла: аренда задания потеряна |
 | 413 | `PAYLOAD_TOO_LARGE` | вебхук больше 1 МиБ |
-| 429 | `RATE_LIMITED` | превышен предел по адресу или учётной записи, есть `Retry-After` |
-| 503 | `SERVICE_NOT_READY` | база или миграции не совпали со сборкой |
-| 503 | `CONNECTOR_UNAVAILABLE` | Telegram не настроен, недоступен или подключение отключено |
-| 500 | `INTERNAL_ERROR` | необработанная ошибка; единый код во всех модулях |
+| 429 | `RATE_LIMITED` | превышен предел по адресу или по учётной записи; есть `Retry-After` |
+| 503 | `SERVICE_NOT_READY` | `/health/ready`: база или миграции не совпали |
+| 503 | `CONNECTOR_UNAVAILABLE` | Telegram не настроен или недоступен, подключение отключено |
+| 503 | `UNAVAILABLE` | `GET /events`: шина сигналов не инициализирована в процессе |
+| 500 | `INTERNAL_ERROR` | необработанная ошибка, единый код во всех модулях; текст без деталей |
 
 `message` никогда не содержит секретов, текста сообщений и деталей исключений.
 
-## Идемпотентность и повторы
+### 1.4. Идемпотентность и повторы
 
-| Ситуация | Поведение |
-|---|---|
-| действия, исходы, выручка | обязателен `Idempotency-Key` (1…255): первая запись `201`, точный повтор `200` с сохранённым ответом, другое содержимое → `409 IDEMPOTENCY_CONFLICT`; ключ бессрочный |
-| `acknowledge`, `resolve`, смена этапа, деактивация услуги, повтор ML-согласия | идемпотентны по семантике: повтор `200`/`204` |
-| вебхук | повтор с тем же телом → `202` и `duplicate: true`; другое тело под тем же внешним id → `409` |
+Канон: [безопасная запись фактов](../backend/12-critical-commands.md#idempotency).
+Неизвестный результат повторяется с исходными body/key; конфликт не
+разрешается автоматической сменой ключа, а отмена формы не отменяет commit.
+`ORGANIC` после конфликта атрибуции разрешён только для нового самостоятельного
+платежа после сверки предыдущего намерения.
 
-Рекомендация фронтенду: генерировать UUID ключа на каждую попытку
-пользователя и повторять с тем же ключом при сетевой ошибке.
+- Команды, создающие неизменяемые факты (`actions`, `outcomes`, `revenue`),
+  требуют заголовок `Idempotency-Key` (1…255 символов). Точный повтор
+  возвращает сохранённый ответ с `200`, первая запись — `201`, тот же ключ с
+  другим содержимым — `409 IDEMPOTENCY_CONFLICT`. Ключ живёт в
+  `idempotency_keys` без описанного автоматического expiry в историческом
+  baseline. Это не утверждённая retention policy: удаление ключей без
+  согласованного replay horizon может повторно создать деньги. Сроки и
+  порядок удаления должны пройти [RG-DATA](../engineering/RELEASE_GATES.md#rg-data).
+- Команды состояния (`acknowledge`, `resolve`, `PATCH stage`, `DELETE`
+  услуги, повтор ML-согласия) идемпотентны по семантике и отвечают `200`/`204`
+  при повторе.
+- Вебхук повторяется провайдером сколько угодно: тот же внешний
+  идентификатор с тем же телом — `202` и `duplicate: true`, с другим телом —
+  `409 CONFLICT`.
 
-## Пагинация
+### 1.5. Пагинация
 
-Курсорная: `limit` 1…100 (по умолчанию 50), `cursor` — непрозрачная строка.
-Переписки — по времени обновления, сообщения — по времени отправки, риски —
-серверным порядком Radar, оплаты аналитики — по времени подтверждения;
-курсоры рисков и переписок привязаны к набору фильтров (у рисков — включая
-статусы) и с другими фильтрами отвергаются; конец страницы — `nextCursor:
-null`.
+Курсорная. `limit` 1…100 (по умолчанию 50), `cursor` — непрозрачная строка
+`base64url`. Переписки сортируются по `updated_at DESC, id DESC`, сообщения —
+по `sent_at DESC, id DESC`, риски — серверным порядком Radar, оплаты
+аналитики — по `confirmed_at DESC, id DESC`. Курсоры рисков и переписок
+несут отпечаток набора фильтров (у рисков — включая статусы), курсор оплат —
+окно дат; с другими фильтрами курсор отвергается `400`. Конец страницы всегда
+`nextCursor: null`. Нечисловой `limit` → `400`.
 
-## Корреляция, заголовки безопасности, лимиты
+### 1.6. Корреляция, заголовки безопасности, ограничение частоты
 
-- Клиент может передать `X-Request-ID` и `Traceparent`; ответ всегда несёт
-  `X-Request-ID`, `traceId` попадает в конверт ошибки и в логи.
-- Каждый ответ несёт `X-Content-Type-Options: nosniff`, `X-Frame-Options:
-  DENY`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`,
-  строгую `Content-Security-Policy`, `Permissions-Policy`; HSTS — при
-  включённых Secure cookie или TLS.
-- Мутации с заголовком `Origin` принимаются только с того же origin или из
-  списка доверенных; иначе `403 ORIGIN_NOT_ALLOWED` (защита от CSRF в
-  дополнение к `SameSite=Strict`).
-- Ограничение по адресу соединения: `/api/v1/auth/*` 120 запросов в минуту,
-  `/api/v1/webhooks/*` 1200, `/internal/v1/ai/*` 600; ответ `429` с
-  `Retry-After`. Вход дополнительно ограничен по учётной записи.
+- Клиент может передать `X-Request-ID` (`^[A-Za-z0-9._:-]{1,128}$`) и
+  `Traceparent`; ответ всегда несёт `X-Request-ID`, `traceId` попадает в
+  конверт ошибки и в логи.
+- Каждый ответ, включая ошибки и `/health`, несёт `X-Content-Type-Options:
+  nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+  `Cache-Control: no-store`, `Content-Security-Policy: default-src 'none';
+  frame-ancestors 'none'`, `Permissions-Policy: camera=(), microphone=(),
+  geolocation=()`; HSTS при `LIDRADAR_COOKIE_SECURE=true` или TLS.
+- Мутации (все методы, кроме `GET`/`HEAD`/`OPTIONS`) с заголовком `Origin`
+  принимаются только с того же origin или из `LIDRADAR_ALLOWED_ORIGINS`;
+  иначе `403 ORIGIN_NOT_ALLOWED`. Это защита от CSRF в дополнение к
+  `SameSite=Strict`.
+- Ограничение по адресу соединения (заголовки прокси не читаются):
+  `/api/v1/auth/*` — 120 запросов в минуту, `/api/v1/webhooks/*` — 1200,
+  `/internal/v1/ai/*` — 600; правила независимы, ответ `429` с `Retry-After`. Отдельно вход ограничивается по учётной записи
+  (5 неудач за 15 минут) и по адресу (20 в минуту) в PostgreSQL.
 
-## SSE: сигналы об изменениях
+Это описанное ограничение baseline, не готовая конфигурация за балансировщиком.
+До production обязателен [proxy runbook](../runbooks/proxy-deployment.md):
+нельзя молча учитывать только IP proxy или доверять произвольному
+forwarded header. Необходимый механизм определяется после сверки кода и edge.
 
-`GET /api/v1/events` (право `risks.read`) отдаёт `text/event-stream` только
-как сигнал «перечитай REST», без бизнес-данных.
+### 1.7. SSE
 
-| Событие | Когда |
-|---|---|
-| `risk.changed` | открыт или обновлён риск, записано действие, подтверждена возвращённая выручка |
-| `risk.acknowledged` | риск принят в работу |
-| `risk.resolved` | риск закрыт |
-| `risk.false_positive` | риск закрыт вердиктом о ложном срабатывании |
-| `resync.required` | буфер подписчика переполнился, часть сигналов отброшена — перечитать сводку и открытые списки целиком |
+`GET /api/v1/events` (`text/event-stream`, право `risks.read`) — только
+сигнал «перечитай REST» (ADR 0028). События `risk.changed`,
+`risk.acknowledged`, `risk.resolved`, `risk.false_positive` с телом
+`{"resourceId":"<uuid риска>"}`,
+комментарий-heartbeat каждые 20 с, без `id:`/`retry:` и `Last-Event-ID`:
+после разрыва клиент переподключается и перечитывает `GET /api/v1/radar`
+и списки. Буфер подписчика 16 сигналов; при переполнении накопленные сигналы
+отбрасываются и подписчику посылается одно событие `resync.required` с телом
+`{"reason":"BUFFER_OVERFLOW"}` — клиент перечитывает сводку и открытые списки
+целиком (ADR 0044). Без инициализированной шины — `503 UNAVAILABLE`.
 
-Тело событий `risk.*` — `{"resourceId":"<uuid риска>"}`, маркера —
-`{"reason":"BUFFER_OVERFLOW"}`; комментарий-heartbeat каждые 20 с;
-идентификаторов событий и `Last-Event-ID` нет: после разрыва клиент
-переподключается и перечитывает `GET /api/v1/radar` и списки. Буфер
-подписчика 16 сигналов. Без инициализированной шины — `503 UNAVAILABLE`.
+Silent NOTIFY loss до хаба этим не обнаруживается. Полный
+[freshness gate](../engineering/RELEASE_GATES.md#rg-sse) остаётся открытым
+и требует численного SLA и автоматической сверки при живом stream.
 
-## Каталог конечных точек
+## 2. Каталог конечных точек
 
-Обозначения: 🔓 без сессии; 🍪 сессия; 🍪+T сессия и `X-Tenant-ID`; A —
-`PLATFORM_ADMIN`.
+Обозначения: 🔓 — без сессии; 🍪 — сессия; 🍪+T — сессия и `X-Tenant-ID`;
+право — из набора членства; A — `PLATFORM_ADMIN`.
 
-### Служебные
-
-| Метод | Путь | Доступ | Ответ |
-|---|---|---|---|
-| GET | `/health/live` | 🔓 | `200 {"status":"ok"}` |
-| GET | `/health/ready` | 🔓 | `200` с версией сборки и миграциями; `503 SERVICE_NOT_READY` |
-
-### Аутентификация
-
-| Метод | Путь | Доступ | Тело → ответ |
-|---|---|---|---|
-| POST | `/api/v1/auth/register` | 🔓 | `{email,password,displayName}` → `201 {user}` + cookie; `409`, `429` |
-| POST | `/api/v1/auth/login` | 🔓 | `{email,password}` → `200 {user}` + cookie; `401`, `429` |
-| POST | `/api/v1/auth/logout` | 🍪 | `204`, cookie стирается |
-| POST | `/api/v1/auth/refresh` | 🍪 | `200 {user}` + новая cookie |
-| GET | `/api/v1/auth/me` | 🍪 | `{user, memberships}` только активные членства активных организаций |
-
-### Организация, точки, ML-согласие
-
-| Метод | Путь | Право | Ответ |
-|---|---|---|---|
-| POST | `/api/v1/organizations` | 🍪 | `{name,defaultTimezone,defaultCurrency?}` → `201`, создаёт OWNER |
-| GET | `/api/v1/organization` | членство | `200 Organization` |
-| PATCH | `/api/v1/organization` | `organization.manage` | частичное обновление → `200` |
-| GET | `/api/v1/locations` | членство | `{items}` |
-| POST | `/api/v1/locations` | `location.manage` | `{name,timezone,responseThresholdMinutes?}` → `201`; поле `active` отклоняется |
-| PATCH | `/api/v1/locations/{id}` | `location.manage` | `200` |
-| PUT | `/api/v1/locations/{id}/business-hours` | `location.manage` | `{timezone, days: 7 × {weekday,closed,opensAt?,closesAt?}}` → `200` |
-| GET | `/api/v1/organization/ml-consent` | членство | `{scope, active, consent}` |
-| POST | `/api/v1/organization/ml-consent` | `organization.manage` | `201` при выдаче, `200` при повторе |
-| DELETE | `/api/v1/organization/ml-consent` | `organization.manage` | `204` |
-| GET | `/api/v1/organization/onboarding` | членство | статус онбординга, выведенный из данных: `complete`, `nextStep`, `steps`, `facts` |
-| GET | `/api/v1/organization/members` | `member.manage` | участники с почтой и именем, включая отозванных |
-| PATCH | `/api/v1/organization/members/{userId}` | `member.manage` | `{role}` → `200`; последний владелец защищён (`409 LAST_OWNER`) |
-| DELETE | `/api/v1/organization/members/{userId}` | `member.manage` | отзыв доступа → `204`, идемпотентно |
-| GET | `/api/v1/organization/invitations` | `member.manage` | приглашения со статусом `PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`, без кода |
-| POST | `/api/v1/organization/invitations` | `member.manage` | `{role,note?}` → `201 {invitation, code}`; код показывается один раз, срок 7 дней |
-| DELETE | `/api/v1/organization/invitations/{id}` | `member.manage` | отзыв → `204`; принятое → `409 INVITATION_USED` |
-| POST | `/api/v1/invitations/accept` | сеанс, без `X-Tenant-ID` | `{code}` → `200 {membership}`; создаёт или восстанавливает членство |
-
-### Каталог услуг
-
-| Метод | Путь | Право | Ответ |
-|---|---|---|---|
-| GET | `/api/v1/services` | `service.manage` | `{items}` |
-| POST | `/api/v1/services` | `service.manage` | `{name,locationId?,priceFrom?,priceTo?,currency?}` → `201`; чужая точка → `404` |
-| PATCH | `/api/v1/services/{id}` | `service.manage` | `null` сбрасывает точку и цены → `200` |
-| DELETE | `/api/v1/services/{id}` | `service.manage` | деактивация → `204`, повтор `204` |
-
-### Каналы и вебхуки
+### 2.1. Служебные
 
 | Метод | Путь | Доступ | Ответ |
 |---|---|---|---|
-| GET | `/api/v1/integrations` | `integration.manage` | `{items}` без хешей и реквизитов |
-| POST | `/api/v1/integrations/{provider}/connect` | `integration.manage` | `{name,locationId?,webhookSecret?,botToken?}` → `201` + `webhookSecret` (если секрет выпустил сервер, показывается один раз); Telegram без публичного URL и ключа → `503` |
-| DELETE | `/api/v1/integrations/{id}` | `integration.manage` | `204` |
-| GET | `/api/v1/integrations/{id}/health` | `integration.manage` | `ConnectionHealth` — сохранённое состояние |
-| POST | `/api/v1/integrations/{id}/health/check` | `integration.manage` | живая проверка Telegram (`getWebhookInfo`) с сохранением; `{health, verification: REMOTE\|LOCAL}` |
-| POST | `/api/v1/webhooks/{provider}/{tenantId}/{connectionId}` | 🔓 + секрет | `202 {rawEventId,status,duplicate}`; `401`, `404`, `409`, `413`, `503` |
+| GET | `/health/live` | 🔓 | `200 {"status":"ok","service":"lidradar-api"}` |
+| GET | `/health/ready` | 🔓 | `200 {"status":"ready","build":{version,revision,modified},"migrations":{applied,latest}}`; `503 SERVICE_NOT_READY`, если база недоступна или журнал миграций не совпал со сборкой |
 
-| Провайдер | Заголовок секрета | Тело |
+### 2.2. Аутентификация (`/api/v1/auth`)
+
+| Метод | Путь | Доступ | Тело → ответ | Особые коды |
+|---|---|---|---|---|
+| POST | `/register` | 🔓 | `{email,password,displayName}` → `201 {"user"}` + cookie | `409 EMAIL_ALREADY_REGISTERED`, `429` |
+| POST | `/login` | 🔓 | `{email,password}` → `200 {"user"}` + cookie | `401 INVALID_CREDENTIALS`, `429` |
+| POST | `/logout` | 🍪 (необязательно) | → `204`, cookie стирается | |
+| POST | `/refresh` | 🍪 | → `200 {"user"}` + новая cookie (старая отзывается) | `401`, `429` |
+| GET | `/me` | 🍪 | → `200 {"user","memberships":[{tenantId,organizationName,role}]}` только активные членства активных организаций | `401` |
+
+### 2.3. Организация, точки, ML-согласие
+
+| Метод | Путь | Доступ / право | Ответ |
+|---|---|---|---|
+| POST | `/api/v1/organizations` | 🍪 | `{name,defaultTimezone,defaultCurrency?}` → `201 Organization`; создаёт OWNER-членство |
+| GET | `/api/v1/organization` | 🍪+T, членство | `200 Organization` |
+| PATCH | `/api/v1/organization` | 🍪+T, `organization.manage` | частичное обновление имени, зоны, валюты → `200` |
+| GET | `/api/v1/locations` | 🍪+T, членство | `200 {"items":[Location]}` |
+| POST | `/api/v1/locations` | 🍪+T, `location.manage` | `{name,timezone,responseThresholdMinutes?}` → `201 Location`; поле `active` отклоняется `400` (новая точка всегда активна, статус меняет только `PATCH`) |
+| PATCH | `/api/v1/locations/{locationId}` | 🍪+T, `location.manage` | `200 Location` |
+| PUT | `/api/v1/locations/{locationId}/business-hours` | 🍪+T, `location.manage` | `{timezone,days:[7×{weekday,closed,opensAt?,closesAt?}]}` → `200 Location` |
+| GET | `/api/v1/organization/ml-consent` | 🍪+T, членство | `200 {"scope":"DATASETS","active":bool,"consent":obj\|null}` |
+| POST | `/api/v1/organization/ml-consent` | 🍪+T, `organization.manage` | `201` при выдаче, `200` при повторе |
+| DELETE | `/api/v1/organization/ml-consent` | 🍪+T, `organization.manage` | `204` (и без действующего согласия) |
+| GET | `/api/v1/organization/onboarding` | 🍪+T, членство | `200 {"complete","nextStep","steps":[5×{key,required,done}],"facts","computedAt"}` — статус выводится из данных (ADR 0045) |
+| GET | `/api/v1/organization/members` | 🍪+T, `member.manage` | `200 {"items":[Member]}` с почтой и именем, включая `DISABLED` |
+| PATCH | `/api/v1/organization/members/{userId}` | 🍪+T, `member.manage` | `{"role"}` → `200 Membership`; `409 LAST_OWNER` / `MEMBER_DISABLED`; аудит `MEMBER_ROLE_CHANGED` |
+| DELETE | `/api/v1/organization/members/{userId}` | 🍪+T, `member.manage` | `204` (`DISABLED`, строка остаётся; повтор идемпотентен); `409 LAST_OWNER`; аудит `MEMBER_REVOKED` |
+| GET | `/api/v1/organization/invitations` | 🍪+T, `member.manage` | `200 {"items":[Invitation]}` со статусом `PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`; кода нет |
+| POST | `/api/v1/organization/invitations` | 🍪+T, `member.manage` | `{"role","note?"}` → `201 {"invitation","code"}`; код 43 символа показывается один раз, хранится SHA-256, срок 7 дней; аудит `MEMBER_INVITED` |
+| DELETE | `/api/v1/organization/invitations/{invitationId}` | 🍪+T, `member.manage` | `204` (повтор идемпотентен); принятое → `409 INVITATION_USED`; аудит `INVITATION_REVOKED` |
+| POST | `/api/v1/invitations/accept` | 🍪 (без `X-Tenant-ID`) | `{"code"}` → `200 {"membership":{tenantId,organizationName,role}}`; создаёт или восстанавливает членство; `404` неизвестный код, `409 INVITATION_EXPIRED`/`INVITATION_REVOKED`/`INVITATION_USED`/`ALREADY_MEMBER`; аудит `INVITATION_ACCEPTED` |
+
+Команда работает по одноразовым кодам, а не по адресам почты: у MVP нет
+почтовой инфраструктуры, а код без адреса не даёт поверхности для перебора
+учётных записей (ADR 0045).
+
+### 2.4. Каталог услуг (`/api/v1/services`)
+
+| Метод | Путь | Право | Ответ |
+|---|---|---|---|
+| GET | `/` | `service.manage` | `200 {"items":[ServiceCatalogItem]}` (порядок: активные, затем по нормализованному имени) |
+| POST | `/` | `service.manage` | `{name,locationId?,priceFrom?,priceTo?,currency?}` → `201`; чужая точка → `404` |
+| PATCH | `/{serviceId}` | `service.manage` | поля опциональны, `null` сбрасывает `locationId`/цены → `200` |
+| DELETE | `/{serviceId}` | `service.manage` | деактивация → `204`, повтор тоже `204` |
+
+### 2.5. Каналы и вебхуки
+
+| Метод | Путь | Доступ / право | Ответ |
+|---|---|---|---|
+| GET | `/api/v1/integrations` | 🍪+T, `integration.manage` | `200 {"items":[ChannelConnection]}` без хеша секрета и реквизитов |
+| POST | `/api/v1/integrations/{provider}/connect` | 🍪+T, `integration.manage` | `{name,locationId?,webhookSecret?,botToken?}` → `201 ChannelConnection + webhookSecret`; без `webhookSecret` сервер выпускает 256-битный секрет и возвращает его один раз (`null` для Telegram и для секрета клиента); Telegram без `LIDRADAR_PUBLIC_BASE_URL`/ключа шифрования → `503 CONNECTOR_UNAVAILABLE`; ошибка Bot API → `201` со статусом `ERROR/TELEGRAM_WEBHOOK_SETUP_FAILED` |
+| DELETE | `/api/v1/integrations/{connectionId}` | 🍪+T, `integration.manage` | `204`; удаляет webhook у Telegram после локального отключения |
+| GET | `/api/v1/integrations/{connectionId}/health` | 🍪+T, `integration.manage` | `200 ConnectionHealth` — сохранённое состояние, `checkedAt` = время чтения |
+| POST | `/api/v1/integrations/{connectionId}/health/check` | 🍪+T, `integration.manage` | `200 {"health","verification":"REMOTE"\|"LOCAL"}`; Telegram — живой `getWebhookInfo` с сохранением результата (`ACTIVE`, `ERROR/TELEGRAM_WEBHOOK_MISMATCH`, `ERROR/TELEGRAM_WEBHOOK_CHECK_FAILED`); остальные провайдеры и `DISCONNECTED` — сохранённое состояние |
+| POST | `/api/v1/webhooks/{provider}/{tenantId}/{connectionId}` | 🔓 + секрет | `202 {"rawEventId","status":"RECEIVED"\|"FAILED","duplicate"}`; `401 WEBHOOK_UNAUTHENTICATED`, `404` (нет подключения или провайдер не совпал), `409` (тот же внешний id, другое тело), `413`, `503` (подключение `DISCONNECTED`) |
+
+Контракт вебхука по провайдерам:
+
+| Провайдер | Заголовок секрета | Тело | Внешний идентификатор |
+|---|---|---|---|
+| `TEST`, `IMPORT`, `GENERIC_WEBHOOK` | `X-LidRadar-Webhook-Secret` | конверт `{"id","type","occurredAt","data":{conversationExternalId,messageExternalId,contactExternalId?,contactDisplayName?,direction,messageType,text?,sentAt,replyToMessageExternalId?,attachments,metadata}}`, `type` ∈ `message.received.v1`/`message.edited.v1`/`message.deleted.v1` | `id` конверта (≤ 512) |
+| `CONNECTED_BUSINESS_BOT` | `X-Telegram-Bot-Api-Secret-Token` | Telegram `Update` ровно с одним из `business_connection`, `business_message`, `edited_business_message`, `deleted_business_messages`, `message`, `callback_query` | `update_id` |
+
+Проверка секрета — сравнение SHA-256 в константное время; при провале в базу
+ничего не пишется. Невалидный, но аутентифицированный payload сохраняется
+как `FAILED` с `INVALID_PAYLOAD` и отвечает `202`.
+
+### 2.6. Переписки (`/api/v1/conversations`, право `conversation.read`)
+
+| Метод | Путь | Ответ |
 |---|---|---|
-| `TEST`, `IMPORT`, `GENERIC_WEBHOOK` | `X-LidRadar-Webhook-Secret` | конверт `{id,type,occurredAt,data}` с каноническими полями сообщения |
-| `CONNECTED_BUSINESS_BOT` | `X-Telegram-Bot-Api-Secret-Token` | Telegram `Update` ровно с одним из полей бизнес-сообщений или служебных |
+| GET | `/` | `{"items":[ConversationListItem],"nextCursor"}`; строка = `{conversation, contact{id,displayName}, channel{connectionId,provider,name,status}, lastMessage{id,direction,type,preview≤140,sentAt}\|null, activeRisks{count,maxSeverity\|null}, externalLink}`; фильтры `search` (имя, телефон по цифрам, почта; ≤ 100 символов), `withRisk=true`, `locationId`, `connectionId`, `status`; `limit`, `cursor` (привязан к фильтрам) |
+| GET | `/{conversationId}` | `{"conversation","contact","channel","externalLink"}` |
+| GET | `/{conversationId}/messages` | `{"items":[{"message","attachments":[]}],"nextCursor"}`; удалённые сообщения остаются с `providerDeletedAt` |
 
-### Переписки
-
-| Метод | Путь | Право | Ответ |
-|---|---|---|---|
-| GET | `/api/v1/conversations` | `conversation.read` | строки с контактом, каналом, превью, активными рисками и внешней ссылкой; фильтры `search`, `withRisk`, `locationId`, `connectionId`, `status` |
-| GET | `/api/v1/conversations/{id}` | `conversation.read` | `{conversation,contact,channel,externalLink}` |
-| GET | `/api/v1/conversations/{id}/messages` | `conversation.read` | `{items:[{message,attachments}],nextCursor}` |
-
-### Сделки
+### 2.7. Сделки (`/api/v1/opportunities`)
 
 | Метод | Путь | Право | Ответ |
 |---|---|---|---|
-| GET | `/api/v1/opportunities/{id}` | `opportunity.manage` | `{opportunity,stageHistory}` |
-| PATCH | `/api/v1/opportunities/{id}` | `opportunity.manage` | `{stage}` → `200`; недопустимый переход → `409` |
-| POST | `/api/v1/opportunities/{id}/outcomes` | `outcome.manage` + ключ | `{status,note?}` → `201`/`200` |
-| POST | `/api/v1/opportunities/{id}/revenue` | `revenue.confirm` + ключ | `{amount,currency,attributionType,riskId?,actionId?,outcomeId?}` → `201`/`200`; `409 RECOVERED_ALREADY_ATTRIBUTED` |
+| GET | `/{opportunityId}` | `opportunity.manage` | `{"opportunity","stageHistory":[]}` |
+| PATCH | `/{opportunityId}` | `opportunity.manage` | `{"stage"}` → `200 Opportunity` (и при повторе того же этапа); недопустимый переход → `409 INVALID_STAGE_TRANSITION` |
+| POST | `/{opportunityId}/outcomes` | `outcome.manage`, `Idempotency-Key` | `{"status","note?"}` → `201`/`200 Outcome` |
+| POST | `/{opportunityId}/revenue` | `revenue.confirm`, `Idempotency-Key` | `{"amount","currency","attributionType","riskId?","actionId?","outcomeId?"}` → `201`/`200 {"revenue","attribution"}`; `409 RECOVERED_ALREADY_ATTRIBUTED`; нарушение окна 30 дней или чужая цепочка → `400` |
 
-### Radar и риски
-
-| Метод | Путь | Право | Ответ |
-|---|---|---|---|
-| GET | `/api/v1/radar` | `risks.read` | `{openRisks,criticalRisks,potentialRevenue,confirmedRecoveredRevenue}` |
-| GET | `/api/v1/risks` | `risks.read` | `{items,nextCursor}`; фильтры `status` (несколько) или `active=true\|false`, `locationId`, `severity`, `riskType` |
-| GET | `/api/v1/risks/{id}` | `risks.read` | карточка: контакт, услуга, канал, превью последнего сообщения, внешняя ссылка, рекомендация, действия, последний исход, выручка (`null`, если нет) |
-| POST | `/api/v1/risks/{id}/acknowledge` | `risks.manage` | `200`, идемпотентно |
-| POST | `/api/v1/risks/{id}/resolve` | `risks.manage` | `200`, идемпотентно |
-| POST | `/api/v1/risks/{id}/recommendation` | `risks.manage` | `200` создать или вернуть |
-| POST | `/api/v1/risks/{id}/actions` | `action.manage` + ключ | `{type,note?}` → `201`/`200`; риск → `ACTED` |
-| POST | `/api/v1/risks/{id}/feedback` | `risks.manage` | `{verdict,reason?,note?}` → `201` |
-| GET | `/api/v1/risks/precision` | `analytics.read` | точность по пяти типам за окно `from`…`to` |
-| GET | `/api/v1/events` | `risks.read` | SSE |
-
-### Выручка, уведомления, аналитика
+### 2.8. Radar и риски
 
 | Метод | Путь | Право | Ответ |
 |---|---|---|---|
-| GET | `/api/v1/revenue/confirmed-recovered?currency=RUB` | `revenue.read` | `{amount,currency}` |
-| POST | `/api/v1/notifications/telegram-link-token` | членство | `201 {startUrl,expiresAt}` |
-| GET | `/api/v1/notifications/telegram-link` | членство | `{linked,linkedAt?}` |
-| DELETE | `/api/v1/notifications/telegram-link` | членство | `204` |
-| GET | `/api/v1/notifications/preferences` | членство | `{items: 5 записей}` |
-| PUT | `/api/v1/notifications/preferences/{riskType}` | членство | полная замена → `200` |
-| DELETE | `/api/v1/notifications/preferences/{riskType}` | членство | сброс → `204` |
-| GET | `/api/v1/analytics/summary?from&to` | `analytics.read` | сводка за период с дневным рядом `series` и разбивкой атрибуций |
-| GET | `/api/v1/analytics/payments?from&to&limit&cursor` | `analytics.read` | подтверждённые оплаты окна с контактом, услугой и атрибуцией |
+| GET | `/api/v1/radar` | `risks.read` | `{"openRisks","criticalRisks","potentialRevenue","confirmedRecoveredRevenue"}`; фильтры те же, что у списка: `status` (повторяемый или через запятую), `active=true\|false`, `locationId`, `severity`, `riskType`; деньги видны и менеджеру (ADR 0044) |
+| GET | `/api/v1/risks` | `risks.read` | `{"items":[RiskDetail],"nextCursor"}`; фильтры `status`/`active` (взаимоисключающие), `locationId`, `severity`, `riskType`, `limit`, `cursor` (привязан к фильтрам, включая статусы) |
+| GET | `/api/v1/risks/{riskId}` | `risks.read` | `RiskDetail` = `{risk, opportunity{…,serviceId}, conversation{id,contactId,lastMessage}, contact{id,displayName}, service{id,name,active}\|null, channel, externalLink{url,kind,unavailableReason}, recommendation\|null, actions[], outcome\|null, revenue\|null}` — все ключи присутствуют всегда |
+| POST | `/api/v1/risks/{riskId}/acknowledge` | `risks.manage` | `200 Risk`, идемпотентно |
+| POST | `/api/v1/risks/{riskId}/resolve` | `risks.manage` | `200 Risk`, идемпотентно |
+| POST | `/api/v1/risks/{riskId}/recommendation` | `risks.manage` | `200 Recommendation` (создать или вернуть существующую) |
+| POST | `/api/v1/risks/{riskId}/actions` | `action.manage`, `Idempotency-Key` | `{"type","note?"}` → `201`/`200 Action`; риск → `ACTED`; переход по `externalLink` клиент фиксирует как `OPEN_CONVERSATION` |
+| POST | `/api/v1/risks/{riskId}/feedback` | `risks.manage` | `{"verdict","reason?","note?"}` → `201 Feedback` |
+| GET | `/api/v1/risks/precision` | `analytics.read` | `PrecisionReport` по пяти типам; `from`, `to` (RFC 3339, `from < to`) |
+| GET | `/api/v1/events` | `risks.read` | SSE (см. § 1.7) |
 
-### Администрирование (без `X-Tenant-ID`)
+### 2.9. Выручка
+
+| Метод | Путь | Право | Ответ |
+|---|---|---|---|
+| GET | `/api/v1/revenue/confirmed-recovered?currency=RUB` | `revenue.read` | `{"amount":"12345.00","currency":"RUB"}` — только `CONFIRMED` + `RECOVERED` |
+
+### 2.10. Уведомления (`/api/v1/notifications`, активное членство)
+
+| Метод | Путь | Ответ |
+|---|---|---|
+| POST | `/telegram-link-token` | `201 {"startUrl":"https://t.me/<bot>?start=…","expiresAt"}`; код одноразовый, 15 минут |
+| GET | `/telegram-link` | `200 {"linked","linkedAt?"}` |
+| DELETE | `/telegram-link` | `204` |
+| GET | `/preferences` | `200 {"items":[5 × Preference]}` с `isDefault`, `timezone` |
+| PUT | `/preferences/{riskType}` | полная замена `{deliveryMode,minimumSeverity,inAppEnabled,telegramEnabled,quietHoursEnabled,quietHoursStart?,quietHoursEnd?,digestTime}` → `200` |
+| DELETE | `/preferences/{riskType}` | сброс к умолчанию → `204` |
+
+### 2.11. Аналитика
+
+| Метод | Путь | Право | Ответ |
+|---|---|---|---|
+| GET | `/api/v1/analytics/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` | `analytics.read` | `{"period","messages","opportunities","risks","outcomes","revenue","series":[по дню окна: incoming, outgoing, risksDetected, confirmed, confirmedRecovered, payments],"attribution":[RECOVERED, ORGANIC, UNKNOWN × {amount,count}]}`; период по умолчанию 30 дней, максимум 366; дни — по часовому поясу организации, нули заполнены |
+| GET | `/api/v1/analytics/payments?from&to&limit&cursor` | `analytics.read` | `{"period","items":[{eventId,opportunityId,conversationId,contactId,contactDisplayName,serviceName,amount,currency,attribution,riskId,confirmedBy,confirmedAt}],"nextCursor"}` — подтверждённые события окна во всех валютах, от новых к старым; возвратов в модели нет |
+
+### 2.12. Администрирование (`/api/v1/admin`, 🍪, без `X-Tenant-ID`)
 
 | Метод | Путь | Доступ | Назначение |
 |---|---|---|---|
-| GET | `/api/v1/admin/me` | 🍪 | `{userId, platformAdmin}` |
-| GET, POST | `/api/v1/admin/admins` | A | история выдач; выдача по почте |
-| DELETE | `/api/v1/admin/admins/{userId}` | A | отзыв |
-| GET | `/api/v1/admin/organizations`, `/connections`, `/queue`, `/jobs`, `/dead-letters` | A | read-модели |
-| POST | `/api/v1/admin/jobs/{id}/retry`, `/discard` | A | только `DEAD` |
-| POST | `/api/v1/admin/outbox/{id}/replay`, `/discard` | A | только `DEAD` |
-| POST | `/api/v1/admin/ai/jobs/{id}/retry`, `/discard` | A | только `DEAD` |
-| POST | `/api/v1/admin/notifications/deliveries/{id}/discard` | A | откладывание |
-| GET | `/api/v1/admin/ai/nodes`, `/ai/runs` | A | узлы, прогоны без сырого вывода |
-| GET | `/api/v1/admin/ai/tenants/{t}/conversations/{c}/summary` | A | факты с признаком доверия |
-| GET | `/api/v1/admin/usage?from&to` | A | потребление по организациям |
-| GET | `/api/v1/admin/trace/tenants/{t}/messages/{m}` | A | цепочка от сообщения до выручки |
+| GET | `/me` | 🍪 | `{"userId","platformAdmin"}` |
+| GET / POST | `/admins` | A | история выдач; `{"email","note?"}` → `201`/`200` |
+| DELETE | `/admins/{userId}` | A | отзыв → `204` |
+| GET | `/organizations`, `/connections`, `/queue`, `/jobs`, `/dead-letters` | A | read-модели; фильтры `tenantId`, `status`, `type`, `limit` (≤ 200) |
+| POST | `/jobs/{jobId}/retry`, `/jobs/{jobId}/discard` | A | только `DEAD`; иначе `409 CONFLICT` |
+| POST | `/outbox/{eventId}/replay`, `/outbox/{eventId}/discard` | A | то же для outbox |
+| POST | `/ai/jobs/{jobId}/retry`, `/ai/jobs/{jobId}/discard` | A | то же для AI-заданий |
+| POST | `/notifications/deliveries/{deliveryId}/discard` | A | откладывание мёртвой доставки |
+| GET | `/ai/nodes`, `/ai/runs` | A | узлы с допусками; прогоны без сырого вывода (`tenantId`, `status`, `applicationStatus`, `limit`) |
+| GET | `/ai/tenants/{tenantId}/conversations/{conversationId}/summary` | A | факты с признаком доверия, без текста резюме |
+| GET | `/usage?from&to` | A | потребление по организациям за окно UTC |
+| GET | `/trace/tenants/{tenantId}/messages/{messageId}` | A | цепочка от сообщения до выручки без текстов |
 
-### API AI-узла
+### 2.13. API AI-узла (`/internal/v1/ai`, только `POST`, подпись)
 
-Только `POST` с подписью: `/internal/v1/ai/nodes/heartbeat`,
-`/internal/v1/ai/jobs/claim`, `/internal/v1/ai/jobs/{id}/started`,
-`/internal/v1/ai/jobs/{id}/complete`, `/internal/v1/ai/jobs/{id}/failed` —
-контракт на странице [08 AI-контур](08%20AI-контур.md).
+`/nodes/heartbeat`, `/jobs/claim`, `/jobs/{jobId}/started`,
+`/jobs/{jobId}/complete`, `/jobs/{jobId}/failed` — контракт, заголовки и коды
+описаны в [../backend/07-ai.md](../backend/07-ai.md) § 5.
 
-## Типичные сценарии фронтенда
+## 3. Типичные сценарии для фронтенда
 
-1. **Вход:** `login` → `me` → выбрать организацию → слать `X-Tenant-ID`.
-2. **Radar:** `GET /radar` + `GET /risks?limit=20`; открыть SSE; по любому
-   сигналу и по таймеру перечитать оба запроса.
-3. **Работа с риском:** детали → рекомендация → действие с
-   `Idempotency-Key` → исход → при оплате выручка `RECOVERED` с тремя
-   идентификаторами цепочки.
-4. **Подключение канала:** владелец создаёт `GENERIC_WEBHOOK` со своим
-   секретом; Telegram подключается серверным помощником, чтобы токен не
-   проходил через браузер.
-5. **Личные уведомления:** выпустить ссылку привязки → открыть в Telegram →
-   проверить статус → настроить режимы по типам риска.
+1. **Вход и выбор организации:** `POST /auth/login` → `GET /auth/me` →
+   выбрать `tenantId` → слать `X-Tenant-ID` со всеми запросами.
+2. **Экран Radar:** `GET /radar` + `GET /risks?limit=20`; открыть SSE
+   `/events`; по любому событию перечитать оба запроса.
+3. **Работа с риском:** `GET /risks/{id}` → `POST …/recommendation` → `POST
+   …/actions` с `Idempotency-Key` (UUID на попытку пользователя) → `POST
+   /opportunities/{id}/outcomes` → при оплате `POST /opportunities/{id}/revenue`
+   с `attributionType: RECOVERED` и тремя идентификаторами цепочки.
+4. **Подключение канала:** OWNER → `POST /integrations/GENERIC_WEBHOOK/connect`
+   без `webhookSecret` — сервер вернёт секрет один раз, его передают
+   отправителю; для Telegram интерфейс отправляет токен бота один раз по TLS
+   (write-only поле, токен шифруется и не возвращается; ADR 0045), либо
+   используется помощник `scripts/telegram-connect-safe.sh`. Кнопка
+   «Проверить связь» — `POST /integrations/{id}/health/check`.
+6. **Команда и онбординг:** `GET /organization/onboarding` определяет
+   следующий шаг настройки; OWNER выпускает код `POST
+   /organization/invitations`, сотрудник после входа принимает его `POST
+   /invitations/accept` и видит организацию в `/auth/me`.
+5. **Личные уведомления:** `POST /notifications/telegram-link-token` →
+   открыть `startUrl` в Telegram → `GET /notifications/telegram-link` →
+   настроить `PUT /notifications/preferences/{riskType}`.

@@ -40,6 +40,9 @@ func schemaPools(t testing.TB, withRoles bool) Pools {
 	t.Helper()
 	databaseURL := os.Getenv("LIDRADAR_DATABASE_URL")
 	if databaseURL == "" {
+		if os.Getenv("LIDRADAR_TEST_DATABASE_REQUIRED") == "1" {
+			t.Fatal("mandatory PostgreSQL tests: LIDRADAR_DATABASE_URL is not configured")
+		}
 		t.Skip("LIDRADAR_DATABASE_URL is not configured")
 	}
 	ctx := context.Background()
@@ -47,9 +50,11 @@ func schemaPools(t testing.TB, withRoles bool) Pools {
 	if err != nil {
 		t.Fatalf("connect integration PostgreSQL: %v", err)
 	}
-	if err := admin.Ping(ctx); err != nil {
+	pingContext, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelPing()
+	if err := admin.Ping(pingContext); err != nil {
 		admin.Close()
-		t.Skipf("integration PostgreSQL unavailable: %v", err)
+		t.Fatal("configured integration PostgreSQL is unavailable")
 	}
 	schema := "test_" + randomHex(t, 8)
 	identifier := pgx.Identifier{schema}.Sanitize()

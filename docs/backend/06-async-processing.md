@@ -225,6 +225,13 @@ worker: DispatchOne → Telegram / IN_APP
   `risk.false_positive` (ADR 0038): клиент перечитывает Radar так же, как
   после закрытия риска.
 
+Уточнение 2026-10-05: buffer-overflow marker не обнаруживает NOTIFY,
+потерянный до хаба. LISTEN может восстанавливаться при непрерванном
+браузерном SSE; heartbeat подтверждает транспорт, не актуальность данных.
+Для ограниченной устарелости нужен автоматический recovery mechanism и
+численный SLA по [RG-SSE](../engineering/RELEASE_GATES.md#rg-sse).
+Этот полный сценарий остаётся непроверенным, даже если overflow-тест прошёл.
+
 ## 9. Мёртвые элементы и вмешательство администратора
 
 `GET /api/v1/admin/dead-letters` показывает `DEAD` без `discarded_at` по

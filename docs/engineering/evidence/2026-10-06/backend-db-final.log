@@ -1,0 +1,2 @@
+go run ./backend/tools/testgate -output runtime/test-db -- -race -count=1
+DB gate: PASS; passed=568 failed=0 skipped=1; evidence=runtime/test-db

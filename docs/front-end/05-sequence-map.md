@@ -224,7 +224,7 @@ sequenceDiagram
   EXT-->>U: Channel opened
   U->>UI: Confirm completed action
   UI->>API: POST action with Idempotency-Key K1
-  API-->>UI: 201 Action or replay 200
+  API-->>UI: 201 Action / replay 200 / 409 RISK_CLOSED
   UI->>Q: Invalidate risk risks radar
   U->>UI: Record outcome
   UI->>API: POST outcome with Idempotency-Key K2
@@ -241,6 +241,12 @@ sequenceDiagram
 При timeout K1/K2/K3 и body сохраняются в памяти draft; новый key до
 однозначного результата запрещён. Action не записывается автоматически только
 из-за клика по несуществующему/небезопасному deeplink.
+
+После reload/утраты draft нельзя считать прежнюю операцию отменённой:
+до сверки результата новая отправка блокируется. `409 IDEMPOTENCY_CONFLICT`
+не обходится сменой ключа. Новый Action по терминальному Risk получает
+`409 RISK_CLOSED`; точный replay уже успешного Action возвращает `200`
+и после закрытия. Канон: [матрица команд](../backend/12-critical-commands.md).
 
 <a id="sequence-feedback"></a>
 ## 7. Feedback и каскад false positive

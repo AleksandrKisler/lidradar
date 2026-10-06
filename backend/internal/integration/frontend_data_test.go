@@ -19,6 +19,9 @@ import (
 
 func TestFrontendDataThroughRealAPI(t *testing.T) {
 	if err := devdata.ValidateTarget(config.EnvironmentTest, os.Getenv("LIDRADAR_DATABASE_URL")); err != nil {
+		if os.Getenv("LIDRADAR_TEST_DATABASE_REQUIRED") == "1" {
+			t.Fatal("mandatory frontend API tests require database lidradar_frontend")
+		}
 		t.Skip("нужна отдельная база lidradar_frontend")
 	}
 	f := newAPIFixture(t)

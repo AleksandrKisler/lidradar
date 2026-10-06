@@ -1,0 +1,28 @@
+{
+  "reviewedAt": "2026-10-06",
+  "backendCanonical": "PASS",
+  "backendVet": "PASS",
+  "backendArchitecture": "PASS",
+  "backendStaticcheck": "PASS",
+  "databaseGate": {
+    "passedEventsIncludingSubtests": 568,
+    "failed": 0,
+    "expectedSkips": 1
+  },
+  "unavailableDatabase": "EXPECTED_FAIL",
+  "missingDatabaseRequiredHelper": "EXPECTED_FAIL",
+  "frontendTests": {
+    "files": 60,
+    "passed": 363,
+    "failed": 0
+  },
+  "frontendBuildDevAndTypecheck": "PASS",
+  "frontendEslint": "PASS",
+  "frontendFsd": "PASS_WITH_CHOKIDAR_USEPOLLING",
+  "frontendApiTypes": "PASS",
+  "frontendArchitectureCases": 13,
+  "recoveryScriptTests": 8,
+  "docsToolingTests": 10,
+  "remoteCI": "NOT_RUN",
+  "productionDeployment": "NOT_RUN"
+}

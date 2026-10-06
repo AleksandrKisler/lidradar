@@ -2,8 +2,8 @@
 
 Каталог описывает все HTTP-операции, доступные текущему web-клиенту, и
 отделяет их от webhook/internal API. Формы моделей раскрыты в
-[02-entities.md](02-entities.md), machine-readable контракт — в
-[OpenAPI](../../contracts/openapi/openapi.yaml), серверная семантика — в
+[02-entities.md](02-entities.md), machine-readable контракт
+[OpenAPI и его версионированный артефакт](../engineering/EXTERNAL_ARTIFACTS.md#openapi), серверная семантика описана в
 [backend API](../backend/04-api.md).
 
 <a id="transport-contract"></a>
@@ -55,7 +55,7 @@
 | 403 | `FORBIDDEN`, `ORIGIN_NOT_ALLOWED` | нейтральный access/config state, без сведений о чужом объекте |
 | 404 | `NOT_FOUND`, `ROUTE_NOT_FOUND` | resource-not-found; для tenant object одинаково с чужим ID |
 | 405 | `METHOD_NOT_ALLOWED` | техническая ошибка клиента, не retry |
-| 409 | `CONFLICT`, `EMAIL_ALREADY_REGISTERED`, `INVALID_STAGE_TRANSITION`, `IDEMPOTENCY_CONFLICT`, `RECOVERED_ALREADY_ATTRIBUTED`, `LAST_OWNER`, `MEMBER_DISABLED`, `INVITATION_EXPIRED`, `INVITATION_REVOKED`, `INVITATION_USED`, `ALREADY_MEMBER` | понятный conflict state; refetch; не повторять автоматически |
+| 409 | `CONFLICT`, `EMAIL_ALREADY_REGISTERED`, `INVALID_STAGE_TRANSITION`, `IDEMPOTENCY_CONFLICT`, `RECOVERED_ALREADY_ATTRIBUTED`, `RISK_CLOSED`, `LAST_OWNER`, `MEMBER_DISABLED`, `INVITATION_EXPIRED`, `INVITATION_REVOKED`, `INVITATION_USED`, `ALREADY_MEMBER` | понятный conflict state; refetch; не повторять автоматически |
 | 413 | `PAYLOAD_TOO_LARGE` | не повторять; предложить уменьшить ввод |
 | 429 | `RATE_LIMITED` | уважать `Retry-After`, заблокировать submit на заданное число секунд |
 | 503 | `SERVICE_NOT_READY`, `CONNECTOR_UNAVAILABLE`, `UNAVAILABLE` (SSE) | сохранить безопасный draft; retry только по явному действию; без SSE — периодический REST refetch |
@@ -261,7 +261,13 @@ Opportunity в `LOST`. Последствия не моделируются оп
 | `POST /opportunities/{opportunityId}/outcomes` | T, `outcome.manage`, Idempotency-Key | `{status,note?}` | `201 Outcome` / replay `200` | opportunity, risk, risks, radar, analytics |
 
 Ошибки: `400/401/403/404`; Action/Outcome также
-`409 IDEMPOTENCY_CONFLICT`. Recommendation детерминирована и не обращается к
+`409 IDEMPOTENCY_CONFLICT`, новый Action по терминальному риску:
+`409 RISK_CLOSED`. Точный replay уже успешного Action возвращает `200`
+даже после закрытия риска, без новой записи. Проверка идемпотентности
+предшествует проверке статуса в одной транзакции с блокировкой Risk.
+Это нормативный контракт QA-07; проверка текущей сборки остаётся
+[отдельным gate](../engineering/RELEASE_GATES.md#rg-money).
+Recommendation детерминирована и не обращается к
 AI. `OPEN_CONVERSATION` — записываемый Action, но сначала должен быть выполнен
 реальный переход во внешний канал по `externalLink.url`; не записывать успех,
 если переход не состоялся. У OWNER и MANAGER есть `action.manage` и
@@ -276,10 +282,18 @@ AI. `OPEN_CONVERSATION` — записываемый Action, но сначала
 | `GET /revenue/confirmed-recovered` | T, `revenue.read` (OWNER) | required `currency` | `200 Money` | — |
 
 POST: `400/401/403/404/409`; GET: `400/401/403`. `409` различает
-`IDEMPOTENCY_CONFLICT` (повторить с новым ключом) и
-`RECOVERED_ALREADY_ATTRIBUTED` (предложить `ORGANIC` по явному решению
-пользователя); оба кода описаны в OpenAPI (GAP-CONTRACT-017 закрыт).
-После неизвестного сетевого результата повторяется то же body с тем же key.
+`IDEMPOTENCY_CONFLICT` и `RECOVERED_ALREADY_ATTRIBUTED`.
+При `IDEMPOTENCY_CONFLICT` запрещены автоматическая смена ключа и отправка
+изменённого тела как повтора. Сначала восстанавливаются исходные body/key
+и результат первоначального намерения.
+После неизвестного сетевого результата повторяется только то же body с тем же key;
+закрытие/отмена формы или reload не доказывают отсутствие серверного commit.
+Если исходное намерение потеряно, автоматический повтор блокируется до сверки.
+`ORGANIC` после `RECOVERED_ALREADY_ATTRIBUTED` допустим лишь для отдельно
+подтверждённого дополнительного платежа, не для повторной записи прежней оплаты.
+Полная [матрица безопасных повторов](../backend/12-critical-commands.md#idempotency)
+применяется ко всем денежным формам; соответствие машинному OpenAPI требует
+получения его [версионированного артефакта](../engineering/EXTERNAL_ARTIFACTS.md#openapi).
 `PAID` Outcome и Revenue подтверждаются отдельными действиями; UI не соединяет
 их в один неделимый запрос.
 
@@ -331,9 +345,13 @@ tenant неизменны, document online/visible. Смена tenant abort-ит
 события за разрыв потеряны. `401` завершает auth context, `403` завершает stream
 до смены контекста; parser ограничивает размер буфера.
 
-NOTIFY между процессами остаётся best-effort, поэтому focus/online/manual REST
-refetch сохраняется как страховка; переполнение буфера подписчика больше не
-теряется молча — приходит `resync.required` (GAP-RELIABILITY-020 закрыт).
+NOTIFY между процессами остаётся best-effort. `resync.required` покрывает
+переполнение буфера, но не произвольную потерю сигнала до Hub.
+Focus/online/manual REST refetch сохраняется, но не ограничивает устарелость
+у постоянно открытой вкладки. GAP-RELIABILITY-020 частично закрыт только
+для buffer overflow; общий [freshness-gate](../engineering/RELEASE_GATES.md#rg-sse)
+остаётся открытым для полного deployment-прогона. SLA 30 секунд утверждён;
+safety refetch и локальный silent-NOTIFY сценарий проверены 2026-10-06.
 `503 UNAVAILABLE` при неинициализированном hub описан в OpenAPI: клиент
 работает по REST с периодическим refetch и повторяет подключение с backoff.
 

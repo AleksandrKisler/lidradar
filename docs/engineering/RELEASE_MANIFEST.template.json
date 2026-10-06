@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "artifactType": "RELEASE_MANIFEST_TEMPLATE",
+  "notForDeployment": true,
+  "releaseId": null,
+  "overallStatus": "NOT_VERIFIED",
+  "environment": null,
+  "releaseOwner": null,
+  "reviewedAt": null,
+  "backend": {
+    "repositoryUrl": null,
+    "commit": null,
+    "imageDigest": null
+  },
+  "frontend": {
+    "repositoryUrl": null,
+    "commit": null,
+    "buildId": null
+  },
+  "database": {
+    "schemaVersion": null,
+    "migrationSetSha256": null,
+    "roleAndGrantBaselineSha256": null
+  },
+  "openapi": {
+    "artifactUrl": null,
+    "version": null,
+    "sha256": null,
+    "lintAndGenerationEvidence": null
+  },
+  "configuration": {
+    "version": null,
+    "nonSecretSha256": null,
+    "secretReferenceVersions": [],
+    "containsSecretValues": false
+  },
+  "architecture": {
+    "applicableAcceptedAdrIds": [],
+    "documentationSourceTreeSha256": null
+  },
+  "ai": {
+    "enabled": null,
+    "modelManifestUrl": null,
+    "modelSha256": null,
+    "providerCommit": null,
+    "runtimeAndDriverVersions": null,
+    "promptVersion": null,
+    "promptSha256": null,
+    "schemaVersion": null,
+    "validatorRevision": null,
+    "generationParameters": null,
+    "goldenDatasetSha256": null,
+    "devDatasetSha256": null,
+    "split": null,
+    "hardware": null,
+    "benchmarkRunId": null,
+    "benchmarkReportUrl": null,
+    "benchmarkReportSha256": null
+  },
+  "requiredDecisions": {
+    "retentionPolicy": {
+      "status": "BLOCKED_DECISION",
+      "approvedPolicyVersion": null,
+      "approvedBy": null,
+      "perClassDurationsAndExceptions": null
+    },
+    "onlineVisibleSnapshotFreshness": {
+      "status": "BLOCKED_DECISION",
+      "maximumStalenessSeconds": null,
+      "refetchLoadBudget": null,
+      "approvedBy": null
+    },
+    "capacityWorkload": {
+      "status": "NOT_APPROVED",
+      "profileVersion": null,
+      "approvedBy": null
+    }
+  },
+  "gates": {
+    "RG-MONEY": {"status": "NOT_RUN", "owner": null, "evidence": []},
+    "RG-DR": {"status": "NOT_RUN", "owner": null, "evidence": []},
+    "RG-DEPLOY": {"status": "NOT_RUN", "owner": null, "evidence": []},
+    "RG-DATA": {"status": "BLOCKED_DECISION", "owner": null, "evidence": []},
+    "RG-AI": {"status": "NOT_RUN", "owner": null, "evidence": []},
+    "RG-SSE": {"status": "BLOCKED_DECISION", "owner": null, "evidence": []},
+    "RG-TESTS": {"status": "NOT_RUN", "owner": null, "evidence": []},
+    "RG-CAPACITY": {"status": "NOT_RUN", "owner": null, "evidence": []},
+    "RG-EXTERNAL": {"status": "NOT_RUN", "owner": null, "evidence": []},
+    "RG-DOCS-LOCAL": {"status": "ATTACH_BUILD_REPORT", "owner": null, "evidence": []},
+    "RG-DOCS-NOTION": {"status": "NOT_EXECUTED", "owner": null, "evidence": []}
+  },
+  "openTechnicalHighIds": [
+    "H-01", "H-02", "H-03", "H-04", "H-05",
+    "H-06", "H-07", "H-08", "H-09", "H-10",
+    "H-11", "H-12", "H-13", "H-14", "H-15",
+    "H-16", "H-17", "H-18", "H-19"
+  ],
+  "migrationAcceptance": {
+    "relatedHighId": "H-20",
+    "workspaceUrl": null,
+    "pageIdMapUrl": null,
+    "linksAndPermissionsEvidence": null,
+    "exportRoundTripEvidence": null,
+    "status": "NOT_EXECUTED"
+  }
+}

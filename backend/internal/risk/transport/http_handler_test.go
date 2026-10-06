@@ -239,5 +239,19 @@ func TestSSEEmitsResyncMarkerWhenSubscriberBufferOverflows(t *testing.T) {
 		if line == "event: risk.resolved\n" {
 			break
 		}
+		if line == "event: "+ResyncEvent+"\n" {
+			// The burst may have queued another overflow marker before the
+			// first marker reached the client. It legitimately subsumes the
+			// probe as well. Wait for its complete frame before the next probe;
+			// a live stream must eventually deliver it after the burst drains.
+			data, err := reader.ReadString('\n')
+			if err != nil || data != "data: {\"reason\":\"BUFFER_OVERFLOW\"}\n" {
+				t.Fatalf("повторный маркер = %q, %v", data, err)
+			}
+			if blank, err := reader.ReadString('\n'); err != nil || blank != "\n" {
+				t.Fatalf("незавершённый кадр: %q, %v", blank, err)
+			}
+			hub.Publish("tenant", "risk.resolved", "risk-2")
+		}
 	}
 }

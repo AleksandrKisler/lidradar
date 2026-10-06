@@ -1,0 +1,85 @@
+EEEEEEEEEE
+======================================================================
+ERROR: test_check_mode_refuses_stale_file_without_mutating (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 94, in test_check_mode_refuses_stale_file_without_mutating
+    original = BUILD.REPO
+AttributeError: module 'docs_builder' has no attribute 'REPO'
+
+======================================================================
+ERROR: test_code_examples_are_not_links_or_headings (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 36, in test_code_examples_are_not_links_or_headings
+    self.assertEqual(BUILD.anchors(text), {"real"})
+AttributeError: module 'docs_builder' has no attribute 'anchors'
+
+======================================================================
+ERROR: test_cross_root_and_excluded_package_target_fail (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 63, in test_cross_root_and_excluded_package_target_fail
+    errors, _ = BUILD.validate_markdown([page, extra], root, {page.resolve()})
+AttributeError: module 'docs_builder' has no attribute 'validate_markdown'
+
+======================================================================
+ERROR: test_explicit_anchor_and_duplicate_heading (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 52, in test_explicit_anchor_and_duplicate_heading
+    BUILD.anchors('# Name\n## Name\n<a id="stable"></a>\n'),
+AttributeError: module 'docs_builder' has no attribute 'anchors'
+
+======================================================================
+ERROR: test_generated_links_are_rebased_and_source_is_visible (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 75, in test_generated_links_are_rebased_and_source_is_visible
+    result = BUILD.derived_text(page, views / "view.md")
+AttributeError: module 'docs_builder' has no attribute 'derived_text'
+
+======================================================================
+ERROR: test_missing_target_and_anchor_fail (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 31, in test_missing_target_and_anchor_fail
+    errors, _ = BUILD.validate_markdown([page], root)
+AttributeError: module 'docs_builder' has no attribute 'validate_markdown'
+
+======================================================================
+ERROR: test_partitions_cover_every_source_once (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 105, in test_partitions_cover_every_source_once
+    batches = BUILD.partition(entries, {"meta.json": b"{}"})
+AttributeError: module 'docs_builder' has no attribute 'partition'
+
+======================================================================
+ERROR: test_unclosed_fence_fails (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 47, in test_unclosed_fence_fails
+    errors, _ = BUILD.validate_markdown([page], Path(temp))
+AttributeError: module 'docs_builder' has no attribute 'validate_markdown'
+
+======================================================================
+ERROR: test_valid_unicode_anchor_and_encoded_filename (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 22, in test_valid_unicode_anchor_and_encoded_filename
+    errors, stats = BUILD.validate_markdown([page, target], root)
+AttributeError: module 'docs_builder' has no attribute 'validate_markdown'
+
+======================================================================
+ERROR: test_zip_is_deterministic_and_preserves_payload (test_build.DocumentationToolingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/aleksandrkisler/Develop/Lidradar/docs/notion/test_build.py", line 82, in test_zip_is_deterministic_and_preserves_payload
+    a = BUILD.zip_bytes({"b.txt": b"B", "a.txt": b"A"})
+AttributeError: module 'docs_builder' has no attribute 'zip_bytes'
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.004s
+
+FAILED (errors=10)

@@ -1,0 +1,4 @@
+ok  	lidradar/backend/internal/corrective/application	1.249s
+ok  	lidradar/backend/internal/corrective/domain	1.061s
+ok  	lidradar/backend/internal/corrective/infrastructure	8.453s
+ok  	lidradar/backend/internal/corrective/transport	1.090s

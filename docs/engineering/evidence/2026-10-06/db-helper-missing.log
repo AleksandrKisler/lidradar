@@ -1,0 +1,5 @@
+--- FAIL: TestPostgresRiskDedupResolveAndTenantIsolation (0.00s)
+    postgres_repository_test.go:19: mandatory PostgreSQL tests: LIDRADAR_DATABASE_URL is not configured
+FAIL
+FAIL	lidradar/backend/internal/risk/infrastructure	0.369s
+FAIL

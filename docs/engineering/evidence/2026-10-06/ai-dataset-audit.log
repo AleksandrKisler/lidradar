@@ -1,0 +1,2 @@
+go run ./backend/cmd/ai-dataset-audit
+{"cases":500,"splitCounts":{"DEV":100,"GOLDEN":400},"factCounts":{"BOOKING_INTENT":178,"BUSINESS_COMMITMENT":70,"FOLLOW_UP_CANDIDATE":70,"PRICE_MENTIONED":142},"emptyCases":145}

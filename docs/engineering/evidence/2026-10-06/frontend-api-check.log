@@ -1,0 +1,5 @@
+
+> lidradar-web@0.1.0 api:check
+> node scripts/check-openapi-types.mjs
+
+Типы OpenAPI соответствуют снимку контракта.

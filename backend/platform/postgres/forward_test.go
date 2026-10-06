@@ -17,6 +17,9 @@ import (
 func TestMigrationsApplyForwardFromPreviousRelease(t *testing.T) {
 	databaseURL := os.Getenv("LIDRADAR_DATABASE_URL")
 	if databaseURL == "" {
+		if os.Getenv("LIDRADAR_TEST_DATABASE_REQUIRED") == "1" {
+			t.Fatal("mandatory PostgreSQL tests: LIDRADAR_DATABASE_URL is not configured")
+		}
 		t.Skip("LIDRADAR_DATABASE_URL is not configured")
 	}
 	ctx := context.Background()

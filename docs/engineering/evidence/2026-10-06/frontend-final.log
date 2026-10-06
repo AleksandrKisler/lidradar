@@ -1,0 +1,17 @@
+
+> lidradar-web@0.1.0 test:unit
+> vitest run
+
+
+ RUN  v5.0.0 /Users/aleksandrkisler/WebstormProjects/Lidradar
+
+
+ Test Files  60 passed (60)
+      Tests  363 passed (363)
+   Start at  01:12:20
+   Duration  33.84s (import 83%, environment 8%, tests 5%, transform 3%)
+
+     Import  355 modules were evaluated 1259 times · 186.04s total, 83% of tracked time
+             ~6.82s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

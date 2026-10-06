@@ -1,6 +1,10 @@
 # LidRadar — Backend Technical Specification & Sequential Delivery Plan v1.1
 
-**Статус:** Ready for Backend Development
+**Статус:** рабочий backlog; готовность текущего выпуска `NOT_VERIFIED`.
+**Сверка документации:** 2026-10-05. Исторические этапы и их Exit Gate не
+являются результатом нового прогона. Исправления High, обязательные
+проверки и оставшиеся решения перечислены в
+[реестре выпуска](engineering/RELEASE_GATES.md).
 **Изменение v1.0 → v1.1:** добавлен внеочередной ЭТАП R — CONSISTENCY REMEDIATION (между этапами 16 и 17), задачи `LR-BE-RM-001 … LR-BE-RM-026`; уточнён §3.5 (абсолютный потолок аренды); §77 дополнен вторым намеренным исключением и этапом A2; §78 дополнен PR #17.5. Основание — Errata v1.2.2 (сквозная сверка Tasks.md, Плана разработки MVP v1.2, GLOSSARY v1.0, README v1.0).
 **Architecture baseline:** Final System Architecture v1.1
 **Implementation baseline:** Development Specification v1.1
@@ -51,26 +55,18 @@ Backend-разработчик **не должен переизобретать 
 
 # 2. Иерархия документации
 
-При противоречиях использовать следующий порядок приоритета:
+Действует [единая политика актуальности](engineering/DOCS_GOVERNANCE.md).
+Вход в доступный комплект: [карта документации](README.md). Архитектурные
+ограничения задают принятые ADR и архитектурная спецификация; контракт поведения
+согласуется в backend specification и канонических разделах. Этот документ
+задаёт задачи и зависимости, а не отменяет более поздний принятый ADR.
 
-1. **Final System Architecture v1.1**
-2. **Development Specification v1.1**
-3. **Detailed MVP Development Plan v1.0**
-4. **MVP Implementation Plan v1.0**
-5. **Functional Scope MVP v0.2**
-
-Detailed Development Plan является основным документом для последовательности разработки.
-
-Development Specification является основным документом для:
-
-* DB schema;
-* domain contracts;
-* API;
-* Risk rules;
-* AI contracts;
-* events.
-
-Final System Architecture является источником истины для архитектурных ограничений.
+Название исторического baseline в шапке не означает, что одноимённый внешний
+документ присутствует в комплекте или имеет приоритет над доступным каноном.
+Runtime и тесты конкретного commit являются доказательствами фактического
+поведения, но расхождение с нормой является дефектом, а не её автоматическим
+изменением. Для отсутствующих исходников, OpenAPI и manifest используется
+[реестр зависимостей](engineering/EXTERNAL_ARTIFACTS.md).
 
 ---
 
@@ -1126,6 +1122,12 @@ tenant_id + key + operation
 
 Повтор с тем же request hash возвращает сохранённый результат.
 
+Клиент сохраняет неизменяемую пару key/body для одного намерения. Timeout,
+reload, отмена формы и неизвестный результат не разрешают новый ключ.
+Сначала сверка результата, затем replay той же команды; при утрате пары
+автоматический повтор запрещён. Полные правила и отрицательные сценарии:
+[критические команды](backend/12-critical-commands.md).
+
 ---
 
 # 20. Connector architecture
@@ -1698,6 +1700,11 @@ SNOOZE
 
 Финансовые операции из Telegram callback запрещены.
 
+Новый Action на закрытом Risk возвращает `409 RISK_CLOSED`; точный replay
+ранее успешной команды возвращает сохранённый результат `200`, в том числе
+после закрытия. Проверка статуса под блокировкой и идемпотентный replay
+согласуются по [матрице команд](backend/12-critical-commands.md#actions).
+
 ---
 
 # 37. Outcomes
@@ -1794,6 +1801,12 @@ WHERE attribution_type = RECOVERED
 ```
 
 Никакие heuristic assumptions не увеличивают этот KPI.
+
+`ORGANIC`/`UNKNOWN` не принимают `riskId`, `actionId`, `outcomeId`.
+`RECOVERED_ALREADY_ATTRIBUTED` не означает, что платёж нужно повторно
+зарегистрировать как органический: сначала проверяют существующие факты.
+Новое подтверждение возможно только для действительно отдельного платежа,
+не для обхода конфликта; действует [денежный контракт](backend/12-critical-commands.md).
 
 ---
 
@@ -1968,15 +1981,14 @@ Endpoint:
 GET /api/v1/events
 ```
 
-Минимальные events:
+Канонический каталог событий клиентского SSE, не internal outbox:
 
 ```text
-risk.created
-risk.updated
+risk.changed
+risk.acknowledged
 risk.resolved
-conversation.updated
-revenue.updated
-notification.created
+risk.false_positive
+resync.required
 ```
 
 SSE является сигналом invalidate/refetch.
@@ -1984,6 +1996,13 @@ SSE является сигналом invalidate/refetch.
 SSE **не является Source of Truth**.
 
 Потеря SSE connection не должна приводить к потере business state.
+
+Маркер buffer overflow не покрывает потерю NOTIFY до хаба при живом SSE.
+Полный допуск требует численного freshness SLA и автоматической сверки в
+его пределах по [RG-SSE](engineering/RELEASE_GATES.md#rg-sse); focus,
+online и ручное обновление не гарантируют ограниченную устарелость.
+Прежний общий список conversation/revenue/notification событий не считается
+поддерживаемым browser-контрактом.
 
 ---
 
@@ -2480,14 +2499,18 @@ max_inflight 1
 
 # 62. Benchmark gate
 
-Dataset v1:
+Текущий dataset baseline:
 
 ```text
-ориентир 300–500
-качественно размеченных случаев
+500 синтетических размеченных случаев
+400 GOLDEN + 100 DEV
+TRAIN отсутствует: дообучение не выполняется
 ```
 
-Train/prompt tuning data отделяется от golden test.
+Prompt tuning выполняется на DEV, контрольный прогон на GOLDEN отделён от
+настройки. Статус текущего v6-кандидата, состав release tuple и пороги допуска:
+[управление AI-моделью](backend/07-ai.md). Старый отчёт с 60 golden не
+подтверждает новый freeze.
 
 Минимально измерять:
 
@@ -2580,6 +2603,12 @@ admin retry/replay/discard
 ```
 
 Audit log append-only.
+
+Это требование, а не подтверждение атомарности всех перечисленных команд.
+Денежные факты, ML-согласие и admin-команды имеют отдельные транзакционные
+границы; исторический общий post-commit audit оставляет окно «мутация есть,
+следа нет». Действуют [матрица аудита](backend/12-critical-commands.md#audit)
+и fault-injection gate, без объявления H-04 закрытым только правкой текста.
 
 ---
 
@@ -2695,9 +2724,12 @@ AI Cost per Recovered Revenue
 
 # 69. Data retention
 
-Retention не hardcode'ится.
+Retention не hardcode'ится. Сроки, начало отсчёта, обработка копий и исключения
+должны быть утверждены по [политике жизненного цикла](backend/13-data-lifecycle.md).
+Состояние значений: `BLOCKED_DECISION`; отсутствие срока не означает ни
+бессрочное хранение, ни ноль дней.
 
-Central config:
+Логические ключи будущей центральной конфигурации, не подтверждённые env/API:
 
 ```text
 raw_event_days
@@ -2736,6 +2768,14 @@ revocable consent
 
 и отдельная retention policy.
 
+На каждую новую экспортную партию проверяются действующее разрешение,
+цель, историческая eligibility, действующая retention policy и отсутствие
+отзыва/удаления. Разрешение повторно проверяется непосредственно перед
+передачей партии; отзыв отменяет ещё не переданные партии.
+`dataset_eligible` в старом feedback не заменяет active consent.
+Текущий benchmark использует синтетические данные; новый экспорт реальных
+переписок блокируется до [RG-DATA](engineering/RELEASE_GATES.md#rg-data).
+
 ---
 
 # 71. Reliability targets
@@ -2756,6 +2796,11 @@ RTO <= 1 h
 
 Backup считается работающим только после успешного restore test.
 
+Для RPO оценивается возраст пригодной независимой точки восстановления,
+включая создание, доставку и сбои копии. Ежесуточный dump не обеспечивает
+RPO 15 минут. Полное учение выполняется на новом кластере с ролями, ключами,
+правами и совместимой сборкой по [runbook DR](runbooks/backup-restore.md);
+schema/count smoke на прежнем кластере не заменяет его.
 ---
 
 # 72. Performance baseline
@@ -2907,7 +2952,11 @@ INT-TELEGRAM-001
 
 Выполняется параллельно Foundation/Identity, потому что Telegram является наиболее рискованной внешней зависимостью.
 
-Из него вырастает **INT-SHADOW-001** (этап A2) — теневой сбор реальных диалогов для golden dataset. Стартует сразу после Exit Gate этапа A и идёт параллельно этапам 13–16, потому что сбор 500 размеченных диалогов занимает 2–3 недели календарного времени и иначе оказывается на критическом пути к Milestone D. См. LR-BE-RM-025.
+Историческое предложение **INT-SHADOW-001** (этап A2) не является текущей
+зависимостью freeze: benchmark baseline синтетический, 400 GOLDEN + 100 DEV.
+Сбор реальных диалогов остаётся отдельным отложенным треком с обязательным
+решением по основаниям обработки, active consent и retention. Сам факт
+прохождения этапа A не разрешает этот сбор; см. LR-BE-RM-025 и RG-DATA.
 
 **Второе — вне очереди:**
 
@@ -3186,12 +3235,16 @@ CLIENT
 
 ## Цель
 
-Собрать 500 реальных обезличенных диалогов для golden dataset до того, как
-они окажутся на критическом пути к Milestone D (см. LR-BE-RM-025).
+Статус: `BLOCKED_DECISION`, не запущенный в рамках этой документации сбор.
+Историческая цель: исследовать реальную речь на отдельно согласованном
+наборе. Текущий freeze использует синтетические 400 GOLDEN + 100 DEV,
+поэтому A2 не является его prerequisite (см. LR-BE-RM-025).
 
 ## Зависимость
 
-Exit Gate этапа A. Идёт параллельно этапам 13–16.
+Помимо технической готовности коннектора нужны утверждённые цель, правовое
+основание, scope consent, retention и отзыв, а также прохождение RG-DATA.
+Нельзя автоматически запускать A2 после Exit Gate этапа A.
 
 ## Ограничения
 
@@ -3200,17 +3253,23 @@ Exit Gate этапа A. Идёт параллельно этапам 13–16.
 * риски не создаются, уведомления не отправляются, владелец продуктом не
   пользуется;
 * обезличивание выполняется при экспорте для разметки;
-* обязательны письменное согласие владельца и ДПА (§70).
+* обязательны отдельное действующее согласие и согласованные документы
+  обработки (§70); одно обезличивание при экспорте не заменяет эти условия;
+* историческая eligibility не разрешает новую передачу после отзыва;
+  требования [жизненного цикла](backend/13-data-lifecycle.md) обязательны.
 
 ## Выход
 
-500 обезличенных диалогов → вход LR-BE-1502. Ожидаемая длительность при
-200 сообщениях в день — 2–3 недели.
+Отдельный versioned исследовательский набор, только после допуска.
+Прежние 500 реальных диалогов и оценка календарного сбора были предложением,
+не подтверждённым результатом и не входом текущего LR-BE-1502.
 
 ## Exit Gate
 
-Экспорт из 500 обезличенных размеченных диалогов принят как вход этапа 15;
-согласие и ДПА подписаны до первого сообщения.
+Утверждены основания, scope и сроки, проверены отзыв до экспорта, provenance
+каждой партии, удаление и исключения. При изменении benchmark dataset
+создаётся новый tuple и повторяется весь quality/performance gate, а не
+переносится статус синтетического набора.
 
 ---
 
@@ -3903,9 +3962,11 @@ stale revision
 
 ### LR-BE-1501 — Dataset format
 
-### LR-BE-1502 — 300–500 labelled cases target
+### LR-BE-1502 — 400 GOLDEN + 100 DEV synthetic cases
 
-Вход — обезличенные диалоги этапа A2 (INT-SHADOW-001), а не пилот этапа 26.
+Вход текущего baseline: синтетический набор из 500 случаев без клиентских
+переписок. Реальные данные из A2 нельзя подставлять без отдельного допуска,
+новой версии набора и повторного benchmark gate.
 
 ### LR-BE-1503 — Dataset split
 
@@ -4065,22 +4126,22 @@ CREATE UNIQUE INDEX revenue_attributions_one_recovered_per_opportunity_idx
 
 ### LR-BE-RM-002 — Platform-default uniqueness
 
-`tenant_id IS NULL` используется как «platform default», но `NULL` в обычном UNIQUE не конфликтует сам с собой — platform-строку можно вставить многократно.
+Для будущих таблиц с `tenant_id IS NULL` как platform default нужно
+отдельно обеспечивать уникальность NULL scope. Это проектное требование,
+не готовая миграция текущего baseline.
 
-```sql
-ALTER TABLE risk_policy_configs
-    DROP CONSTRAINT risk_policy_configs_one_per_type_and_tenant,
-    ADD CONSTRAINT risk_policy_configs_one_per_type_and_tenant
-        UNIQUE NULLS NOT DISTINCT (tenant_id, risk_type);
-
-ALTER TABLE encrypted_secrets
-    ADD CONSTRAINT encrypted_secrets_one_active_per_kind
-        UNIQUE NULLS NOT DISTINCT (tenant_id, kind);
-```
+`risk_policy_configs` не создаётся по
+[ADR 0043](adr/0043-risk-thresholds-in-code.md); прежний `ALTER TABLE`
+для неё не выполняется. Обобщённая `encrypted_secrets` также не является
+подтверждённой таблицей этого комплекта. Конкретный DDL, constraints и
+очистка существующих дублей допускаются только после принятого решения
+о соответствующей схеме и сверки реальных миграций.
 
 **Acceptance:**
 
-Повторный `INSERT` platform-строки с тем же `risk_type` отклоняется. Дубликаты, если они успели появиться, устраняются в той же миграции до наложения constraint.
+Если новая таблица утверждена, тесты запрещают два platform default для
+одного логического ключа и сохраняют tenant override отдельно. До такого
+решения задача не создаёт миграцию несуществующих таблиц.
 
 ---
 
@@ -4169,18 +4230,32 @@ WHERE excluded.conversation_revision_at > conversation_summaries.conversation_re
 Freshness guard делает результат STALE на каждое новое сообщение и планирует новый job. Без дедупликации активный диалог порождает по заданию на сообщение, при `max_inflight = 1` и одной RTX 4060 это прямая потеря пропускной способности.
 
 ```sql
-CREATE UNIQUE INDEX ai_jobs_one_active_per_entity_idx
+CREATE UNIQUE INDEX ai_jobs_one_queued_per_entity_idx
     ON ai_jobs(tenant_id, entity_type, entity_id)
-    WHERE status IN ('PENDING', 'LEASED', 'RUNNING');
+    WHERE status IN ('PENDING', 'RETRY');
 ```
 
-Постановка задания — идемпотентная: `INSERT … ON CONFLICT DO UPDATE SET base_conversation_revision = excluded.base_conversation_revision`.
+Нормативный контракт установлен
+[ADR 0036](adr/0036-ai-queue-single-queued-job.md). При конфликте обновляется
+только queued-задание и только если входная revision новее: весь согласованный
+snapshot (prompt/payload, revision, analysis-through message, schema/prompt/model
+versions), не один номер revision. `id` сохраняется, `available_at` остаётся
+более ранним, priority берётся как максимум. Старый snapshot ничего не меняет.
+Выданное `LEASED`/`RUNNING` задание неизменяемо; новая revision ставится
+отдельным queued-заданием и не перезаписывает вход выполняющегося Run.
 
-Дебаунс: повторный анализ той же Conversation планируется не раньше чем через `AI_ANALYSIS_DEBOUNCE = 60s` через существующее поле `available_at` (§53). Stale-переплан использует ту же задержку.
+Дебаунс нового queued-задания: 60 секунд через `available_at` (§53).
+Замена snapshot не отодвигает более ранний срок бесконечно; stale-переплан
+использует ту же очередь и правила дедупликации. Это контракт, не указание
+создать вторую копию индекса поверх уже применённой миграции.
 
 **Acceptance:**
 
-Диалог, в который пришло 5 сообщений за 20 секунд, порождает одно задание с последней revision, а не пять.
+Пять сообщений до claim дают одно queued-задание с последним цельным
+snapshot. После claim revision 5 поступление revision 7 оставляет
+выданный snapshot 5 неизменным и ставит queued 7; результат 5 не применяется
+как свежий. Проверяются гонка enqueue/claim, out-of-order snapshots,
+`RETRY`, повторная финальная freshness-проверка и отсутствие starvation.
 
 ---
 
@@ -4322,35 +4397,21 @@ BOOKING_INTENT
 
 ### LR-BE-RM-014 — Risk threshold unit
 
-`risk_policy_configs.threshold_minutes` не указывает, бизнес-минуты это или календарные. Для R1/R3/R4 канон — бизнес-время; для R2/R5 §30 и §33 задают бизнес-часы, но при 9-часовом рабочем дне «24 бизнес-часа» — это около 2,7 календарных суток, что для риска «клиент молчит» требует явного подтверждения продуктового решения.
+Прежнее предложение заменено принятым
+[ADR 0043](adr/0043-risk-thresholds-in-code.md), который supersedes ADR 0035.
+Для всех пяти правил используется бизнес-время точки. `NO_RESPONSE`
+берёт настраиваемый порог Location; остальные пороги остаются константами
+versioned policy. Таблица `risk_policy_configs` в текущем MVP не создаётся.
 
-Задача — сделать единицу явной, поведение по умолчанию не менять:
-
-```sql
-ALTER TABLE risk_policy_configs
-    RENAME COLUMN threshold_minutes TO threshold_value;
-
-ALTER TABLE risk_policy_configs
-    ADD COLUMN threshold_unit TEXT
-        CHECK (threshold_unit IN ('BUSINESS_MINUTES','CALENDAR_MINUTES')),
-    ADD COLUMN escalation_value INTEGER
-        CHECK (escalation_value IS NULL OR escalation_value > threshold_value);
-
-UPDATE risk_policy_configs SET threshold_unit = 'BUSINESS_MINUTES';
-
-UPDATE risk_policy_configs
-SET escalation_value = 2880
-WHERE risk_type = 'CUSTOMER_SILENT_AFTER_PRICE';
-
-ALTER TABLE risk_policy_configs
-    ALTER COLUMN threshold_unit SET NOT NULL;
-```
-
-Открытый вопрос для владельца продукта, решается внутри этапа: перевести R2 и R5 на `CALENDAR_MINUTES` (1440 = ровно сутки) или оставить бизнес-время. Решение фиксируется ADR-033.
+Вопрос R2/R5 решён в пользу бизнес-времени для пилота. Переход на календарные
+сутки, таблицу настроек или другой порог требует нового решения, версии
+политики и миграционного плана, а не выполнения старого DDL из backlog.
 
 **Acceptance:**
 
-Ни один расчёт порога не выводит единицу из типа риска; единица читается из строки конфига.
+Все пять правил используют один business-time механизм; тесты покрывают
+конец рабочего дня, выходные, timezone/DST и пересчёт срока. Значения
+согласованы с ADR 0043 и кодом того же выпуска, лишней миграции таблицы нет.
 
 ---
 
@@ -4415,33 +4476,38 @@ AI Agent с искусственно зависшим Provider и живым hea
 
 ---
 
-### LR-BE-RM-018 — RLS roles and fail-closed (ADR-032)
+### LR-BE-RM-018 — RLS roles and fail-closed
 
 §12 требует RLS до первого pilot, но policy строится на `current_setting('lidradar.tenant_id')`, а три сценария работают вне tenant-контекста: claim заданий (охватывает все tenant'ы), outbox dispatcher, admin read-models. При включении RLS на этапе 24 сломаются этапы 6, 13 и 23 — в документах это не оговорено.
 
-Ввести три роли:
+Канон: ADR 0034 с уточнённым механизмом
+[ADR 0041](adr/0041-rls-enforcement-and-hardening.md). Исходное предложение
+`SET LOCAL` и `BYPASSRLS` из прежней редакции не применяется; действуют роли пула:
 
 | Роль | Кто использует | RLS | Контекст |
 |---|---|---|---|
-| `lidradar_app` | `cmd/api` | FORCE | `SET LOCAL lidradar.tenant_id` из `X-Tenant-ID` |
-| `lidradar_worker` | `cmd/worker`, `cmd/scheduler` | FORCE | `SET LOCAL` из `jobs.tenant_id` после claim |
-| `lidradar_platform` | claim/dispatch/admin | `BYPASSRLS` | не устанавливается |
+| `lidradar_app` | tenant-scoped API | FORCE | pool hook устанавливает `SET ROLE` и `set_config(..., false)` из проверенного request context |
+| `lidradar_worker` | tenant-scoped обработчики worker/событий | FORCE | тот же механизм, tenant из захваченного задания/события |
+| `lidradar_platform` | только allowlist платформенных операций | исключение через `pg_has_role(..., 'MEMBER')` в политике, не `BYPASSRLS` | отсутствие tenant допустимо только для этих операций |
 
-```sql
-CREATE POLICY tenant_isolation ON conversations
-    USING (tenant_id = current_setting('lidradar.tenant_id', true)::uuid);
-ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
-```
+При каждой выдаче соединения из пула tenant/user context устанавливается
+заново либо очищается до пустого значения. Политика обязана безопасно
+обработать NULL и пустую строку, не оставлять tenant предыдущего запроса и
+не давать доступ без контекста. Точный SQL берут из проверенной миграции,
+а не из неполного примера cast пустой строки в UUID.
 
-Аргумент `true` возвращает NULL вместо ошибки при незаданной переменной — сравнение даёт «строк нет», то есть fail-closed.
-
-Круг запросов под `lidradar_platform` держать явным списком: `jobs.claim`, `ai_jobs.claim`, `reclaim-expired-*`, `outbox.dispatch`, `admin.*`.
-
-AI Node в этот список не входит: узел не имеет доступа к PostgreSQL вообще, только к HTTP API (§48). Записать это явно.
+Allowlist: захват/завершение заданий, scheduler, outbox dispatch,
+захват доставок, серверные HTTP handlers AI-узла и admin read models.
+Обычная обработка данных после claim снова ограничена tenant. AI-узел сам
+не имеет доступа к PostgreSQL; server-side handlers проверяют допуски узла
+до выдачи prompt. Роли, grants и их восстановление входят в recovery set.
 
 **Acceptance:**
 
-`SELECT` без `SET LOCAL` под ролью `lidradar_app` возвращает 0 строк. Worker после claim видит только свой tenant. Этапы 6, 13, 23 проходят регресс с включённым RLS.
+Чтение без tenant и с пустым tenant fail-closed; запрещённые записи
+отклоняются. Проверяются reuse соединения A → B → без tenant, чужие UUID,
+worker после claim, allowlist Platform и новый кластер после restore.
+Нельзя закрыть gate отключением RLS или пропуском DB-тестов.
 
 ---
 
@@ -4553,21 +4619,18 @@ LR-BE-1503 и План v1.2 задают «60% TRAIN, 20% VALIDATION, 20% GOLDEN
 
 ### LR-BE-RM-025 — Shadow collection scheduling
 
-Этап 15 требует 500 реальных диалогов «из pilot-детейлинга», но пилот стартует на этапе 26 — то есть Milestone D заблокирован данными, появляющимися внутри Milestone E.
-
-Ввести параллельный этап **A2 — INT-SHADOW-001**, стартующий сразу после Exit Gate этапа A:
-
-* дружественная студия подключается через Connected Business Bot;
-* активны только этапы 4–5 (RawEvent → нормализация); `ai_enabled = FALSE`;
-* риски не создаются, уведомления не отправляются, владелец продуктом не пользуется;
-* обезличивание выполняется при экспорте для разметки;
-* обязательны письменное согласие владельца и ДПА (§70).
-
-Выход: 500 обезличенных диалогов → вход LR-BE-1502. Ожидаемая длительность при 200 сообщениях в день — 2–3 недели.
+Историческое предложение о сборе реальных диалогов вынесено в отложенный
+этап A2, `BLOCKED_DECISION`. Текущий dataset синтетический: 400 GOLDEN +
+100 DEV, поэтому ни пилот этапа 26, ни A2 не блокируют его формирование.
+При этом успешный synthetic benchmark не доказывает качество на реальных
+переписках. Реальный набор требует отдельной версии, active consent,
+retention, проверки отзыва и provenance каждой партии.
 
 **Acceptance:**
 
-Этап A2 заведён в план как параллельный трек с собственным Exit Gate; зависимость этапа 15 переписана с «pilot-детейлинг» на «этап A2».
+LR-BE-1502 и §62 ссылаются на синтетический baseline. A2 не запускается
+автоматически и не объявляется завершённым; до реального сбора/экспорта
+должен быть пройден RG-DATA, а после смены dataset повторён RG-AI.
 
 ---
 

@@ -1,0 +1,13 @@
+{
+  "startedAt": "2026-10-06T06:42:56.519208Z",
+  "commit": "aa977c5d965e5ef321aeb5aa16f4d29257a86cd2",
+  "workingDiffSha256": "69f0cb4e9d4af09397797662cb630721f06e542d7c27345790e50264eced42ff",
+  "migrationsSha256": "95a44e55b1719b973bcdbf6a780e05a0a7a472ff37d6594add4b8f4caa6f0d94",
+  "sourceSha256": "ce349888c8ea8162a05d56b6fb64969e53ebacdd0cbb9e793f9a2344bbce8949",
+  "passed": null,
+  "failed": null,
+  "skipped": null,
+  "missingRequired": null,
+  "failure": "mandatory PostgreSQL is unavailable",
+  "status": "FAIL"
+}

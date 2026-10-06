@@ -1,0 +1,43 @@
+{
+  "reviewedAt": "2026-10-06",
+  "scope": "local development working trees; not production release approval",
+  "notForDeployment": true,
+  "backend": {
+    "commit": "aa977c5d965e5ef321aeb5aa16f4d29257a86cd2",
+    "workingTreeModified": true,
+    "sourceSha256": "ce349888c8ea8162a05d56b6fb64969e53ebacdd0cbb9e793f9a2344bbce8949",
+    "sourceHashRecipe": "backend tree + go.mod/go.sum, sorted path + NUL + bytes; testgate/main.go"
+  },
+  "frontend": {
+    "commit": "39d953750dd3b675d9fb8f0b3de5fe6a2e810c69",
+    "workingTreeModified": true,
+    "sourceSha256": "fd1a0e8b1a4400d67808d633796ed4c589cf38e5b061acb5fa54d5d6a8c5bc21",
+    "sourceHashRecipe": "src/tests/contracts/package.json/package-lock.json; sorted relative path + NUL + bytes"
+  },
+  "schema": {
+    "latest": "000022_membership_invitations",
+    "migrationSetSha256": "95a44e55b1719b973bcdbf6a780e05a0a7a472ff37d6594add4b8f4caa6f0d94"
+  },
+  "openapi": {
+    "backendSha256": "8774c544abc405360275cd35a61d88019ba8bd187b03051fdb2035fc99dc0fc8",
+    "frontendSnapshotSha256": "8774c544abc405360275cd35a61d88019ba8bd187b03051fdb2035fc99dc0fc8",
+    "generatedTypesSha256": "43e32dd26469743353c0d078e59cd71b062e668632ae9dcc0dead3712322aab3"
+  },
+  "ai": {
+    "manifestSha256": "3d0a80d906d693a4865f988cc9e5708a4b94e4cb07b88ca6953c0d83d2bd6366",
+    "provenanceReviewSha256": "6766fea16f8d376f605f514e4d51660393b34e0c04d42aeb4db0093da2baf7a2"
+  },
+  "decisions": {
+    "onlineVisibleRadarMaximumStalenessSeconds": 30,
+    "freshnessApprovedBy": "project owner in task, 2026-10-05",
+    "h04": "leave open; ADR 0046 Proposed, owner decision 2026-10-06",
+    "retention": "NOT_APPROVED",
+    "capacityWorkload": "NOT_APPROVED"
+  },
+  "databaseTests": {
+    "status": "PASS",
+    "passedEventsIncludingSubtests": 568,
+    "failed": 0,
+    "expectedSkips": 1
+  }
+}

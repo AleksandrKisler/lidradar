@@ -68,6 +68,10 @@ An accepted ADR is required before changing the modular-monolith shape, module
 boundaries, dependency direction, data ownership, PostgreSQL source-of-truth
 policy, or cross-module communication model.
 
+## Предложения на рассмотрении
+
+- [0046 — атомарный аудит критических команд](0046-atomic-critical-command-audit.md) — Proposed, H-04.
+
 ## Minimal template
 
 ```md

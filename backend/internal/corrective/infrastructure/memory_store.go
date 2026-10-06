@@ -18,6 +18,7 @@ type idem struct {
 type memoryRisk struct {
 	opportunityID string
 	riskType      string
+	status        string
 }
 
 // MemoryStore — внутрипроцессный испытательный адаптер. Рабочим командам нельзя
@@ -43,8 +44,17 @@ func (s *MemoryStore) AddRisk(tenant, risk, opportunity string) {
 func (s *MemoryStore) AddRiskType(tenant, risk, opportunity, riskType string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.risks[scoped(tenant, risk)] = memoryRisk{opportunityID: opportunity, riskType: riskType}
+	s.risks[scoped(tenant, risk)] = memoryRisk{opportunityID: opportunity, riskType: riskType, status: "OPEN"}
 	s.opportunities[scoped(tenant, opportunity)] = true
+}
+func (s *MemoryStore) SetRiskStatus(tenant, risk, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := scoped(tenant, risk)
+	if value, ok := s.risks[k]; ok {
+		value.status = status
+		s.risks[k] = value
+	}
 }
 func (s *MemoryStore) Risk(_ context.Context, tenant, risk string) (application.RiskReference, bool, error) {
 	s.mu.Lock()
@@ -77,10 +87,20 @@ func (s *MemoryStore) AppendAction(_ context.Context, a domain.Action, key strin
 		}
 		return *old.action, false, nil
 	}
+	riskKey := scoped(a.TenantID, a.RiskID)
+	risk, found := s.risks[riskKey]
+	if !found {
+		return domain.Action{}, false, application.ErrNotFound
+	}
+	if !domain.CanRecordAction(risk.status) {
+		return domain.Action{}, false, application.ErrRiskClosed
+	}
 	s.actions = append(s.actions, a)
 	s.audits = append(s.audits, audit)
 	copy := a
 	s.idempotency[k] = idem{hash: hash, action: &copy}
+	risk.status = "ACTED"
+	s.risks[riskKey] = risk
 	return a, true, nil
 }
 func (s *MemoryStore) AppendOutcome(_ context.Context, o domain.Outcome, key string, hash [32]byte, audit application.AuditRecord) (domain.Outcome, bool, error) {

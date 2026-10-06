@@ -251,12 +251,17 @@ type ApiError = {
 body + idempotencyKey + state(draft/submitting/unknown/succeeded/failed)
 ```
 
-Ключ создаётся через `crypto.randomUUID()` перед первым POST. При timeout или
-разрыве сети состояние `unknown`, кнопка не создаёт новый ключ: повтор идёт с
-исходным телом и ключом. Новый ключ допустим только после подтверждённого
-ответа, явной отмены draft или фактического изменения тела пользователем.
-Ответ `200` означает replay прежнего результата, `201` — первую запись.
-`409 IDEMPOTENCY_CONFLICT` не повторяется и требует устранить ошибку клиента.
+Ключ создаётся через `crypto.randomUUID()` перед первым POST. После отправки
+тело и ключ неизменяемы; при timeout или разрыве состояние `unknown`.
+Повтор использует исходные body/key. Отмена формы, её редактирование,
+reload и logout не отменяют возможный серверный commit и не разрешают новый ключ.
+При потере исходного намерения автоматическая отправка блокируется до сверки.
+Новый ключ создаётся для отдельно подтверждённого нового намерения после
+разрешения предыдущего неизвестного результата.
+Ответ `200` означает replay, `201` первую запись.
+`409 IDEMPOTENCY_CONFLICT` не обходится сменой ключа: нужно восстановить
+исходный результат и устранить рассогласование клиента.
+Канон: [безопасная запись фактов](../backend/12-critical-commands.md).
 
 <a id="session-tenant-boot"></a>
 ## 5. Boot, сессия и организация
@@ -393,19 +398,23 @@ invalidating/refetch: команды могут запускать транза�
 `X-Tenant-ID`. Поток открывается через streaming `fetch` с cookie и tenant
 header.
 
-Клиент обрабатывает только `risk.changed`, `risk.acknowledged`,
-`risk.resolved`, `risk.false_positive`. `data.resourceId` служит подсказкой
+Клиент обрабатывает `risk.changed`, `risk.acknowledged`,
+`risk.resolved`, `risk.false_positive` и `resync.required`.
+У событий `risk.*` поле `data.resourceId` служит подсказкой
 для точечной invalidation, но после reconnect обязательно перечитываются
-Radar и текущая лента. У событий нет replay ID; потеря сигнала ожидаема.
+Radar и текущая лента. `resync.required` требует полного REST refetch сводки
+и открытых списков. У событий нет replay ID; потеря сигнала ожидаема.
 
 Состояния соединения: `connecting`, `open`, `backoff`, `offline`, `stopped`.
 Backoff ограниченный, с jitter; offline browser приостанавливает повторы.
 На смене tenant/logout старый stream закрывается до открытия нового.
 
-SSE — ускоритель, а не гарантия доставки: normal query staleness,
-`refetchOnWindowFocus`, refetch после возврата online и ручное обновление
-остаются включены. Частота возможного safety refetch для долго открытого Radar
-зависит от решения [GAP-RELIABILITY-020](08-readiness-gaps.md#gap-reliability-020);
-до него UI всегда показывает время последнего успешного REST snapshot.
+SSE является ускорителем, не гарантией доставки. `refetchOnWindowFocus`,
+возврат online и ручное обновление не ограничивают устарелость вкладки,
+которая всё время остаётся открытой. Необходимы численный freshness SLA
+и автоматический bounded recovery, проверенные на silent NOTIFY loss.
+[GAP-RELIABILITY-020](08-readiness-gaps.md#gap-reliability-020) закрыт только
+в части subscriber-buffer overflow; общий gate остаётся открытым.
+UI показывает время последнего успешного REST snapshot и состояние устарелости.
 
 Подробные диаграммы — в [карте последовательностей](05-sequence-map.md).

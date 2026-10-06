@@ -1,0 +1,92 @@
+?   	lidradar/backend/cmd/ai-agent	[no test files]
+?   	lidradar/backend/cmd/ai-benchmark	[no test files]
+?   	lidradar/backend/cmd/ai-dataset-audit	[no test files]
+?   	lidradar/backend/cmd/ai-dataset-generate	[no test files]
+?   	lidradar/backend/cmd/ai-node-manage	[no test files]
+?   	lidradar/backend/cmd/ai-node-register	[no test files]
+?   	lidradar/backend/cmd/api	[no test files]
+ok  	lidradar/backend/cmd/dev-data	(cached)
+?   	lidradar/backend/cmd/load-generate	[no test files]
+?   	lidradar/backend/cmd/migrate	[no test files]
+?   	lidradar/backend/cmd/platform-admin	[no test files]
+?   	lidradar/backend/cmd/scheduler	[no test files]
+?   	lidradar/backend/cmd/worker	[no test files]
+ok  	lidradar/backend/internal/admin/application	(cached)
+?   	lidradar/backend/internal/admin/domain	[no test files]
+ok  	lidradar/backend/internal/admin/infrastructure	0.336s
+?   	lidradar/backend/internal/admin/transport	[no test files]
+ok  	lidradar/backend/internal/ai/agent	(cached)
+ok  	lidradar/backend/internal/ai/application	(cached)
+ok  	lidradar/backend/internal/ai/benchmark	(cached)
+?   	lidradar/backend/internal/ai/domain	[no test files]
+ok  	lidradar/backend/internal/ai/infrastructure	0.516s
+ok  	lidradar/backend/internal/ai/transport	(cached)
+ok  	lidradar/backend/internal/analytics/application	(cached)
+ok  	lidradar/backend/internal/analytics/domain	(cached)
+ok  	lidradar/backend/internal/analytics/infrastructure	0.384s
+?   	lidradar/backend/internal/analytics/transport	[no test files]
+?   	lidradar/backend/internal/audit/application	[no test files]
+?   	lidradar/backend/internal/audit/domain	[no test files]
+ok  	lidradar/backend/internal/audit/infrastructure	0.333s
+ok  	lidradar/backend/internal/catalog/application	(cached)
+ok  	lidradar/backend/internal/catalog/domain	(cached)
+ok  	lidradar/backend/internal/catalog/infrastructure	0.353s
+?   	lidradar/backend/internal/catalog/transport	[no test files]
+ok  	lidradar/backend/internal/connector/application	(cached)
+ok  	lidradar/backend/internal/connector/domain	(cached)
+ok  	lidradar/backend/internal/connector/infrastructure	0.484s
+?   	lidradar/backend/internal/connector/transport	[no test files]
+?   	lidradar/backend/internal/conversation/application	[no test files]
+ok  	lidradar/backend/internal/conversation/domain	(cached)
+ok  	lidradar/backend/internal/conversation/infrastructure	0.360s
+?   	lidradar/backend/internal/conversation/transport	[no test files]
+ok  	lidradar/backend/internal/corrective/application	(cached)
+ok  	lidradar/backend/internal/corrective/domain	(cached)
+ok  	lidradar/backend/internal/corrective/infrastructure	0.278s
+ok  	lidradar/backend/internal/corrective/transport	(cached)
+ok  	lidradar/backend/internal/devdata	0.243s
+?   	lidradar/backend/internal/events/application	[no test files]
+?   	lidradar/backend/internal/events/domain	[no test files]
+ok  	lidradar/backend/internal/events/infrastructure	0.252s
+ok  	lidradar/backend/internal/identity/application	(cached)
+ok  	lidradar/backend/internal/identity/domain	(cached)
+ok  	lidradar/backend/internal/identity/infrastructure	0.260s
+ok  	lidradar/backend/internal/identity/transport	(cached)
+ok  	lidradar/backend/internal/integration	0.282s
+ok  	lidradar/backend/internal/jobs/application	(cached)
+ok  	lidradar/backend/internal/jobs/domain	(cached)
+ok  	lidradar/backend/internal/jobs/infrastructure	0.254s
+?   	lidradar/backend/internal/loadgen	[no test files]
+ok  	lidradar/backend/internal/notification/application	(cached)
+ok  	lidradar/backend/internal/notification/domain	(cached)
+ok  	lidradar/backend/internal/notification/infrastructure	0.267s
+?   	lidradar/backend/internal/notification/transport	[no test files]
+ok  	lidradar/backend/internal/opportunity/application	(cached)
+ok  	lidradar/backend/internal/opportunity/domain	(cached)
+ok  	lidradar/backend/internal/opportunity/infrastructure	0.249s
+?   	lidradar/backend/internal/opportunity/transport	[no test files]
+ok  	lidradar/backend/internal/revenue/application	(cached)
+ok  	lidradar/backend/internal/revenue/domain	(cached)
+ok  	lidradar/backend/internal/revenue/infrastructure	0.237s
+ok  	lidradar/backend/internal/revenue/transport	(cached)
+ok  	lidradar/backend/internal/risk/application	(cached)
+ok  	lidradar/backend/internal/risk/domain	(cached)
+ok  	lidradar/backend/internal/risk/infrastructure	0.241s
+ok  	lidradar/backend/internal/risk/transport	0.233s
+ok  	lidradar/backend/internal/tenant/application	(cached)
+ok  	lidradar/backend/internal/tenant/domain	(cached)
+ok  	lidradar/backend/internal/tenant/infrastructure	0.236s
+?   	lidradar/backend/internal/tenant/transport	[no test files]
+?   	lidradar/backend/internal/testsupport	[no test files]
+ok  	lidradar/backend/platform/bootstrap	(cached)
+ok  	lidradar/backend/platform/buildinfo	(cached)
+ok  	lidradar/backend/platform/config	(cached)
+ok  	lidradar/backend/platform/crypto	(cached)
+?   	lidradar/backend/platform/health	[no test files]
+ok  	lidradar/backend/platform/http	(cached)
+ok  	lidradar/backend/platform/ids	(cached)
+ok  	lidradar/backend/platform/observability	(cached)
+ok  	lidradar/backend/platform/postgres	0.242s
+?   	lidradar/backend/platform/tenantctx	[no test files]
+ok  	lidradar/backend/tools/archcheck	(cached)
+ok  	lidradar/backend/tools/testgate	0.206s

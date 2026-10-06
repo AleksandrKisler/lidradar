@@ -1,100 +1,98 @@
-# 13 Архитектурные решения (ADR)
+<!-- GENERATED; source-sha256: c2afeb4361fa4088dec36517a6d41685f9ca8ce6cc57875d307b00b9132db3a2 -->
+> Источник: [канонический документ](../adr/README.md). Правки вносятся в источник.
 
-Каждое решение о форме системы, границах модулей, направлении зависимостей,
-источнике истины и способе общения модулей записано как ADR до реализации.
-Старые решения не переписываются: их заменяет новый ADR. Полные тексты — в
-репозитории, каталог `docs/adr/`.
+# Architecture decision records
 
-```mermaid
-flowchart LR
-  Need["Измеренная потребность<br/>или обнаруженное расхождение"] --> Draft["ADR со статусом Proposed:<br/>контекст, решение, альтернативы,<br/>последствия, откат"]
-  Draft --> Review["Согласование"]
-  Review -->|принято| Accepted["Accepted → реализация"]
-  Review -->|отклонено| Rejected["Rejected"]
-  Accepted -->|пересмотр| Superseded["новый ADR, старый — Superseded"]
+Architecture decision records (ADRs) explain significant decisions in LidRadar's
+architecture. The baseline records below codify decisions 001–031 from Final
+System Architecture v1.1; later changes must follow the workflow in this file.
+
+## Baseline index
+
+| ADR | Status |
+| --- | --- |
+| [0001: Use a modular monolith](../adr/0001-modular-monolith.md) | Accepted |
+| [0002: Build separate runtime processes from one repository](../adr/0002-runtime-processes.md) | Accepted |
+| [0003: Use PostgreSQL as the source of truth](../adr/0003-postgres-source-of-truth.md) | Accepted |
+| [0004: Persist external events before processing](../adr/0004-persist-first-ingestion.md) | Accepted |
+| [0005: Separate raw provider data from interpretation](../adr/0005-raw-data-separation.md) | Accepted |
+| [0006: Separate conversations from opportunities](../adr/0006-conversation-opportunity-separation.md) | Accepted |
+| [0007: Separate opportunity stage from risk](../adr/0007-stage-risk-separation.md) | Accepted |
+| [0008: Limit AI to semantic facts](../adr/0008-ai-semantic-facts.md) | Accepted |
+| [0009: Keep AI inference asynchronous](../adr/0009-asynchronous-ai.md) | Accepted |
+| [0010: Keep AI nodes disposable and non-authoritative](../adr/0010-disposable-ai-node.md) | Accepted |
+| [0011: Standardize the backend platform](../adr/0011-go-platform-baseline.md) | Accepted |
+| [0012: Use REST over net/http and chi](../adr/0012-http-rest-stack.md) | Accepted |
+| [0013: Use pgx and SQL without an ORM](../adr/0013-pgx-sqlc-no-orm.md) | Accepted |
+| [0014: Enforce inward module dependency direction](../adr/0014-module-dependency-direction.md) | Accepted |
+| [0015: Use UUIDv7-compatible identifiers and UTC timestamps](../adr/0015-uuidv7-and-time.md) | Accepted |
+| [0016: Represent money with exact decimals](../adr/0016-exact-money.md) | Accepted |
+| [0017: Restrict JSONB to extensible data](../adr/0017-jsonb-boundary.md) | Accepted |
+| [0018: Make organization the tenant boundary](../adr/0018-tenant-owned-data.md) | Accepted |
+| [0019: Enforce tenant integrity in PostgreSQL](../adr/0019-tenant-integrity-rls.md) | Accepted |
+| [0020: Use opaque server-side sessions](../adr/0020-opaque-session-auth.md) | Accepted |
+| [0021: Authorize through membership permissions](../adr/0021-membership-permissions.md) | Accepted |
+| [0022: Use OpenAPI as the REST contract](../adr/0022-openapi-rest-contract.md) | Accepted |
+| [0023: Persist idempotency records for critical commands](../adr/0023-idempotency-records.md) | Accepted |
+| [0024: Keep connectors channel-independent](../adr/0024-connector-contract.md) | Accepted |
+| [0025: Use a short atomic webhook transaction](../adr/0025-webhook-transaction.md) | Accepted |
+| [0026: Use a leased PostgreSQL job queue](../adr/0026-postgres-job-queue.md) | Accepted |
+| [0027: Publish versioned events through a transactional outbox](../adr/0027-transactional-outbox-events.md) | Accepted |
+| [0028: Use SSE only as an invalidation signal](../adr/0028-sse-invalidation.md) | Accepted |
+| [0029: Separate notifications from delivery attempts](../adr/0029-notification-delivery-separation.md) | Accepted |
+| [0030: Use an outbound pull model for local AI](../adr/0030-local-pull-ai.md) | Accepted |
+| [0031: Validate AI output and enforce freshness](../adr/0031-ai-validation-freshness.md) | Accepted |
+| [0032: Ограничивать попытки аутентификации через PostgreSQL](../adr/0032-persistent-auth-throttling.md) | Accepted |
+| [0033: Ограничивать AI-узлы явным списком организаций](../adr/0033-ai-node-tenant-allowlist.md) | Accepted |
+| [0034: Роли PostgreSQL и fail-closed контекст для RLS](../adr/0034-rls-roles-fail-closed.md) | Accepted |
+| [0035: Явная единица порога риска](../adr/0035-risk-threshold-unit.md) | Superseded by 0043 |
+| [0036: Одно ожидающее AI-задание на переписку и дебаунс анализа](../adr/0036-ai-queue-single-queued-job.md) | Accepted |
+| [0037: Политика уведомлений: получатели, тихие часы и сводки](../adr/0037-notification-policy-delivery.md) | Accepted |
+| [0038: Обратная связь по рискам, окно точности и граница ML-согласия](../adr/0038-risk-feedback-precision-consent.md) | Accepted |
+| [0039: Базовая аналитика читает необработанные факты модулей](../adr/0039-basic-analytics-raw-facts.md) | Accepted |
+| [0040: Платформенное администрирование читает все модули и правит очереди](../adr/0040-platform-admin-observability.md) | Accepted |
+| [0041: Реализация RLS через роли пула и усиление периметра](../adr/0041-rls-enforcement-and-hardening.md) | Accepted |
+| [0042: Нагрузочное испытание в процессе на синтетическом наборе](../adr/0042-capacity-test-method.md) | Accepted |
+| [0043: Пороги правил риска в бизнес-времени без таблицы конфигурации](../adr/0043-risk-thresholds-in-code.md) | Accepted |
+| [0044: Обогащённые модели чтения Radar и переписок для интерфейса](../adr/0044-frontend-read-models.md) | Accepted |
+| [0045: Команда по одноразовым кодам, статус онбординга и безопасное подключение каналов](../adr/0045-team-onboarding-and-secure-connect.md) | Accepted |
+
+## Workflow
+
+1. Create `NNNN-short-title.md` in this directory using the next available
+   four-digit number.
+2. Describe the context, decision, alternatives, consequences, and migration or
+   rollback considerations.
+3. Mark the record `Proposed` while it is under discussion.
+4. Obtain project approval and mark it `Accepted` before implementation.
+5. Supersede old decisions with a new ADR rather than rewriting their history.
+
+An accepted ADR is required before changing the modular-monolith shape, module
+boundaries, dependency direction, data ownership, PostgreSQL source-of-truth
+policy, or cross-module communication model.
+
+## Предложения на рассмотрении
+
+- [0046 — атомарный аудит критических команд](../adr/0046-atomic-critical-command-audit.md) — Proposed, H-04.
+
+## Minimal template
+
+```md
+# NNNN: Decision title
+
+- Status: Proposed
+- Date: YYYY-MM-DD
+
+## Context
+
+## Decision
+
+## Alternatives considered
+
+## Consequences
+
+## Migration and rollback
 ```
 
-## Форма системы и платформа
-
-| ADR | Решение | Суть |
-|---|---|---|
-| 0001 | Модульный монолит | одна кодовая база, явные модули, общий процесс не даёт права на связность внутренностей |
-| 0002 | Отдельные процессы из одного репозитория | `api`, `worker`, `scheduler`, `migrate`, `ai-agent` собираются из одного кода |
-| 0003 | PostgreSQL — источник истины | кэши, индексы и очереди не могут стать авторитетными |
-| 0011 | Платформа Go | Go 1.26, `slog`, минимум зависимостей |
-| 0012 | REST на `net/http` и chi | без GraphQL и фреймворков |
-| 0013 | pgx и SQL без ORM | инварианты и очереди средствами базы |
-| 0014 | Направление зависимостей внутрь | transport → application → domain ← infrastructure; проверяется archcheck |
-| 0015 | UUIDv7 и время в UTC | сортируемые идентификаторы, `TIMESTAMPTZ` |
-| 0016 | Точные деньги | десятичные типы и строки, без плавающей точки |
-| 0017 | JSONB только для расширяемых данных | бизнес-поля — колонки с ограничениями |
-
-## Организации и доступ
-
-| ADR | Решение | Суть |
-|---|---|---|
-| 0018 | Организация — граница арендатора | `tenant_id` в каждой бизнес-таблице |
-| 0019 | Целостность арендатора в PostgreSQL | составные внешние ключи с `tenant_id`, RLS как второй уровень |
-| 0020 | Непрозрачные серверные сессии | cookie с токеном, в базе только хеш |
-| 0021 | Авторизация через разрешения членства | роли OWNER и MANAGER, именованные права |
-| 0032 | Троттлинг входа в PostgreSQL | лимиты по адресу и учётной записи переживают перезапуск |
-| 0034 | Роли PostgreSQL и fail-closed контекст RLS | три роли, пустой контекст — ноль строк; реализация уточнена ADR 0041 |
-| 0041 | Реализация RLS через роли пула и усиление периметра | контекст хуком пула, обход предикатом политики, заголовки безопасности, лимиты частоты, аудит, резервные копии |
-
-## Приём данных и переписки
-
-| ADR | Решение | Суть |
-|---|---|---|
-| 0004 | Сначала сохранить внешнее событие | persist-first: ответ провайдеру после записи |
-| 0005 | Сырые данные отдельно от интерпретации | `raw_events` неизменны, канонические сущности — отдельно |
-| 0006 | Переписки отдельно от сделок | переписка — факт общения, сделка — коммерческая интерпретация |
-| 0024 | Канало-независимые коннекторы | общий контракт канонических событий |
-| 0025 | Короткая атомарная транзакция вебхука | сырое событие и намерение обработать в одной транзакции |
-
-## Фоновая обработка и контракты
-
-| ADR | Решение | Суть |
-|---|---|---|
-| 0022 | OpenAPI как контракт REST | один файл для фронтенда и бэкенда, проверка в CI |
-| 0023 | Записи идемпотентности для критических команд | ключ, хеш запроса, сохранённый ответ |
-| 0026 | Очередь заданий с арендой в PostgreSQL | `SKIP LOCKED`, аренда 30 с, повторы, `DEAD` |
-| 0027 | Версионированные события через транзакционный outbox | доставка как минимум один раз |
-| 0028 | SSE только как сигнал инвалидации | без бизнес-данных, клиент перечитывает REST |
-| 0029 | Уведомления отдельно от попыток доставки | логический факт и попытки с повторами |
-| 0037 | Политика уведомлений | получатели, режимы, тихие часы, сводки, эскалация |
-
-## Риски и деньги
-
-| ADR | Решение | Суть |
-|---|---|---|
-| 0007 | Этап сделки отдельно от риска | риск не двигает этап, этап не закрывает риск напрямую |
-| 0035 | Явная единица порога риска | заменён ADR 0043 |
-| 0038 | Обратная связь, окно точности и ML-согласие | вердикты append-only, precision по типам, `dataset_eligible` по согласию |
-| 0039 | Аналитика читает необработанные факты | одна read-only транзакция, без витрин |
-| 0043 | Пороги правил в бизнес-времени без таблицы конфигурации | пороги — константы кода, порог ответа — поле точки, таблица отложена до измеренной потребности |
-
-## AI
-
-| ADR | Решение | Суть |
-|---|---|---|
-| 0008 | AI ограничен семантическими фактами | никакого прямого изменения состояния |
-| 0009 | Асинхронный вывод | очередь, а не запрос-ответ |
-| 0010 | Одноразовые неавторитетные узлы | узел можно потерять без потери данных |
-| 0030 | Исходящая pull-модель | узел сам забирает задания по HTTPS, входящих портов нет |
-| 0031 | Проверка результата и свежесть | строгая схема, статусы `APPLIED`/`STALE`/`REJECTED` |
-| 0033 | Явный список организаций для узла | допуски и составные ключи |
-| 0036 | Одно ожидающее задание на переписку и дебаунс | замена снимка, 60 с |
-
-## Эксплуатация
-
-| ADR | Решение | Суть |
-|---|---|---|
-| 0040 | Платформенное администрирование | отдельное право, read-модели без содержимого, правка очередей с аудитом |
-| 0042 | Нагрузочное испытание в процессе | синтетический набор, те же обработчики, отчёт JSON, найденные узкие места чинятся в том же этапе |
-
-## Статусы
-
-Все решения приняты (`Accepted`), кроме ADR 0035 — заменён ADR 0043. ADR
-0034 несёт примечание о реализации, закреплённой ADR 0041 (контекст через
-`set_config` в хуке пула вместо `SET LOCAL`, обход предикатом `pg_has_role`
-вместо `BYPASSRLS`).
+The current architecture guardrails are summarized in
+[`../architecture/ARCHITECTURE.md`](../architecture/ARCHITECTURE.md).

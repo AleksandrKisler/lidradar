@@ -1,0 +1,70 @@
+
+> lidradar-web@0.1.0 build:dev
+> npm run typecheck && vite build --mode development
+
+
+> lidradar-web@0.1.0 typecheck
+> vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json
+
+vite v8.3.0 building client environment for development...
+transforming...
+✓ 1936 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                    0.69 kB │ gzip:  0.36 kB
+dist/.vite/manifest.json                          17.85 kB │ gzip:  1.99 kB
+dist/assets/index-ZhwUhXK9.css                    34.38 kB │ gzip:  7.34 kB
+dist/assets/return-path-CScFd0lb.js                0.29 kB │ gzip:  0.23 kB │ map:   1.68 kB
+dist/assets/UiCard-DUZKdQPf.js                     0.43 kB │ gzip:  0.33 kB │ map:   1.81 kB
+dist/assets/onboarding-DyHcAjaC.js                 0.44 kB │ gzip:  0.36 kB │ map:   1.74 kB
+dist/assets/types-BzpvYo2o.js                      0.61 kB │ gzip:  0.42 kB │ map:   4.15 kB
+dist/assets/UiEmptyState-DW-oFA_6.js               0.77 kB │ gzip:  0.47 kB │ map:   2.44 kB
+dist/assets/options-CGXf4AEY.js                    0.79 kB │ gzip:  0.52 kB │ map:   2.65 kB
+dist/assets/UiPageHeader-5TWac1uI.js               0.79 kB │ gzip:  0.47 kB │ map:   2.37 kB
+dist/assets/money-CdviRkUf.js                      0.90 kB │ gzip:  0.54 kB │ map:   5.83 kB
+dist/assets/location-yK2Mrzyj.js                   0.92 kB │ gzip:  0.47 kB │ map:   3.36 kB
+dist/assets/not-found-BEYGmMXh.js                  0.97 kB │ gzip:  0.66 kB │ map:   2.48 kB
+dist/assets/organization-DgMTI31a.js               0.99 kB │ gzip:  0.46 kB │ map:   4.34 kB
+dist/assets/UiField-BoonYER7.js                    1.03 kB │ gzip:  0.62 kB │ map:   4.41 kB
+dist/assets/UiAccessDenied-DT0kJFWB.js             1.03 kB │ gzip:  0.72 kB │ map:   3.36 kB
+dist/assets/UiAlert-BPRZz8__.js                    1.09 kB │ gzip:  0.63 kB │ map:   4.02 kB
+dist/assets/UiTextarea-8gdIAqQO.js                 1.14 kB │ gzip:  0.63 kB │ map:   3.38 kB
+dist/assets/register-DMsQzGd2.js                   1.18 kB │ gzip:  0.74 kB │ map:   3.77 kB
+dist/assets/UiInput-CwPfV3Ax.js                    1.26 kB │ gzip:  0.65 kB │ map:   4.17 kB
+dist/assets/PlainLayout-BSKc92Pf.js                1.30 kB │ gzip:  0.86 kB │ map:   4.55 kB
+dist/assets/AdminLayout-7epuehjT.js                1.41 kB │ gzip:  0.89 kB │ map:   4.68 kB
+dist/assets/workspaces-DLt0iX9O.js                 1.55 kB │ gzip:  0.89 kB │ map:   4.71 kB
+dist/assets/UiSelect-BZ2oOvN-.js                   1.60 kB │ gzip:  0.91 kB │ map:   4.67 kB
+dist/assets/AuthLayout-6tSeEovL.js                 1.78 kB │ gzip:  0.98 kB │ map:   4.72 kB
+dist/assets/OnboardingLayout-C_4ec3r6.js           2.07 kB │ gzip:  1.29 kB │ map:   7.29 kB
+dist/assets/adapters-Dekiy8JE.js                   2.12 kB │ gzip:  0.95 kB │ map:   8.90 kB
+dist/assets/UiPasswordInput-BPpBrScM.js            2.21 kB │ gzip:  1.18 kB │ map:   6.76 kB
+dist/assets/onboarding-progress-BEMtCV-l.js        2.22 kB │ gzip:  1.27 kB │ map:   9.19 kB
+dist/assets/login-Bfh8zHij.js                      2.26 kB │ gzip:  1.26 kB │ map:   6.53 kB
+dist/assets/team-BRYPwUIS.js                       2.54 kB │ gzip:  1.11 kB │ map:  11.21 kB
+dist/assets/select-workspace-BwS_vK8s.js           2.59 kB │ gzip:  1.29 kB │ map:  11.56 kB
+dist/assets/useMutation-CTCsLz8a.js                2.60 kB │ gzip:  1.11 kB │ map:  17.04 kB
+dist/assets/admin-shell-EJmfBKr7.js                4.83 kB │ gzip:  2.49 kB │ map:  17.25 kB
+dist/assets/admin-CWsht0ZR.js                      4.90 kB │ gzip:  1.43 kB │ map:  20.39 kB
+dist/assets/invitations-CKcBQJM4.js                4.94 kB │ gzip:  2.36 kB │ map:  18.11 kB
+dist/assets/ShellLayout-BjD7Yr_m.js                6.06 kB │ gzip:  2.78 kB │ map:  25.79 kB
+dist/assets/auth-session-7oYzEFWs.js               7.87 kB │ gzip:  2.79 kB │ map:  32.66 kB
+dist/assets/link-telegram-7l3itLSC.js              8.76 kB │ gzip:  3.56 kB │ map:  32.76 kB
+dist/assets/radar-FU-7EF2W.js                     12.87 kB │ gzip:  5.06 kB │ map:  51.18 kB
+dist/assets/onboarding-gvXYs5Hp.js                17.58 kB │ gzip:  5.88 kB │ map:  64.52 kB
+dist/assets/conversations-BBdBrU17.js             19.81 kB │ gzip:  7.25 kB │ map:  85.99 kB
+dist/assets/manage-services-D9oV4ha6.js           19.98 kB │ gzip:  6.32 kB │ map:  80.74 kB
+dist/assets/useQuery-BfYn1wqz.js                  22.28 kB │ gzip:  7.39 kB │ map: 105.82 kB
+dist/assets/analytics-Dols0Xy9.js                 24.53 kB │ gzip:  8.07 kB │ map: 101.95 kB
+dist/assets/date-time-S5lBkEOk.js                 26.57 kB │ gzip:  7.60 kB │ map: 103.56 kB
+dist/assets/integrations-Ba-4iAq0.js              29.06 kB │ gzip:  9.65 kB │ map: 106.74 kB
+dist/assets/UiDialog--FSXU848.js                  35.36 kB │ gzip: 12.00 kB │ map: 505.10 kB
+dist/assets/vee-validate-valibot-PmpKYhxK.js      37.70 kB │ gzip: 12.63 kB │ map: 204.57 kB
+dist/assets/risk-CCM_RPZ5.js                      52.40 kB │ gzip: 14.37 kB │ map: 217.96 kB
+dist/assets/admin-BS-JTZ1W.js                     59.95 kB │ gzip: 14.29 kB │ map: 231.69 kB
+dist/assets/settings-Mu91Eksi.js                  60.32 kB │ gzip: 16.23 kB │ map: 238.98 kB
+dist/assets/index-DRC5PK6G.js                     61.67 kB │ gzip: 21.23 kB │ map: 239.84 kB
+dist/assets/session-D4VI_TxO.js                   74.51 kB │ gzip: 27.42 kB │ map: 632.53 kB
+dist/assets/runtime-core.esm-bundler-Car86Ubo.js  85.42 kB │ gzip: 33.36 kB │ map: 498.98 kB
+
+✓ built in 2.49s

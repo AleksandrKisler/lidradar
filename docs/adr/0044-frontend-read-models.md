@@ -84,6 +84,11 @@ OpenAPI расходилась с runtime (`MANUAL` в `Risk.source`, обяза
    сводку и открытые списки целиком. Повтор событий и `Last-Event-ID`
    по-прежнему не вводятся (ADR 0028). Ответ `503 UNAVAILABLE` при
    неинициализированной шине описан в контракте.
+   Уточнение границы 2026-10-05: это решение покрывает subscriber buffer
+   overflow, но не silent NOTIFY loss до хаба при живом SSE. Полная
+   freshness-гарантия требует отдельного
+   [RG-SSE](../engineering/RELEASE_GATES.md#rg-sse); статус частичного
+   закрытия зафиксирован в реестре frontend, без изменения истории ADR.
 8. **Именованные права корректирующих команд стали фактическими
    ограничениями.** `POST /risks/{riskId}/actions` требует `action.manage`,
    `POST /opportunities/{opportunityId}/outcomes` — `outcome.manage`,

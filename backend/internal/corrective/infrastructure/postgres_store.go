@@ -148,6 +148,20 @@ func (store *PostgresStore) AppendAction(
 		}
 		return stored, false, nil
 	}
+	// Serialize with closure before writing a new fact. NO KEY UPDATE also
+	// allows concurrent FK checks without unnecessarily locking referenced keys.
+	var riskStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM risk_signals
+		WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, action.TenantID, action.RiskID).Scan(&riskStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Action{}, false, application.ErrNotFound
+	}
+	if err != nil {
+		return domain.Action{}, false, mapCorrectiveError("проверка состояния риска", err)
+	}
+	if !domain.CanRecordAction(riskStatus) {
+		return domain.Action{}, false, application.ErrRiskClosed
+	}
 	inserted, err := tx.Exec(ctx, `
 		INSERT INTO actions(id, tenant_id, risk_id, opportunity_id, actor_user_id, type, note, created_at)
 		SELECT $1, $2, $3, risk.opportunity_id, $4, $5, $6, $7
