@@ -181,6 +181,16 @@ PENDING — ожидаем действие. RESOLVED — есть более п
 Предложение времени с вопросом о записи заменяет ожидание ответа компании на ожидание CUSTOMER от предложения. Согласованная отсрочка заменяет старое основание на сообщение об отсрочке, ждём её автора. При новом предложении остаётся актуальное ожидание. Приветствие, спасибо, «ок» и посторонний ответ не выполняют обещание. Нет конкретного ожидания — agreements:[]. Не повторяй договорённости. Не выдумывай trusted.
 analysisThroughMessageId скопируй из запроса. summary — одно краткое предложение.`
 
+// V9 restores availability requests as intent, independently from agreement
+// extraction. The model still has to provide grounded positive observations.
+var analysisSystemPromptV9 = strings.Replace(analysisSystemPromptV8,
+	"BOOKING_INTENT: клиент просит запись, выбирает время, просит перенос на конкретный день или подтверждает предложение. Общий интерес, вопрос только о цене, ошибочная запись, отказ и отмена не подходят.",
+	"BOOKING_INTENT: клиент просит визит/запись, хочет попасть на услугу, выбирает день/время или спрашивает о доступности специалиста/услуги/места для своего визита. Вопросительная форма тоже выражает намерение: «есть место в субботу?», «можно попасть утром?», «нужен визит на следующей неделе». Название услуги может отсутствовать. Общий интерес, вопрос только о цене, режиме работы или описании услуги, ошибочная запись, отказ и отмена без новой записи не подходят.", 1)
+
+func init() {
+	analysisSystemPromptV9 += "\nНезависимые ожидания (например, счёт и договор, перенос и оплата) сохраняй отдельно. Выполнение или отмена одного не завершает другое. Замена времени относится только к той же записи.\nУсловное намерение на неопределённое будущее («возможно когда-нибудь») не факт. Отмена прежнего заказа и явная просьба о новом заказе в другом предложении не отменяют новое PURCHASE_INTENT. Оценивай эти части отдельно.\nОбещание OUTGOING учитывается даже без входящего вопроса клиента и без явного срока. Если найден COMMITMENT в agreements, обязательно проверь BUSINESS_COMMITMENT в facts; последний конкретный текст обещания доказывает факт даже после исполнения. Для двух разных обещаний создай две договорённости."
+}
+
 func (p LlamaProvider) Ready(ctx context.Context) error {
 	healthURL := p.HealthURL
 	if healthURL == "" {
@@ -214,7 +224,7 @@ func (p LlamaProvider) Infer(ctx context.Context, prompt string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if version != application.AnalysisPromptV8 {
+	if version != application.AnalysisPromptV8 && version != application.AnalysisPromptV9 {
 		return p.infer(ctx, prompt)
 	}
 	aliased, aliases, err := aliasAnalysisRequest(prompt)
@@ -241,7 +251,14 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 		return "", err
 	}
 	messages := []map[string]string{{"role": "system", "content": systemPrompt}}
-	if promptVersion == application.AnalysisPromptV3 {
+	if promptVersion == application.AnalysisPromptV9 {
+		var input application.AnalyzeConversationRequestV1
+		_ = json.Unmarshal([]byte(prompt), &input)
+		if len(agreementGenerationCandidates(input.Messages)) == 0 {
+			messages[0]["content"] = analysisSystemPromptV6 + "\nКонтракт ответа analyze-conversation.v2, agreements: []. PURCHASE_INTENT: явное желание купить/заказать, в том числе новый заказ после отмены старого. Вопрос о доступности дня/времени для своего визита — BOOKING_INTENT, даже без названия услуги."
+		}
+		messages = append(messages, selectExamplesV9(input.Messages)...)
+	} else if promptVersion == application.AnalysisPromptV3 {
 		messages = append(messages, analysisFewShotMessagesV3...)
 	} else if promptVersion == application.AnalysisPromptV4 {
 		messages = append(messages, analysisFewShotMessagesV4...)
@@ -257,10 +274,11 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 				// With no agreement anchors, retain the qualified fact-focused
 				// instruction and examples instead of biasing toward a booking.
 				messages[0]["content"] = analysisSystemPromptV6 + "\nКонтракт ответа analyze-conversation.v2, agreements: []. Дополнительный тип PURCHASE_INTENT: клиент явно хочет купить или заказать, включая проблему оплаты."
+				examples := analysisFactExamplesV8
 				if len(input.Messages) > 6 {
-					messages = append(messages, analysisFactExamplesV8[4:8]...)
+					messages = append(messages, examples[4:8]...)
 				} else {
-					messages = append(messages, analysisFactExamplesV8...)
+					messages = append(messages, examples...)
 				}
 			} else {
 				messages = append(messages, analysisFewShotMessagesV8...)
@@ -273,9 +291,9 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 	messages = append(messages, map[string]string{"role": "user", "content": prompt})
 	temperature, presencePenalty := 0.7, 1.5
 	schema := analysisResultGenerationSchemaV1
-	if promptVersion == application.AnalysisPromptV6 || promptVersion == application.AnalysisPromptV7 || promptVersion == application.AnalysisPromptV8 {
+	if promptVersion == application.AnalysisPromptV6 || promptVersion == application.AnalysisPromptV7 || promptVersion == application.AnalysisPromptV8 || promptVersion == application.AnalysisPromptV9 {
 		temperature, presencePenalty = 0.2, 0
-		if promptVersion == application.AnalysisPromptV7 || promptVersion == application.AnalysisPromptV8 {
+		if promptVersion == application.AnalysisPromptV7 || promptVersion == application.AnalysisPromptV8 || promptVersion == application.AnalysisPromptV9 {
 			schema, err = analysisGenerationSchemaV7(prompt)
 		} else {
 			schema, err = analysisGenerationSchemaV6(prompt)
@@ -366,6 +384,8 @@ func analysisPromptDefinition(prompt string) (string, string, error) {
 		return analysisSystemPromptV7, application.AnalysisPromptV7, nil
 	case application.AnalysisPromptV8:
 		return analysisSystemPromptV8, application.AnalysisPromptV8, nil
+	case application.AnalysisPromptV9:
+		return analysisSystemPromptV9, application.AnalysisPromptV9, nil
 	default:
 		return "", "", fmt.Errorf("неподдерживаемая версия инструкции анализа %q", metadata.PromptVersion)
 	}

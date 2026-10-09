@@ -88,7 +88,7 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 				allowed := m.Direction == "INCOMING"
 				switch kind {
 				case "BOOKING_INTENT":
-					allowed = allowed && !application.RejectsBookingIntent(m.Body)
+					allowed = application.PossibleBookingEvidence(m)
 				case "BUSINESS_COMMITMENT":
 					allowed = application.PossibleBusinessCommitmentEvidence(m)
 				case "FOLLOW_UP_CANDIDATE":
@@ -104,10 +104,13 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 				// The contract asks for the latest direct proof, not every
 				// historical repetition. Keep fallback wording model-assessed.
 				for _, m := range request.Messages {
-					if application.ExplicitBookingEvidence(m) {
+					if application.ExplicitBookingEvidence(m) && (request.PromptVersion != application.AnalysisPromptV9 || application.PossibleBookingEvidence(m)) {
 						eligible = []string{m.ID}
 					}
 				}
+			}
+			if kind == "BUSINESS_COMMITMENT" && request.PromptVersion == application.AnalysisPromptV9 && len(eligible) > 1 {
+				eligible = eligible[len(eligible)-1:]
 			}
 			if len(eligible) == 0 {
 				continue
@@ -145,10 +148,21 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
+		factsSchema := fmt.Sprintf(`{"type":"array","items":{"oneOf":[%s]}}`, variants)
+		if request.PromptVersion == application.AnalysisPromptV9 {
+			// The prompt permits one fact per type. Bound malformed repetitive
+			// generation while still allowing abstention and negative values.
+			factsSchema = fmt.Sprintf(`{"type":"array","maxItems":5,"items":{"oneOf":[%s]}}`, variants)
+		}
+		if request.PromptVersion == application.AnalysisPromptV9 && other == "" && len(application.PriceEvidenceAmounts(request.Messages)) == 0 {
+			// No positive fact is eligible. Do not force the model to express a
+			// refusal as an irrelevant negative price observation.
+			factsSchema = `{"const":[]}`
+		}
 		return json.RawMessage(fmt.Sprintf(`{"type":"object","additionalProperties":false,
 "required":["schemaVersion","analysisThroughMessageId","summary","facts","agreements"],"properties":{
 "schemaVersion":{"const":"analyze-conversation.v2"},"analysisThroughMessageId":{"const":%s},
-"summary":{"type":"string","minLength":1},"facts":{"type":"array","items":{"oneOf":[%s]}},"agreements":%s}}`, throughJSON, variants, agreement)), nil
+"summary":{"type":"string","minLength":1},"facts":%s,"agreements":%s}}`, throughJSON, factsSchema, agreement)), nil
 	}
 	return json.RawMessage(fmt.Sprintf(`{"type":"object","additionalProperties":false,
 "required":["schemaVersion","analysisThroughMessageId","summary","facts"],"properties":{

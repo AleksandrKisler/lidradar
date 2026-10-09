@@ -107,40 +107,46 @@ func (policy PromiseNotFulfilledPolicy) Evaluate(state ConversationState, at tim
 func (policy PromiseNotFulfilledPolicy) evaluateV2(state ConversationState, at time.Time) (Decision, error) {
 	active, hasActive := state.ActiveRisks[TypePromiseNotFulfilled]
 	var pending *AgreementSignal
-	resolvedActive := false
-	for i := range state.Agreements {
-		a := &state.Agreements[i]
-		if a.Kind != "COMMITMENT" || a.WaitingFor != "BUSINESS" || a.Confidence < StrongCommitmentConfidence {
-			continue
-		}
-		if hasActive && a.TriggerMessageID == active.TriggerMessageID &&
-			(a.Status == "RESOLVED" || a.Status == "CANCELLED") {
-			resolvedActive = true
-		}
-		if a.Status == "PENDING" && (pending == nil || a.TriggerAt.After(pending.TriggerAt)) {
-			pending = a
-		}
-	}
-	if pending == nil {
-		return Decision{Resolve: resolvedActive}, nil
-	}
-	if hasActive && active.TriggerMessageID != pending.TriggerMessageID && !active.TriggerAt.IsZero() &&
-		!pending.TriggerAt.After(active.TriggerAt) {
-		return Decision{}, nil
-	}
+	var due time.Time
+	resolvedActive, parsed := false, false
+	var promised PromisedDue
 	location, err := time.LoadLocation(state.BusinessHours.Timezone)
 	if err != nil {
 		return Decision{}, ErrInvalidBusinessHours
 	}
-	promised, parsed := ParsePromisedDue(pending.TriggerText, pending.TriggerAt, location)
-	due := promised.At
-	if !parsed {
-		if due, err = state.BusinessHours.AddBusinessTime(pending.TriggerAt, PromiseFallbackThreshold); err != nil {
-			return Decision{}, err
+	eligibleCount := 0
+	for i := range state.Agreements {
+		a := &state.Agreements[i]
+		if a.Kind != "COMMITMENT" || a.WaitingFor != "BUSINESS" || !strongAgreement(*a) {
+			continue
+		}
+		if hasActive && a.TriggerMessageID == active.TriggerMessageID && (a.Status == "RESOLVED" || a.Status == "CANCELLED") {
+			resolvedActive = true
+		}
+		if a.Status != "PENDING" || state.ClosedAgreementTriggers[TypePromiseNotFulfilled][a.TriggerMessageID] {
+			continue
+		}
+		candidate, explicit := ParsePromisedDue(a.TriggerText, a.TriggerAt, location)
+		candidateDue := candidate.At
+		if !explicit {
+			candidateDue, err = state.BusinessHours.AddBusinessTime(a.TriggerAt, PromiseFallbackThreshold)
+			if err != nil {
+				return Decision{}, err
+			}
+		}
+		eligibleCount++
+		if preferAgreement(pending, due, *a, candidateDue, active.TriggerMessageID) {
+			pending, due, parsed, promised = a, candidateDue, explicit, candidate
 		}
 	}
-	decision := Decision{DueAt: due, TriggerMessageID: pending.TriggerMessageID, PolicyVersion: "promise-not-fulfilled/v2",
-		Resolve: hasActive && active.TriggerMessageID != pending.TriggerMessageID}
+	if hasActive && pending != nil && pending.TriggerMessageID != active.TriggerMessageID && !resolvedActive {
+		return Decision{}, nil
+	}
+	if pending == nil {
+		return Decision{Resolve: resolvedActive}, nil
+	}
+	decision := Decision{DueAt: due, TriggerMessageID: pending.TriggerMessageID, PolicyVersion: "promise-not-fulfilled/v3",
+		Resolve: hasActive && resolvedActive && active.TriggerMessageID != pending.TriggerMessageID}
 	if at.Before(due) {
 		return decision, nil
 	}
@@ -152,9 +158,12 @@ func (policy PromiseNotFulfilledPolicy) evaluateV2(state ConversationState, at t
 	confidence, runID := pending.Confidence, pending.AIRunID
 	decision.Finding = &Finding{
 		TenantID: state.TenantID, OpportunityID: state.OpportunityID, LocationID: state.LocationID,
-		TriggerMessageID: pending.TriggerMessageID, Severity: SeverityHigh, PolicyVersion: "promise-not-fulfilled/v2",
+		TriggerMessageID: pending.TriggerMessageID, Severity: SeverityHigh, PolicyVersion: "promise-not-fulfilled/v3",
 		ReasonCode: "PROMISE_NOT_FULFILLED_AFTER_DUE", Reason: reason, DueAt: due,
 		Source: SourceHybrid, Confidence: &confidence, AIRunID: &runID,
+	}
+	if eligibleCount > 1 {
+		decision.Finding.Reason += fmt.Sprintf(". Всего невыполненных обещаний: %d", eligibleCount)
 	}
 	return decision, nil
 }

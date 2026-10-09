@@ -23,7 +23,8 @@ const (
 	AnalysisPromptV6      = "analyze-conversation.prompt.v6"
 	AnalysisPromptV7      = "analyze-conversation.prompt.v7"
 	AnalysisPromptV8      = "analyze-conversation.prompt.v8"
-	CurrentAnalysisPrompt = AnalysisPromptV8
+	AnalysisPromptV9      = "analyze-conversation.prompt.v9"
+	CurrentAnalysisPrompt = AnalysisPromptV9
 	DefaultModelVersion   = "lidradar-main-v1"
 	MaxContextMessages    = 20
 	MaxContextRunes       = 12000 // консервативная оценка для цели в 3000 токенов
@@ -33,7 +34,7 @@ var ErrInvalidAIOutput = errors.New("invalid AI output")
 
 func SupportedAnalysisPrompt(version string) bool {
 	switch version {
-	case AnalysisPromptV1, AnalysisPromptV2, AnalysisPromptV3, AnalysisPromptV4, AnalysisPromptV5, AnalysisPromptV6, AnalysisPromptV7, AnalysisPromptV8:
+	case AnalysisPromptV1, AnalysisPromptV2, AnalysisPromptV3, AnalysisPromptV4, AnalysisPromptV5, AnalysisPromptV6, AnalysisPromptV7, AnalysisPromptV8, AnalysisPromptV9:
 		return true
 	default:
 		return false

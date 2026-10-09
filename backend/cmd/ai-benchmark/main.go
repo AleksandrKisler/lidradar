@@ -23,6 +23,7 @@ func main() {
 	timeout := flag.Duration("timeout", 30*time.Minute, "предельная длительность всей проверки")
 	promptVersion := flag.String("prompt-version", "", "версия инструкции для сравнения; файл и контрольная сумма набора не меняются")
 	precision := flag.Float64("minimum-precision", 0, "минимальная общая точность, обязательно")
+	factRecall := flag.Float64("minimum-fact-recall", 0, "минимальная полнота каждого представленного типа факта; 0 отключает порог")
 	factPrecision := flag.Float64("minimum-fact-precision", 0, "минимальная точность каждого типа факта, обязательно")
 	recall := flag.Float64("minimum-recall", 0, "минимальная полнота, обязательно")
 	f1 := flag.Float64("minimum-f1", 0, "минимальная F1-мера, обязательно")
@@ -66,7 +67,7 @@ func main() {
 		}
 	}
 	report, err := benchmark.Run(ctx, infrastructure.LlamaProvider{URL: *endpoint}, cases, digest, benchmark.Thresholds{
-		MinimumPrecision: *precision, MinimumFactPrecision: *factPrecision, MinimumRecall: *recall, MinimumF1: *f1, MinimumExactRate: *exact, MinimumValidRate: *valid, MinimumEvidenceExactRate: *evidence, MaximumP95MS: *p95,
+		MinimumFactRecall: *factRecall, MinimumPrecision: *precision, MinimumFactPrecision: *factPrecision, MinimumRecall: *recall, MinimumF1: *f1, MinimumExactRate: *exact, MinimumValidRate: *valid, MinimumEvidenceExactRate: *evidence, MaximumP95MS: *p95,
 	})
 	fatal(err)
 	fatal(json.NewEncoder(os.Stdout).Encode(report))

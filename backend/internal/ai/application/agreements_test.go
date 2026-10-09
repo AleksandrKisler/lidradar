@@ -36,7 +36,11 @@ func TestAgreementGenerationTransitionsRequireEvidence(t *testing.T) {
 		{"unrelated delivery", "Отправил счёт", "OUTGOING", domain.AgreementCommitment, domain.AgreementBusiness, []domain.AgreementStatus{domain.AgreementPending}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := application.AgreementTransitionCandidates(tc.kind, tc.actor, "Проверю наличие", []application.ContextMessage{{ID: "reply", Direction: tc.direction, Body: tc.body}})
+			trigger := "Проверю наличие"
+			if tc.kind == domain.AgreementReschedule {
+				trigger = "Перенесите запись на завтра"
+			}
+			got := application.AgreementTransitionCandidates(tc.kind, tc.actor, trigger, []application.ContextMessage{{ID: "reply", Direction: tc.direction, Body: tc.body}})
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("statuses = %v, want %v", got, tc.want)
 			}

@@ -4,6 +4,7 @@ package infrastructure
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -347,7 +348,50 @@ func (store *MemoryStore) Finalize(_ context.Context, final application.Finaliza
 	job.LeasedBy, job.LeaseUntil, job.LeasedAt, job.UpdatedAt = "", time.Time{}, time.Time{}, final.CompletedAt
 	store.jobs[job.ID] = job
 	if final.Summary != nil {
-		store.summaries[snapshotKey(final.Summary.TenantID, final.Summary.ConversationID)] = *final.Summary
+		summary := *final.Summary
+		previous, exists := store.summaries[snapshotKey(summary.TenantID, summary.ConversationID)]
+		valid := make([]bool, len(previous.Agreements))
+		var current application.AnalyzeConversationRequestV1
+		_ = json.Unmarshal([]byte(job.Prompt), &current)
+		currentMessages := make(map[string]application.ContextMessage, len(current.Messages))
+		for _, message := range current.Messages {
+			currentMessages[message.ID] = message
+		}
+		if exists {
+			for i, agreement := range previous.Agreements {
+				source := agreement.SourceRunID
+				if source == "" {
+					source = previous.RunID
+				}
+				originRun, found := store.runs[source]
+				originJob := store.jobs[originRun.JobID]
+				if !found || originRun.TenantID != summary.TenantID || originRun.ConversationID != summary.ConversationID || originJob.TenantID != summary.TenantID {
+					continue
+				}
+				var original application.AnalyzeConversationRequestV1
+				if json.Unmarshal([]byte(originJob.Prompt), &original) != nil || original.ConversationID != summary.ConversationID {
+					continue
+				}
+				originMessages := make(map[string]application.ContextMessage, len(original.Messages))
+				for _, message := range original.Messages {
+					originMessages[message.ID] = message
+				}
+				valid[i] = len(agreement.EvidenceMessageIDs) > 0
+				for _, id := range append([]string{agreement.TriggerMessageID}, agreement.EvidenceMessageIDs...) {
+					was, found := originMessages[id]
+					if !found {
+						valid[i] = false
+						break
+					}
+					if now, present := currentMessages[id]; present && (was.Body != now.Body || was.Direction != now.Direction) {
+						valid[i] = false
+						break
+					}
+				}
+			}
+		}
+		summary.Agreements = application.MergeAgreementProjection(previous.Agreements, summary.Agreements, valid, previous.RunID, summary.RunID, job.Prompt)
+		store.summaries[snapshotKey(summary.TenantID, summary.ConversationID)] = summary
 	}
 	if final.Replacement != nil {
 		if _, err := store.upsertQueued(*final.Replacement); err != nil && !errors.Is(err, application.ErrConflict) {

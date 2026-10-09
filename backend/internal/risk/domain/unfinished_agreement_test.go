@@ -85,8 +85,12 @@ func TestUnfinishedAgreementSemanticLifecycle(t *testing.T) {
 	state.Agreements[0].Status = "PENDING"
 	state.Agreements[0].TriggerMessageID = "new"
 	state.Agreements[0].TriggerAt = start.Add(time.Hour)
+	if decision, _ := policy.Evaluate(state, start.Add(90*time.Minute)); decision.Resolve || decision.Finding != nil || decision.TriggerMessageID != "" {
+		t.Fatalf("unrelated trigger displaced unresolved active risk: %+v", decision)
+	}
+	state.Agreements = append(state.Agreements, AgreementSignal{Kind: "BOOKING_CONFIRMATION", WaitingFor: "CUSTOMER", Status: "CANCELLED", TriggerMessageID: "trigger", TriggerAt: start, Confidence: .95, AIRunID: "run"})
 	if decision, _ := policy.Evaluate(state, start.Add(90*time.Minute)); !decision.Resolve || decision.Finding != nil || decision.TriggerMessageID != "new" {
-		t.Fatalf("new trigger did not reset schedule: %+v", decision)
+		t.Fatalf("explicitly replaced trigger did not reset schedule: %+v", decision)
 	}
 }
 

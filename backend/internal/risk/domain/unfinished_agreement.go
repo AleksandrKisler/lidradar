@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const UnfinishedAgreementPolicyVersion = "unfinished-agreement/v1"
+const UnfinishedAgreementPolicyVersion = "unfinished-agreement/v2"
 const StrongAgreementConfidence = 0.85
 
 type UnfinishedAgreementPolicy struct{}
@@ -27,64 +27,46 @@ func (p UnfinishedAgreementPolicy) Evaluate(state ConversationState, at time.Tim
 	}
 	active, hasActive := state.ActiveRisks[TypeUnfinishedAgreement]
 	var pending *AgreementSignal
-	resolvedActive := false
+	var due time.Time
+	resolvedActive, transferredActive := false, false
+	eligibleCount := 0
 	for i := range state.Agreements {
 		a := &state.Agreements[i]
-		if a.Confidence < StrongAgreementConfidence || a.TriggerMessageID == "" || a.TriggerAt.IsZero() || a.AIRunID == "" {
+		if !strongAgreement(*a) || a.Kind == "COMMITMENT" {
 			continue
 		}
-		if hasActive && a.TriggerMessageID == active.TriggerMessageID &&
-			(a.Status == "RESOLVED" || a.Status == "CANCELLED") {
+		if hasActive && a.TriggerMessageID == active.TriggerMessageID && (a.Status == "RESOLVED" || a.Status == "CANCELLED" || a.Superseded) {
 			resolvedActive = true
 		}
-		if a.Status != "PENDING" || a.Kind == "COMMITMENT" ||
-			(a.WaitingFor != "CUSTOMER" && a.WaitingFor != "BUSINESS") {
+		if a.Superseded || a.Status != "PENDING" || state.ClosedAgreementTriggers[TypeUnfinishedAgreement][a.TriggerMessageID] {
 			continue
 		}
-		if pending == nil || a.TriggerAt.After(pending.TriggerAt) ||
-			(a.TriggerAt.Equal(pending.TriggerAt) && a.TriggerMessageID > pending.TriggerMessageID) {
-			pending = a
+		if a.Kind != "BOOKING_CONFIRMATION" && a.Kind != "RESCHEDULE" && a.Kind != "PURCHASE_BLOCKER" {
+			continue
+		}
+		if duplicateAgreementAction(state, *a) {
+			transferredActive = transferredActive || (hasActive && a.TriggerMessageID == active.TriggerMessageID)
+			continue
+		}
+		candidateDue, err := unfinishedAgreementDue(state, *a)
+		if err != nil {
+			return Decision{}, err
+		}
+		eligibleCount++
+		if preferAgreement(pending, due, *a, candidateDue, active.TriggerMessageID) {
+			pending, due = a, candidateDue
 		}
 	}
-	if pending == nil {
-		return Decision{Resolve: resolvedActive}, nil
-	}
-	// An older agreement visible in a bounded snapshot must not replace the
-	// active, newer trigger merely because the newer text fell out of context.
-	if hasActive && active.TriggerMessageID != pending.TriggerMessageID && !active.TriggerAt.IsZero() &&
-		!pending.TriggerAt.After(active.TriggerAt) {
+	if hasActive && pending != nil && pending.TriggerMessageID != active.TriggerMessageID && !resolvedActive && !transferredActive {
+		// Missing evidence (including a bounded snapshot) cannot replace an
+		// unresolved active anchor with a newer, unrelated expectation.
 		return Decision{}, nil
 	}
-	if duplicateAgreementAction(state, *pending) {
-		return Decision{Resolve: hasActive && active.TriggerMessageID == pending.TriggerMessageID}, nil
-	}
-	threshold := state.AgreementThreshold
-	if threshold == 0 {
-		threshold = 120 * time.Minute
-	}
-	if threshold < time.Minute || threshold > 1440*time.Minute || threshold%time.Minute != 0 {
-		return Decision{}, ErrInvalidRisk
-	}
-	due, err := state.BusinessHours.AddBusinessTime(pending.TriggerAt, threshold)
-	if err != nil {
-		return Decision{}, err
-	}
-	// Appointment slots are not reply deadlines. Only an explicit promise to
-	// answer/contact/confirm makes the existing time parser applicable.
-	text := strings.ToLower(pending.TriggerText)
-	if strings.Contains(text, "напиш") || strings.Contains(text, "ответ") ||
-		strings.Contains(text, "сообщ") || strings.Contains(text, "подтверж") ||
-		strings.Contains(text, "свяж") || strings.Contains(text, "подума") || strings.Contains(text, "отлож") || strings.Contains(text, "вернёмся") || strings.Contains(text, "вернемся") {
-		location, err := time.LoadLocation(state.BusinessHours.Timezone)
-		if err != nil {
-			return Decision{}, ErrInvalidBusinessHours
-		}
-		if explicit, ok := ParsePromisedDue(pending.TriggerText, pending.TriggerAt, location); ok {
-			due = explicit.At
-		}
+	if pending == nil {
+		return Decision{Resolve: resolvedActive || transferredActive}, nil
 	}
 	decision := Decision{DueAt: due, TriggerMessageID: pending.TriggerMessageID,
-		Resolve: hasActive && active.TriggerMessageID != pending.TriggerMessageID}
+		Resolve: hasActive && (resolvedActive || transferredActive) && active.TriggerMessageID != pending.TriggerMessageID}
 	if at.Before(due) {
 		return decision, nil
 	}
@@ -110,7 +92,35 @@ func (p UnfinishedAgreementPolicy) Evaluate(state ConversationState, at time.Tim
 			pending.TriggerAt.In(location).Format("02.01 15:04")),
 		DueAt: due, Source: SourceHybrid, Confidence: &confidence, AIRunID: &runID,
 	}
+	if eligibleCount > 1 {
+		decision.Finding.Reason += fmt.Sprintf(". Всего незавершённых ожиданий этого типа: %d", eligibleCount)
+	}
 	return decision, nil
+}
+
+func unfinishedAgreementDue(state ConversationState, a AgreementSignal) (time.Time, error) {
+	threshold := state.AgreementThreshold
+	if threshold == 0 {
+		threshold = 120 * time.Minute
+	}
+	if threshold < time.Minute || threshold > 1440*time.Minute || threshold%time.Minute != 0 {
+		return time.Time{}, ErrInvalidRisk
+	}
+	due, err := state.BusinessHours.AddBusinessTime(a.TriggerAt, threshold)
+	if err != nil {
+		return time.Time{}, err
+	}
+	text := strings.ToLower(a.TriggerText)
+	if strings.Contains(text, "напиш") || strings.Contains(text, "ответ") || strings.Contains(text, "сообщ") || strings.Contains(text, "подтверж") || strings.Contains(text, "свяж") || strings.Contains(text, "подума") || strings.Contains(text, "отлож") || strings.Contains(text, "вернёмся") || strings.Contains(text, "вернемся") {
+		location, err := time.LoadLocation(state.BusinessHours.Timezone)
+		if err != nil {
+			return time.Time{}, ErrInvalidBusinessHours
+		}
+		if explicit, ok := ParsePromisedDue(a.TriggerText, a.TriggerAt, location); ok {
+			due = explicit.At
+		}
+	}
+	return due, nil
 }
 
 func duplicateAgreementAction(state ConversationState, a AgreementSignal) bool {

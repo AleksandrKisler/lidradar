@@ -55,6 +55,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0045: Команда по одноразовым кодам, статус онбординга и безопасное подключение каналов](0045-team-onboarding-and-secure-connect.md) | Accepted |
 
 - [0047: Сделки с неизвестной услугой и незавершённые договорённости](0047-unfinished-agreements.md) — Accepted, 2026-10-07.
+- [0048: Сохранение независимых незавершённых ожиданий](0048-retain-independent-agreements.md) — Accepted, 2026-10-09.
 
 ## Workflow
 

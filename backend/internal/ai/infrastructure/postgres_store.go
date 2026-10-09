@@ -701,6 +701,9 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 	}
 	if final.Summary != nil {
 		summary := final.Summary
+		if err := mergeStoredAgreements(ctx, tx, summary, job.Prompt); err != nil {
+			return domain.Run{}, err
+		}
 		facts, marshalErr := json.Marshal(summary.Facts)
 		if marshalErr != nil {
 			return domain.Run{}, fmt.Errorf("кодирование смысловых фактов AI: %w", marshalErr)

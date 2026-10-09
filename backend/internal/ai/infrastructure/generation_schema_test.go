@@ -227,3 +227,67 @@ func TestGenerationExcludesSupersededAndCompletedTriggers(t *testing.T) {
 		}
 	}
 }
+
+func TestV9LatestPromiseFactKeepsIndependentAgreementAnchors(t *testing.T) {
+	input := application.AnalyzeConversationRequestV1{SchemaVersion: application.AnalysisSchemaV2, PromptVersion: application.AnalysisPromptV9, AnalysisThroughMessageID: "m2",
+		Messages: []application.ContextMessage{{ID: "m1", Direction: "OUTGOING", Body: "Отправлю счёт."}, {ID: "m2", Direction: "OUTGOING", Body: "Отправлю договор."}}}
+	prompt, _ := application.EncodeAnalysisRequest(input)
+	raw, err := analysisGenerationSchemaV7(prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties struct {
+			Facts      json.RawMessage `json:"facts"`
+			Agreements json.RawMessage `json:"agreements"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	var facts struct {
+		Items struct {
+			OneOf []struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"oneOf"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(schema.Properties.Facts, &facts); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, variant := range facts.Items.OneOf {
+		if !strings.Contains(string(variant.Properties["type"]), "BUSINESS_COMMITMENT") {
+			continue
+		}
+		found = true
+		evidence := string(variant.Properties["evidenceMessageIds"])
+		if strings.Contains(evidence, `"m1"`) || !strings.Contains(evidence, `"m2"`) {
+			t.Fatalf("historical fact must cite latest promise: %s", evidence)
+		}
+	}
+	if !found {
+		t.Fatal("promise fact unavailable")
+	}
+	for _, id := range []string{`"m1"`, `"m2"`} {
+		if !strings.Contains(string(schema.Properties.Agreements), id) {
+			t.Fatalf("independent agreement lost: %s", schema.Properties.Agreements)
+		}
+	}
+}
+
+func TestV9BudgetAcceptanceIsNotBookingEvidence(t *testing.T) {
+	input := application.AnalyzeConversationRequestV1{SchemaVersion: application.AnalysisSchemaV2, PromptVersion: application.AnalysisPromptV9, AnalysisThroughMessageID: "m1",
+		Messages: []application.ContextMessage{{ID: "m1", Direction: "INCOMING", Body: "Указанная сумма меня устраивает: 2750 рублей."}}}
+	prompt, _ := application.EncodeAnalysisRequest(input)
+	raw, err := analysisGenerationSchemaV7(prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"BOOKING_INTENT"`) {
+		t.Fatalf("budget acceptance became a booking candidate: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"2750"`) {
+		t.Fatal("actual monetary evidence lost")
+	}
+}

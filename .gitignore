@@ -5,6 +5,7 @@
 .env
 .env.*
 !.env.example
+marketing/
 
 # Локальные резервные копии PostgreSQL (scripts/backup.sh)
 backups/

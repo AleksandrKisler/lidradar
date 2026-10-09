@@ -155,6 +155,10 @@ type Agreement struct {
 	EvidenceMessageIDs []string            `json:"evidenceMessageIds"`
 	Confidence         float64             `json:"confidence"`
 	Trusted            bool                `json:"trusted"`
+	// SourceRunID identifies the run whose prompt first supplied this evidence.
+	// It is persisted only in the server-owned projection, never model output.
+	SourceRunID                  string `json:"sourceRunId,omitempty"`
+	SupersededByTriggerMessageID string `json:"supersededByTriggerMessageId,omitempty"`
 }
 
 // AgreementObservation is the model-facing shape without server authority.

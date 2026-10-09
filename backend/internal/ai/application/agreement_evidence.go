@@ -82,10 +82,11 @@ func ValidateAgreementEvidence(result domain.AnalysisResultV2, prompt string) er
 			}
 			if i > triggerIndex {
 				m := request.Messages[i]
-				if a.Status == domain.AgreementResolved && m.Direction == waitingForDirection(a.WaitingFor) && resolvesAgreement(a.Kind, trigger.Body, m.Body) {
+				ambiguous := ambiguousCommitmentReply(a.Kind, request.Messages, i, m.Body)
+				if a.Status == domain.AgreementResolved && !ambiguous && m.Direction == waitingForDirection(a.WaitingFor) && resolvesAgreement(a.Kind, trigger.Body, m.Body) {
 					laterEvidence = true
 				}
-				if a.Status == domain.AgreementCancelled && explicitCancellation(m.Body) {
+				if a.Status == domain.AgreementCancelled && !ambiguous && cancelsAgreement(trigger.Body, m.Body) {
 					laterEvidence = true
 				}
 			}
@@ -101,11 +102,12 @@ func ValidateAgreementEvidence(result domain.AnalysisResultV2, prompt string) er
 					}
 				}
 			}
-			for _, m := range request.Messages[triggerIndex+1:] {
+			for offset, m := range request.Messages[triggerIndex+1:] {
 				if a.Kind == domain.AgreementBookingConfirmation && a.WaitingFor == domain.AgreementBusiness && m.Direction == "OUTGOING" && HasExplicitBookingOffer(m.Body) {
 					return fmt.Errorf("%w: business already offered a booking slot", ErrInvalidAIOutput)
 				}
-				if explicitCancellation(m.Body) || (m.Direction == waitingForDirection(a.WaitingFor) && resolvesAgreement(a.Kind, trigger.Body, m.Body)) {
+				if !ambiguousCommitmentReply(a.Kind, request.Messages, triggerIndex+1+offset, m.Body) &&
+					(cancelsAgreement(trigger.Body, m.Body) || (m.Direction == waitingForDirection(a.WaitingFor) && resolvesAgreement(a.Kind, trigger.Body, m.Body))) {
 					return fmt.Errorf("%w: pending agreement contradicts later message", ErrInvalidAIOutput)
 				}
 				if a.Kind == domain.AgreementBookingConfirmation && m.Direction == trigger.Direction && explicitAgreementTrigger(a.Kind, m.Body) {
@@ -158,7 +160,7 @@ func explicitAgreementTrigger(kind domain.AgreementKind, body string) bool {
 	b := strings.ToLower(body)
 	switch kind {
 	case domain.AgreementBookingConfirmation:
-		return containsAny(b, "запис", "брон", "свободно", "окно", "время", "предлага", "slot", "book", "appoint") || isDeferral(b)
+		return containsAny(b, "запис", "запиш", "брон", "свободно", "окно", "время", "предлага", "slot", "book", "appoint") || isDeferral(b)
 	case domain.AgreementReschedule:
 		return containsAny(b, "перенес", "перенос", "другое время", "позже", "подума", "отлож", "reschedul", "postpon", "later")
 	case domain.AgreementCommitment:
@@ -177,7 +179,7 @@ func isDeferral(body string) bool {
 // directly requests or confirms a booking (e.g. cancel Monday, book Tuesday).
 func RejectsBookingIntent(body string) bool {
 	b := strings.ToLower(body)
-	if !containsAny(b, "отмен", "не запис", "не брони", "не подтверж", "никакой записи", "запись не нужна", "запись не требуется") {
+	if !containsAny(b, "отмен", "не запис", "не запиш", "не брони", "не подтверж", "не ставьте", "не приед", "приезжать не буду", "никакой записи", "запись не нужна", "запись не требуется") {
 		return false
 	}
 	for _, clause := range strings.FieldsFunc(b, func(r rune) bool { return strings.ContainsRune(".,;!?", r) }) {
@@ -194,6 +196,24 @@ func ExplicitBookingEvidence(m ContextMessage) bool {
 	return m.Direction == "INCOMING" && (explicitBookingIntent(m.Body) || ConfirmsBookingOffer(m.Body))
 }
 
+// PossibleBookingEvidence excludes a purely informational request. It does not
+// manufacture intent: ambiguous positive wording is still assessed by the model.
+func PossibleBookingEvidence(m ContextMessage) bool {
+	if m.Direction != "INCOMING" || RejectsBookingIntent(m.Body) {
+		return false
+	}
+	b := strings.ToLower(m.Body)
+	if HasFollowUpDeferral(b) && !containsAny(b, "запишите", "забронируйте", "хочу записаться") {
+		return false
+	}
+	if containsAny(b, "когда-нибудь", "может быть", "не хочу купить", "не хочу заказать") || (strings.Contains(b, "возможно") && !strings.Contains(b, "возможно ли")) {
+		return false
+	}
+	information := containsAny(b, "какие услуги", "есть ли услуга", "есть ли у вас вообще", "нужны подробности", "расскажите", "что входит", "режим работы", "сколько стоит", "есть прайс", "пришлите прайс", "как оформить заказ", "интересует", "во сколько обойд", "есть скидки", "сколько брать", "могу оплатить", "сумма меня устраивает", "передумал окончательно", "больше не рассматриваю", "вопрос закрыт", "бюджет", "цену", "по цене", "расценк", "прайс", "стоимость", "денег", "скидк")
+	intent := explicitBookingIntent(b) || containsAny(b, "хочу попасть", "хотел бы попасть", "хотела бы попасть", "нужен визит", "есть место", "свободен ли", "доступно ли", "можно выбрать", "можно прийти", "можно ли прийти", "можно приехать", "можно ли приехать", "можно подъехать", "можно ли попасть")
+	return !information || intent
+}
+
 // PossibleBusinessCommitmentEvidence requires an outgoing future action anchor.
 // A model still decides whether this is a promise in the conversation context.
 func PossibleBusinessCommitmentEvidence(m ContextMessage) bool {
@@ -206,14 +226,23 @@ func PossibleBusinessCommitmentEvidence(m ContextMessage) bool {
 
 // HasExplicitPurchaseIntent identifies direct order language, excluding mere budgets.
 func HasExplicitPurchaseIntent(body string) bool {
-	b := strings.ToLower(body)
-	return containsAny(b, "хочу заказать", "оформите заказ", "заказываю", "хочу купить", "хочу заказать", "куплю", "покупаю", "оплачу", "i want to buy", "i'll buy", "place an order") && !containsAny(b, "не закаж", "не куп", "пока не", "отмен", "not buy", "don't buy")
+	// Assess independent clauses so cancelling one order does not suppress a
+	// new purchase request. This is only eligibility, never a generated fact.
+	for _, clause := range strings.FieldsFunc(strings.ToLower(body), func(r rune) bool { return strings.ContainsRune(".;!?", r) }) {
+		if containsAny(clause, "как оформить", "как купить", "как заказать", "не хочу", "не хотел", "не буду", "не закаж", "не куп", "не покуп", "не опла", "не оформ", "не надо", "не нужно", "пока не", "отмен", "если ", "возможно", "думаю", "not buy", "don't buy", "do not buy", "don't want", "do not want", "if ") {
+			continue
+		}
+		if containsAny(clause, "хочу заказать", "хотел бы заказать", "хотела бы заказать", "оформите заказ", "оформить заказ", "заказываю", "хочу купить", "хотел бы купить", "хотела бы купить", "хочу приобрести", "хотел бы приобрести", "хотела бы приобрести", "куплю", "покупаю", "оплачу", "беру этот", "беру эту", "беру комплект", "беру набор", "i want to buy", "i'd like to buy", "i would like to buy", "i'll buy", "place an order") {
+			return true
+		}
+	}
+	return false
 }
 
 func explicitBookingIntent(body string) bool {
 	b := strings.ToLower(body)
-	return containsAny(b, "запис", "брон", "свободно ли", "есть время", "свободное окно", "есть свободное", "можно к вам", "подходит", "book", "appointment") &&
-		!containsAny(b, "не запис", "не брони", "пока не", "отмен", "не подходит", "не подтверж", "никакой записи", "не требуется", "not book")
+	return containsAny(b, "запишите", "записаться", "записать меня", "записать нас", "хочу запись", "нужна запись", "есть запись", "есть ли запись", "забронируйте", "хочу забронировать", "бронирую", "свободно ли", "есть время", "свободное окно", "есть свободное", "можно к вам", "подходит", "book me", "want to book", "appointment") &&
+		!containsAny(b, "не запис", "не запиш", "не брони", "не ставьте", "не приед", "приезжать не буду", "пока не", "отмен", "не подходит", "не подтверж", "никакой записи", "не требуется", "not book")
 }
 
 func explicitResolution(kind domain.AgreementKind, body string) bool {
@@ -234,7 +263,7 @@ func explicitResolution(kind domain.AgreementKind, body string) bool {
 }
 
 func resolvesAgreement(kind domain.AgreementKind, trigger, reply string) bool {
-	if !explicitResolution(kind, reply) {
+	if !explicitResolution(kind, reply) || !agreementSubjectsCompatible(trigger, reply) {
 		return false
 	}
 	if kind != domain.AgreementCommitment {
@@ -262,6 +291,25 @@ func resolvesAgreement(kind domain.AgreementKind, trigger, reply string) bool {
 		}
 	}
 	return !known
+}
+
+// An object-free reply cannot prove which of several independent business
+// promises was fulfilled or cancelled. Named replies are matched separately
+// by agreementSubjectsCompatible.
+func ambiguousCommitmentReply(kind domain.AgreementKind, messages []ContextMessage, replyIndex int, reply string) bool {
+	if kind != domain.AgreementCommitment || len(agreementSubjects(reply)) != 0 {
+		return false
+	}
+	anchors := 0
+	for _, message := range messages[:replyIndex] {
+		if message.Direction == "OUTGOING" && explicitAgreementTrigger(kind, message.Body) {
+			anchors++
+			if anchors > 1 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func explicitCancellation(body string) bool {
@@ -345,7 +393,7 @@ func AgreementTransitionCandidates(kind domain.AgreementKind, actor domain.Agree
 	resolved, cancelled := false, false
 	for _, m := range later {
 		resolved = resolved || (m.Direction == waitingForDirection(actor) && resolvesAgreement(kind, trigger, m.Body))
-		cancelled = cancelled || explicitCancellation(m.Body)
+		cancelled = cancelled || cancelsAgreement(trigger, m.Body)
 	}
 	statuses := []domain.AgreementStatus{}
 	if !resolved && !cancelled {

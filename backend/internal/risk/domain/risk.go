@@ -342,28 +342,29 @@ type ActiveRiskSnapshot struct {
 // ConversationState — свежая авторитетная проекция, читаемая при выполнении
 // проверки по расписанию. В полезной нагрузке хранятся только идентификаторы.
 type ConversationState struct {
-	TenantID              string
-	OpportunityID         string
-	LocationID            string
-	ActiveOpportunity     bool
-	LastMeaningfulID      string
-	LastMeaningfulAt      time.Time
-	LastMeaningful        Direction
-	ResponseThreshold     time.Duration
-	AgreementThreshold    time.Duration
-	BusinessHours         BusinessHours
-	AgreementsCurrent     bool
-	V2SnapshotUnavailable bool
-	Agreements            []AgreementSignal
-	OpportunityStage      string
-	BookingIntent         *BookingIntentSignal
-	Commitment            *CommitmentSignal
-	Price                 *PriceSignal
-	FollowUp              *FollowUpSignal
-	LastOutgoing          *MessageRef
-	LastIncoming          *MessageRef
-	LatestOutcome         string
-	ActiveRisks           map[Type]ActiveRiskSnapshot
+	TenantID                string
+	OpportunityID           string
+	LocationID              string
+	ActiveOpportunity       bool
+	LastMeaningfulID        string
+	LastMeaningfulAt        time.Time
+	LastMeaningful          Direction
+	ResponseThreshold       time.Duration
+	AgreementThreshold      time.Duration
+	BusinessHours           BusinessHours
+	AgreementsCurrent       bool
+	V2SnapshotUnavailable   bool
+	Agreements              []AgreementSignal
+	OpportunityStage        string
+	BookingIntent           *BookingIntentSignal
+	Commitment              *CommitmentSignal
+	Price                   *PriceSignal
+	FollowUp                *FollowUpSignal
+	LastOutgoing            *MessageRef
+	LastIncoming            *MessageRef
+	LatestOutcome           string
+	ActiveRisks             map[Type]ActiveRiskSnapshot
+	ClosedAgreementTriggers map[Type]map[string]bool
 }
 
 // BookingIntentSignal — только проверенная производная семантика. Она не
@@ -379,6 +380,7 @@ type BookingIntentSignal struct {
 // AgreementSignal is a server-trusted observation from a current v2 snapshot.
 // Trigger text is read from the canonical message for deterministic deadlines.
 type AgreementSignal struct {
+	Superseded               bool
 	EvidenceMessageIDs       []string
 	Kind, WaitingFor, Status string
 	TriggerMessageID         string

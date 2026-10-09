@@ -386,11 +386,13 @@ func (reader *PostgresStateReader) CurrentState(
 	if agreementSchema != nil && *agreementSchema == "analyze-conversation.v2" && agreementRunID != nil {
 		state.AgreementsCurrent = true
 		var observations []struct {
-			EvidenceMessageIDs       []string `json:"evidenceMessageIds"`
-			Kind, WaitingFor, Status string
-			TriggerMessageID         string `json:"triggerMessageId"`
-			Confidence               float64
-			Trusted                  bool
+			EvidenceMessageIDs           []string `json:"evidenceMessageIds"`
+			Kind, WaitingFor, Status     string
+			TriggerMessageID             string `json:"triggerMessageId"`
+			SourceRunID                  string `json:"sourceRunId"`
+			SupersededByTriggerMessageID string `json:"supersededByTriggerMessageId"`
+			Confidence                   float64
+			Trusted                      bool
 		}
 		if err := json.Unmarshal(agreementsJSON, &observations); err != nil {
 			return domain.ConversationState{}, fmt.Errorf("разбор договорённостей: %w", err)
@@ -401,12 +403,18 @@ func (reader *PostgresStateReader) CurrentState(
 			}
 			var triggerAt time.Time
 			var triggerText string
-			// A deleted or cross-conversation trigger is never authoritative.
+			// Retained observations belong to their opportunity episode. A new
+			// deal must not inherit pending anchors from a previously closed one.
 			err := tx.QueryRow(ctx, `
-				SELECT sent_at, COALESCE(text, '') FROM messages
-				WHERE tenant_id = $1 AND conversation_id = (
-					SELECT conversation_id FROM opportunities WHERE tenant_id = $1 AND id = $2
-				) AND id = $3 AND provider_deleted_at IS NULL`,
+				SELECT m.sent_at, COALESCE(m.text, '') FROM messages m
+				JOIN opportunities current ON current.tenant_id=m.tenant_id AND current.conversation_id=m.conversation_id
+				WHERE m.tenant_id=$1 AND current.id=$2 AND m.id=$3 AND m.provider_deleted_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM opportunities prior
+					WHERE prior.tenant_id=current.tenant_id AND prior.conversation_id=current.conversation_id
+					AND prior.id<>current.id AND prior.closed_at<=current.opened_at
+					AND prior.closed_at>=m.sent_at
+				)`,
 				tenantID, opportunityID, observation.TriggerMessageID).Scan(&triggerAt, &triggerText)
 			if errors.Is(err, pgx.ErrNoRows) {
 				continue
@@ -414,12 +422,51 @@ func (reader *PostgresStateReader) CurrentState(
 			if err != nil {
 				return domain.ConversationState{}, fmt.Errorf("чтение основания договорённости: %w", err)
 			}
+			sourceRunID := observation.SourceRunID
+			if sourceRunID == "" {
+				sourceRunID = *agreementRunID
+			}
+			superseded := false
+			for _, next := range observations {
+				if observation.SupersededByTriggerMessageID != "" && next.TriggerMessageID == observation.SupersededByTriggerMessageID && next.Trusted && next.Kind == observation.Kind {
+					superseded = true
+					break
+				}
+			}
 			state.Agreements = append(state.Agreements, domain.AgreementSignal{
+				Superseded:         superseded,
 				EvidenceMessageIDs: observation.EvidenceMessageIDs, Kind: observation.Kind, WaitingFor: observation.WaitingFor, Status: observation.Status,
 				TriggerMessageID: observation.TriggerMessageID, TriggerAt: triggerAt.UTC(), TriggerText: triggerText,
-				Confidence: observation.Confidence, AIRunID: *agreementRunID,
+				Confidence: observation.Confidence, AIRunID: sourceRunID,
 			})
 		}
+	}
+
+	// Manual or automatic closure suppresses only this historical anchor. A
+	// different independent pending agreement may still open a new aggregate.
+	closed, err := tx.Query(ctx, `SELECT type, trigger_message_id::text FROM risk_signals
+		WHERE tenant_id=$1 AND opportunity_id=$2 AND status='RESOLVED'
+		AND type IN ('UNFINISHED_AGREEMENT','PROMISE_NOT_FULFILLED')`, tenantID, opportunityID)
+	if err != nil {
+		return domain.ConversationState{}, fmt.Errorf("чтение закрытых оснований: %w", err)
+	}
+	state.ClosedAgreementTriggers = make(map[domain.Type]map[string]bool)
+	for closed.Next() {
+		var kind domain.Type
+		var trigger string
+		if err := closed.Scan(&kind, &trigger); err != nil {
+			closed.Close()
+			return domain.ConversationState{}, err
+		}
+		if state.ClosedAgreementTriggers[kind] == nil {
+			state.ClosedAgreementTriggers[kind] = make(map[string]bool)
+		}
+		state.ClosedAgreementTriggers[kind][trigger] = true
+	}
+	closedErr := closed.Err()
+	closed.Close()
+	if closedErr != nil {
+		return domain.ConversationState{}, closedErr
 	}
 
 	rows, err := tx.Query(ctx, `

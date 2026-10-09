@@ -54,6 +54,7 @@ type Provider interface {
 
 type Thresholds struct {
 	MinimumPrecision         float64       `json:"minimumPrecision"`
+	MinimumFactRecall        float64       `json:"minimumFactRecall,omitempty"`
 	MinimumFactPrecision     float64       `json:"minimumFactPrecision"`
 	MinimumRecall            float64       `json:"minimumRecall"`
 	MinimumF1                float64       `json:"minimumF1"`
@@ -253,12 +254,18 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	}
 	factPrecisionPassed := true
 	for _, factType := range []domain.FactType{domain.FactBookingIntent, domain.FactBusinessCommitment, domain.FactPriceMentioned, domain.FactFollowUpCandidate} {
-		if report.ByFactType[string(factType)].Precision < thresholds.MinimumFactPrecision {
+		if counts, present := report.ByFactType[string(factType)]; present && counts.Precision < thresholds.MinimumFactPrecision {
 			factPrecisionPassed = false
 		}
 	}
 	if purchase, ok := report.ByFactType[string(domain.FactPurchaseIntent)]; ok && purchase.Precision < thresholds.MinimumFactPrecision {
 		factPrecisionPassed = false
+	}
+	factRecallPassed := true
+	for _, counts := range report.ByFactType {
+		if counts.TruePositive+counts.FalseNegative > 0 && counts.Recall < thresholds.MinimumFactRecall {
+			factRecallPassed = false
+		}
 	}
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 	report.P50MS = percentile(latencies, .50).Milliseconds()
@@ -273,7 +280,7 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	if maxP95 == 0 && thresholds.MaximumP95MS > 0 {
 		maxP95 = time.Duration(thresholds.MaximumP95MS) * time.Millisecond
 	}
-	report.Passed = report.Precision >= thresholds.MinimumPrecision && factPrecisionPassed && report.Recall >= thresholds.MinimumRecall && report.F1 >= thresholds.MinimumF1 && report.ExactRate >= thresholds.MinimumExactRate && report.ValidRate >= thresholds.MinimumValidRate && report.EvidenceExactRate >= thresholds.MinimumEvidenceExactRate && (maxP95 == 0 || p95 <= maxP95)
+	report.Passed = report.Precision >= thresholds.MinimumPrecision && factPrecisionPassed && factRecallPassed && report.Recall >= thresholds.MinimumRecall && report.F1 >= thresholds.MinimumF1 && report.ExactRate >= thresholds.MinimumExactRate && report.ValidRate >= thresholds.MinimumValidRate && report.EvidenceExactRate >= thresholds.MinimumEvidenceExactRate && (maxP95 == 0 || p95 <= maxP95)
 	if report.AgreementCases > 0 && report.AgreementExactRate < thresholds.MinimumExactRate {
 		report.Passed = false
 	}
@@ -321,7 +328,7 @@ func AuditCases(cases []Case) (Audit, error) {
 
 func validateCase(c Case) error {
 	input := c.Input
-	v2Prompt := input.PromptVersion == application.AnalysisPromptV7 || input.PromptVersion == application.AnalysisPromptV8
+	v2Prompt := input.PromptVersion == application.AnalysisPromptV7 || input.PromptVersion == application.AnalysisPromptV8 || input.PromptVersion == application.AnalysisPromptV9
 	if input.Task != "ANALYZE_CONVERSATION" || !application.SupportedAnalysisPrompt(input.PromptVersion) ||
 		(input.SchemaVersion != application.AnalysisSchemaV1 && input.SchemaVersion != application.AnalysisSchemaV2) ||
 		(input.SchemaVersion == application.AnalysisSchemaV2 && !v2Prompt) ||

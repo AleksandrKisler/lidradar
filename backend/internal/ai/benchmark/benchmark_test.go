@@ -219,3 +219,39 @@ func TestEmptyAgreementLabelsSurviveDatasetRoundTrip(t *testing.T) {
 		t.Fatalf("negative agreement label lost: %s; %v", encoded, err)
 	}
 }
+
+// An overall recall gate must not hide a completely missed smaller category.
+func TestPerFactRecallGate(t *testing.T) {
+	cases, digest, err := Load(strings.NewReader(dataset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := infrastructure.FakeProvider{Output: `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"message-1","summary":"Намерение пропущено.","facts":[]}`}
+	for _, threshold := range []float64{0, .9} {
+		report, err := Run(context.Background(), provider, cases, digest, Thresholds{MinimumFactRecall: threshold})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Passed != (threshold == 0) {
+			t.Fatalf("threshold=%v report=%+v", threshold, report)
+		}
+	}
+}
+
+func TestIntentRegressionDatasetLabels(t *testing.T) {
+	f, err := os.Open("../../../../models/datasets/intent_regression_v2.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cases, _, err := Load(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) < 25 {
+		t.Fatal("missing intent boundary scenarios")
+	}
+	if _, err := AuditCases(cases); err != nil {
+		t.Fatal(err)
+	}
+}
