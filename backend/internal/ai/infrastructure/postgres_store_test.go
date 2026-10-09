@@ -100,7 +100,7 @@ func TestPostgresAIQueuePersistsLifecycleAndSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"` + messageID + `","summary":"Клиент хочет записаться завтра.","facts":[{"type":"BOOKING_INTENT","value":true,"confidence":0.95,"evidenceMessageIds":["` + messageID + `"]}]}`
+	output := `{"schemaVersion":"analyze-conversation.v2","agreements":[],"analysisThroughMessageId":"` + messageID + `","summary":"Клиент хочет записаться завтра.","facts":[{"type":"BOOKING_INTENT","value":true,"confidence":0.95,"evidenceMessageIds":["` + messageID + `"]}]}`
 	completed, err := service.Complete(ctx, node.ID, "secret-with-at-least-32-characters", job.ID, run.ID, output)
 	if err != nil || completed.ApplicationStatus != domain.ApplicationApplied {
 		t.Fatalf("complete = %#v, %v", completed, err)
@@ -350,7 +350,7 @@ func TestPostgresFinalizationAtomicallyRejectsFreshnessRace(t *testing.T) {
 	store := &finalizationMutatingStore{
 		Store: postgresStore, pool: pool, tenantID: tenant.TenantID, conversationID: conversationID,
 	}
-	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, "test-model-v1")
+	builder := legacyAnalysisJobBuilder(pool, "test-model-v1")
 	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(builder)
 	secret := "freshness-secret-with-at-least-32-characters"
@@ -408,7 +408,7 @@ func TestPostgresAnalysisExitGateProtectsOpportunityAndRisk(t *testing.T) {
 	modelVersion := "stage-14-test-model"
 	secret := "stage-14-secret-with-at-least-32-characters"
 	store := infrastructure.NewPostgresStore(pool)
-	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, modelVersion)
+	builder := legacyAnalysisJobBuilder(pool, modelVersion)
 	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(builder)
 	node, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-STAGE-14", secret)
@@ -591,7 +591,7 @@ func TestPostgresFreshnessUsesLastAnalyzableMessage(t *testing.T) {
 	modelVersion := "stage-14-media-model"
 	secret := "stage-14-media-secret-with-at-least-32-characters"
 	store := infrastructure.NewPostgresStore(pool)
-	builder := infrastructure.NewPostgresAnalysisJobBuilder(pool, modelVersion)
+	builder := legacyAnalysisJobBuilder(pool, modelVersion)
 	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(builder)
 	node, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-STAGE-14-MEDIA", secret)

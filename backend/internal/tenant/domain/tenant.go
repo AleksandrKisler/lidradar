@@ -114,25 +114,29 @@ type AccountMembership struct {
 }
 
 type Location struct {
-	ID                       string         `json:"id"`
-	TenantID                 string         `json:"-"`
-	Name                     string         `json:"name"`
-	Timezone                 string         `json:"timezone"`
-	ResponseThresholdMinutes int            `json:"responseThresholdMinutes"`
-	Active                   bool           `json:"active"`
-	BusinessHours            []BusinessHour `json:"businessHours"`
-	CreatedAt                time.Time      `json:"createdAt"`
-	UpdatedAt                time.Time      `json:"updatedAt"`
+	ID                        string         `json:"id"`
+	TenantID                  string         `json:"-"`
+	Name                      string         `json:"name"`
+	Timezone                  string         `json:"timezone"`
+	ResponseThresholdMinutes  int            `json:"responseThresholdMinutes"`
+	AgreementThresholdMinutes int            `json:"agreementThresholdMinutes"`
+	Active                    bool           `json:"active"`
+	BusinessHours             []BusinessHour `json:"businessHours"`
+	CreatedAt                 time.Time      `json:"createdAt"`
+	UpdatedAt                 time.Time      `json:"updatedAt"`
 }
 
-func NewLocation(id, tenantID, name, timezone string, responseThresholdMinutes int, at time.Time) (Location, error) {
+func NewLocation(id, tenantID, name, timezone string, responseThresholdMinutes int, at time.Time, agreementThresholdMinutes ...int) (Location, error) {
 	if responseThresholdMinutes == 0 {
 		responseThresholdMinutes = 45
 	}
 	location := Location{
 		ID: id, TenantID: tenantID, Name: strings.TrimSpace(name), Timezone: strings.TrimSpace(timezone),
-		ResponseThresholdMinutes: responseThresholdMinutes, Active: true,
+		ResponseThresholdMinutes: responseThresholdMinutes, AgreementThresholdMinutes: 120, Active: true,
 		BusinessHours: []BusinessHour{}, CreatedAt: at.UTC(), UpdatedAt: at.UTC(),
+	}
+	if len(agreementThresholdMinutes) > 0 {
+		location.AgreementThresholdMinutes = agreementThresholdMinutes[0]
 	}
 	if location.Validate() != nil || at.IsZero() {
 		return Location{}, ErrInvalid
@@ -142,7 +146,8 @@ func NewLocation(id, tenantID, name, timezone string, responseThresholdMinutes i
 
 func (location Location) Validate() error {
 	if location.ID == "" || location.TenantID == "" || location.Name == "" || len(location.Name) > 200 ||
-		!validTimezone(location.Timezone) || location.ResponseThresholdMinutes < 1 || location.ResponseThresholdMinutes > 1440 {
+		!validTimezone(location.Timezone) || location.ResponseThresholdMinutes < 1 || location.ResponseThresholdMinutes > 1440 ||
+		location.AgreementThresholdMinutes < 1 || location.AgreementThresholdMinutes > 1440 {
 		return ErrInvalid
 	}
 	return nil

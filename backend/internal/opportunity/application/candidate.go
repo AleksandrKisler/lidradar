@@ -116,5 +116,17 @@ func (processor CandidateProcessor) Evaluate(
 	if err != nil {
 		return domain.Opportunity{}, false, mapDomainError(err)
 	}
+	if !wasCreated && created.ServiceID == nil {
+		if enricher, ok := processor.repository.(domain.ServiceEnricher); ok {
+			enriched, _, enrichErr := enricher.EnrichService(ctx, domain.ServiceEnrichment{
+				TenantID: tenantID, OpportunityID: created.ID, ServiceID: serviceID,
+				Currency: item.Currency, Amount: amount, Confidence: confidence, At: now,
+			})
+			if enrichErr != nil {
+				return domain.Opportunity{}, false, mapDomainError(enrichErr)
+			}
+			return enriched, false, nil
+		}
+	}
 	return created, wasCreated, nil
 }

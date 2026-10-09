@@ -313,10 +313,11 @@ func (handler Handler) updateOrganization(w http.ResponseWriter, r *http.Request
 }
 
 type locationRequest struct {
-	Name                     *string `json:"name"`
-	Timezone                 *string `json:"timezone"`
-	ResponseThresholdMinutes *int    `json:"responseThresholdMinutes"`
-	Active                   *bool   `json:"active"`
+	Name                      *string `json:"name"`
+	Timezone                  *string `json:"timezone"`
+	ResponseThresholdMinutes  *int    `json:"responseThresholdMinutes"`
+	AgreementThresholdMinutes *int    `json:"agreementThresholdMinutes"`
+	Active                    *bool   `json:"active"`
 }
 
 func (handler Handler) listLocations(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +351,22 @@ func (handler Handler) createLocation(w http.ResponseWriter, r *http.Request) {
 	if request.ResponseThresholdMinutes != nil {
 		threshold = *request.ResponseThresholdMinutes
 	}
-	location, err := handler.service.CreateLocation(r.Context(), actorID, tenantID, *request.Name, *request.Timezone, threshold)
+	agreementThreshold := 120
+	if request.AgreementThresholdMinutes != nil {
+		agreementThreshold = *request.AgreementThresholdMinutes
+	}
+	var location domain.Location
+	var err error
+	if configured, ok := handler.service.(interface {
+		CreateLocationWithAgreementThreshold(context.Context, string, string, string, string, int, int) (domain.Location, error)
+	}); ok {
+		location, err = configured.CreateLocationWithAgreementThreshold(r.Context(), actorID, tenantID, *request.Name, *request.Timezone, threshold, agreementThreshold)
+	} else if request.AgreementThresholdMinutes == nil {
+		location, err = handler.service.CreateLocation(r.Context(), actorID, tenantID, *request.Name, *request.Timezone, threshold)
+	} else {
+		writeError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request")
+		return
+	}
 	if handleError(w, r, err) {
 		return
 	}
@@ -373,7 +389,7 @@ func (handler Handler) updateLocation(w http.ResponseWriter, r *http.Request) {
 	}
 	location, err := handler.service.UpdateLocation(r.Context(), actorID, tenantID, locationID, application.LocationUpdate{
 		Name: request.Name, Timezone: request.Timezone,
-		ResponseThresholdMinutes: request.ResponseThresholdMinutes, Active: request.Active,
+		ResponseThresholdMinutes: request.ResponseThresholdMinutes, AgreementThresholdMinutes: request.AgreementThresholdMinutes, Active: request.Active,
 	})
 	if handleError(w, r, err) {
 		return

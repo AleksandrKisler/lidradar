@@ -97,11 +97,11 @@ type Risks struct {
 	ByType []RiskTypeMetrics `json:"byType"`
 }
 
-// RiskTypes перечисляет типы в порядке ТЗ §27; отчёт всегда содержит все пять.
+// RiskTypes перечисляет типы в порядке ТЗ §27; отчёт всегда содержит все типы.
 func RiskTypes() []string {
 	return []string{
 		"NO_RESPONSE", "CUSTOMER_SILENT_AFTER_PRICE", "BOOKING_NOT_CONFIRMED",
-		"PROMISE_NOT_FULFILLED", "FOLLOW_UP_CANDIDATE",
+		"PROMISE_NOT_FULFILLED", "FOLLOW_UP_CANDIDATE", "UNFINISHED_AGREEMENT",
 	}
 }
 
@@ -136,11 +136,16 @@ type Outcomes struct {
 // Confirmed — подтверждённые события окна; ConfirmedRecovered — их часть с
 // атрибуцией RECOVERED (ТЗ §39); ConfirmedPayments — число событий.
 type Revenue struct {
-	Currency           string `json:"currency"`
-	Potential          string `json:"potential"`
-	Confirmed          string `json:"confirmed"`
-	ConfirmedRecovered string `json:"confirmedRecovered"`
-	ConfirmedPayments  int    `json:"confirmedPayments"`
+	// Active opportunities with an active risk detected in the selected period;
+	// each opportunity contributes at most once, in the report currency.
+	AtRiskPotential                  string `json:"atRiskPotential"`
+	AtRiskOpportunities              int    `json:"atRiskOpportunities"`
+	AtRiskUnknownAmountOpportunities int    `json:"atRiskUnknownAmountOpportunities"`
+	Currency                         string `json:"currency"`
+	Potential                        string `json:"potential"`
+	Confirmed                        string `json:"confirmed"`
+	ConfirmedRecovered               string `json:"confirmedRecovered"`
+	ConfirmedPayments                int    `json:"confirmedPayments"`
 }
 
 // DailyPoint — показатели одного календарного дня организации (для графика

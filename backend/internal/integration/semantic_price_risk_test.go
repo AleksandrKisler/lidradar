@@ -92,7 +92,7 @@ func TestSemanticPriceRiskFlow(t *testing.T) {
 	}
 
 	aiStore := aiinfrastructure.NewPostgresStore(fixture.pool)
-	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(fixture.pool, aiapplication.DefaultModelVersion)
+	aiBuilder := legacyAnalysisJobBuilder(fixture.pool, aiapplication.DefaultModelVersion)
 	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).
 		WithAnalysisDebounce(0).WithStaleJobBuilder(aiBuilder)
 	nodeSecret := "stage-18-node-secret-with-at-least-32-characters"

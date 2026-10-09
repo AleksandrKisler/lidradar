@@ -59,11 +59,21 @@ func (reader *PostgresStateReader) CurrentState(
 	if reader == nil || reader.pool == nil || tenantID == "" || opportunityID == "" {
 		return domain.ConversationState{}, application.ErrStateIncomplete
 	}
+	tx, err := reader.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return domain.ConversationState{}, fmt.Errorf("начало чтения состояния риска: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var state domain.ConversationState
 	var locationID, messageID, direction *string
 	var sentAt *time.Time
 	var timezone *string
 	var threshold *int
+	var agreementThreshold *int
+	var agreementSchema *string
+	var agreementRunID *string
+	var anySchema *string
+	var agreementsJSON []byte
 	var bookingConfidence *float64
 	var bookingRunID, bookingMessageID *string
 	var bookingAt *time.Time
@@ -85,10 +95,12 @@ func (reader *PostgresStateReader) CurrentState(
 	var lastIncomingAt *time.Time
 	var latestOutcome *string
 	var activeRisks []byte
-	err := reader.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT o.tenant_id, o.id, o.stage,
 		       o.`+activeOpportunityStages+`,
-		       c.location_id, l.timezone, l.response_threshold_minutes,
+		       c.location_id, l.timezone, l.response_threshold_minutes, l.agreement_threshold_minutes,
+		       summary.schema_version, summary.ai_run_id::text, summary.agreements,
+		       summary_any.schema_version,
 		       message.id, message.sent_at, message.direction,
 		       booking.confidence, booking.ai_run_id,
 		       booking.evidence_message_id, booking.evidence_at,
@@ -129,6 +141,8 @@ func (reader *PostgresStateReader) CurrentState(
 		  ON summary.tenant_id = c.tenant_id AND summary.conversation_id = c.id
 		 AND summary.base_conversation_revision = c.revision
 		 AND summary.analysis_through_message_id = analysis_message.id
+		LEFT JOIN conversation_summaries AS summary_any
+		  ON summary_any.tenant_id = c.tenant_id AND summary_any.conversation_id = c.id
 		LEFT JOIN LATERAL (
 			SELECT (fact.value ->> 'confidence')::double precision AS confidence,
 			       summary.ai_run_id::text AS ai_run_id,
@@ -152,6 +166,9 @@ func (reader *PostgresStateReader) CurrentState(
 		-- сообщений, поэтому читается из последней проекции без условия ревизии.
 		LEFT JOIN conversation_summaries AS commitment_summary
 		  ON commitment_summary.tenant_id = c.tenant_id AND commitment_summary.conversation_id = c.id
+		 AND (commitment_summary.schema_version <> 'analyze-conversation.v2'
+		      OR (commitment_summary.base_conversation_revision = c.revision
+		          AND commitment_summary.analysis_through_message_id = analysis_message.id))
 		LEFT JOIN LATERAL (
 			SELECT (fact.value ->> 'confidence')::double precision AS confidence,
 			       commitment_summary.ai_run_id::text AS ai_run_id,
@@ -281,7 +298,8 @@ func (reader *PostgresStateReader) CurrentState(
 		) AS active_risks ON TRUE
 		WHERE o.tenant_id = $1 AND o.id = $2`, tenantID, opportunityID).Scan(
 		&state.TenantID, &state.OpportunityID, &state.OpportunityStage,
-		&state.ActiveOpportunity, &locationID, &timezone, &threshold,
+		&state.ActiveOpportunity, &locationID, &timezone, &threshold, &agreementThreshold,
+		&agreementSchema, &agreementRunID, &agreementsJSON, &anySchema,
 		&messageID, &sentAt, &direction, &bookingConfidence, &bookingRunID,
 		&bookingMessageID, &bookingAt,
 		&commitmentConfidence, &commitmentRunID, &commitmentMessageID,
@@ -298,7 +316,7 @@ func (reader *PostgresStateReader) CurrentState(
 	if err != nil {
 		return domain.ConversationState{}, fmt.Errorf("чтение актуального состояния риска: %w", err)
 	}
-	if locationID == nil || timezone == nil || threshold == nil || messageID == nil || sentAt == nil || direction == nil {
+	if locationID == nil || timezone == nil || threshold == nil || agreementThreshold == nil || messageID == nil || sentAt == nil || direction == nil {
 		return domain.ConversationState{}, application.ErrStateIncomplete
 	}
 	state.LocationID = *locationID
@@ -362,9 +380,49 @@ func (reader *PostgresStateReader) CurrentState(
 		}
 	}
 	state.ResponseThreshold = time.Duration(*threshold) * time.Minute
+	state.AgreementThreshold = time.Duration(*agreementThreshold) * time.Minute
 	state.BusinessHours = domain.BusinessHours{Timezone: *timezone, Weekly: make(map[time.Weekday][]domain.BusinessPeriod)}
+	state.V2SnapshotUnavailable = anySchema != nil && *anySchema == "analyze-conversation.v2" && agreementSchema == nil
+	if agreementSchema != nil && *agreementSchema == "analyze-conversation.v2" && agreementRunID != nil {
+		state.AgreementsCurrent = true
+		var observations []struct {
+			EvidenceMessageIDs       []string `json:"evidenceMessageIds"`
+			Kind, WaitingFor, Status string
+			TriggerMessageID         string `json:"triggerMessageId"`
+			Confidence               float64
+			Trusted                  bool
+		}
+		if err := json.Unmarshal(agreementsJSON, &observations); err != nil {
+			return domain.ConversationState{}, fmt.Errorf("разбор договорённостей: %w", err)
+		}
+		for _, observation := range observations {
+			if !observation.Trusted || observation.TriggerMessageID == "" {
+				continue
+			}
+			var triggerAt time.Time
+			var triggerText string
+			// A deleted or cross-conversation trigger is never authoritative.
+			err := tx.QueryRow(ctx, `
+				SELECT sent_at, COALESCE(text, '') FROM messages
+				WHERE tenant_id = $1 AND conversation_id = (
+					SELECT conversation_id FROM opportunities WHERE tenant_id = $1 AND id = $2
+				) AND id = $3 AND provider_deleted_at IS NULL`,
+				tenantID, opportunityID, observation.TriggerMessageID).Scan(&triggerAt, &triggerText)
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return domain.ConversationState{}, fmt.Errorf("чтение основания договорённости: %w", err)
+			}
+			state.Agreements = append(state.Agreements, domain.AgreementSignal{
+				EvidenceMessageIDs: observation.EvidenceMessageIDs, Kind: observation.Kind, WaitingFor: observation.WaitingFor, Status: observation.Status,
+				TriggerMessageID: observation.TriggerMessageID, TriggerAt: triggerAt.UTC(), TriggerText: triggerText,
+				Confidence: observation.Confidence, AIRunID: *agreementRunID,
+			})
+		}
+	}
 
-	rows, err := reader.pool.Query(ctx, `
+	rows, err := tx.Query(ctx, `
 		SELECT weekday, is_closed,
 		       COALESCE(to_char(opens_at, 'HH24:MI'), ''),
 		       COALESCE(to_char(closes_at, 'HH24:MI'), '')

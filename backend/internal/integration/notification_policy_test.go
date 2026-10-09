@@ -50,7 +50,7 @@ func TestNotificationPolicySettingsAndQuietHoursFlow(t *testing.T) {
 	stranger := register(t, fixture.handler, "policy-stranger@example.com", "Посторонний")
 
 	defaults := listPreferences(t, fixture, owner.Cookie, tenantID)
-	if len(defaults) != 5 || defaults[0].RiskType != "NO_RESPONSE" || defaults[0].DeliveryMode != "IMMEDIATE" || !defaults[0].IsDefault ||
+	if len(defaults) != 6 || defaults[0].RiskType != "NO_RESPONSE" || defaults[0].DeliveryMode != "IMMEDIATE" || !defaults[0].IsDefault ||
 		defaults[0].MinimumSeverity != "LOW" || !defaults[0].InAppEnabled || !defaults[0].TelegramEnabled || defaults[0].QuietHoursEnabled ||
 		defaults[0].QuietHoursStart == nil || *defaults[0].QuietHoursStart != "22:00" || *defaults[0].QuietHoursEnd != "08:00" ||
 		defaults[0].DigestTime != "09:00" || defaults[0].Timezone != "Europe/Moscow" ||

@@ -705,12 +705,20 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 		if marshalErr != nil {
 			return domain.Run{}, fmt.Errorf("кодирование смысловых фактов AI: %w", marshalErr)
 		}
+		storedAgreements := summary.Agreements
+		if storedAgreements == nil {
+			storedAgreements = []domain.Agreement{}
+		}
+		agreements, marshalErr := json.Marshal(storedAgreements)
+		if marshalErr != nil {
+			return domain.Run{}, fmt.Errorf("кодирование договорённостей AI: %w", marshalErr)
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO conversation_summaries(
 				tenant_id, conversation_id, summary_text, base_conversation_revision,
 				analysis_through_message_id, model_version, prompt_version,
-				schema_version, ai_run_id, semantic_facts, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+				schema_version, ai_run_id, semantic_facts, agreements, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12)
 			ON CONFLICT (tenant_id, conversation_id) DO UPDATE
 			SET summary_text = EXCLUDED.summary_text,
 			    base_conversation_revision = EXCLUDED.base_conversation_revision,
@@ -720,12 +728,13 @@ func (store *PostgresStore) Finalize(ctx context.Context, final application.Fina
 			    schema_version = EXCLUDED.schema_version,
 			    ai_run_id = EXCLUDED.ai_run_id,
 			    semantic_facts = EXCLUDED.semantic_facts,
+			    agreements = EXCLUDED.agreements,
 			    updated_at = EXCLUDED.updated_at
 			WHERE conversation_summaries.base_conversation_revision <= EXCLUDED.base_conversation_revision`,
 			summary.TenantID, summary.ConversationID, summary.Text,
 			summary.BaseConversationRevision, summary.AnalysisThroughMessageID,
 			summary.ModelVersion, summary.PromptVersion, summary.SchemaVersion,
-			summary.RunID, facts, summary.UpdatedAt.UTC()); err != nil {
+			summary.RunID, facts, agreements, summary.UpdatedAt.UTC()); err != nil {
 			return domain.Run{}, mapAIStoreError("сохранение производного резюме", err)
 		}
 		if err := store.appendAnalysisAppliedEvent(ctx, tx, *summary, final.CompletedAt); err != nil {

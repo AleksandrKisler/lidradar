@@ -44,7 +44,7 @@ func ValidFeedbackReason(reason FeedbackReason) bool {
 func Types() []Type {
 	return []Type{
 		TypeNoResponse, TypeCustomerSilentAfterPrice, TypeBookingNotConfirmed,
-		TypePromiseNotFulfilled, TypeFollowUpCandidate,
+		TypePromiseNotFulfilled, TypeFollowUpCandidate, TypeUnfinishedAgreement,
 	}
 }
 

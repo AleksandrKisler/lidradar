@@ -52,7 +52,7 @@ func TestSemanticFollowUpRiskFlow(t *testing.T) {
 	path := "/api/v1/webhooks/GENERIC_WEBHOOK/" + tenantID + "/" + connectionID
 
 	aiStore := aiinfrastructure.NewPostgresStore(fixture.pool)
-	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(fixture.pool, aiapplication.DefaultModelVersion)
+	aiBuilder := legacyAnalysisJobBuilder(fixture.pool, aiapplication.DefaultModelVersion)
 	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).
 		WithAnalysisDebounce(0).WithStaleJobBuilder(aiBuilder)
 	nodeSecret := "stage-19-node-secret-with-at-least-32-characters"

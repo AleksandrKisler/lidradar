@@ -141,7 +141,7 @@ func (r *PostgresRepository) ListLocations(ctx context.Context, tenantID string)
 		return nil, domain.ErrInvalid
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, name, timezone, response_threshold_minutes, active, created_at, updated_at
+		SELECT id, tenant_id, name, timezone, response_threshold_minutes, agreement_threshold_minutes, active, created_at, updated_at
 		FROM locations
 		WHERE tenant_id = $1
 		ORDER BY created_at, id`, tenantID)
@@ -177,7 +177,7 @@ func (r *PostgresRepository) Location(ctx context.Context, tenantID, locationID 
 		return domain.Location{}, false, domain.ErrInvalid
 	}
 	location, found, err := scanLocation(r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, name, timezone, response_threshold_minutes, active, created_at, updated_at
+		SELECT id, tenant_id, name, timezone, response_threshold_minutes, agreement_threshold_minutes, active, created_at, updated_at
 		FROM locations
 		WHERE tenant_id = $1 AND id = $2`, tenantID, locationID))
 	if err != nil || !found {
@@ -192,10 +192,10 @@ func (r *PostgresRepository) CreateLocation(ctx context.Context, tenantID string
 		return domain.ErrInvalid
 	}
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO locations(id, tenant_id, name, timezone, response_threshold_minutes, active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		INSERT INTO locations(id, tenant_id, name, timezone, response_threshold_minutes, agreement_threshold_minutes, active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		location.ID, tenantID, location.Name, location.Timezone, location.ResponseThresholdMinutes,
-		location.Active, location.CreatedAt, location.UpdatedAt,
+		location.AgreementThresholdMinutes, location.Active, location.CreatedAt, location.UpdatedAt,
 	)
 	if err != nil {
 		return mapPostgresError("insert location", err)
@@ -209,10 +209,10 @@ func (r *PostgresRepository) UpdateLocation(ctx context.Context, tenantID, locat
 	}
 	updated, found, err := scanLocation(r.pool.QueryRow(ctx, `
 		UPDATE locations
-		SET name = $3, timezone = $4, response_threshold_minutes = $5, active = $6, updated_at = $7
+		SET name = $3, timezone = $4, response_threshold_minutes = $5, agreement_threshold_minutes = $6, active = $7, updated_at = $8
 		WHERE tenant_id = $1 AND id = $2
-		RETURNING id, tenant_id, name, timezone, response_threshold_minutes, active, created_at, updated_at`,
-		tenantID, locationID, location.Name, location.Timezone, location.ResponseThresholdMinutes, location.Active, location.UpdatedAt,
+		RETURNING id, tenant_id, name, timezone, response_threshold_minutes, agreement_threshold_minutes, active, created_at, updated_at`,
+		tenantID, locationID, location.Name, location.Timezone, location.ResponseThresholdMinutes, location.AgreementThresholdMinutes, location.Active, location.UpdatedAt,
 	))
 	if err != nil || !found {
 		return updated, found, err
@@ -233,7 +233,7 @@ func (r *PostgresRepository) ReplaceBusinessHours(ctx context.Context, tenantID,
 	location, found, err := scanLocation(tx.QueryRow(ctx, `
 		UPDATE locations SET timezone = $3, updated_at = $4
 		WHERE tenant_id = $1 AND id = $2
-		RETURNING id, tenant_id, name, timezone, response_threshold_minutes, active, created_at, updated_at`,
+		RETURNING id, tenant_id, name, timezone, response_threshold_minutes, agreement_threshold_minutes, active, created_at, updated_at`,
 		tenantID, locationID, timezone, at,
 	))
 	if err != nil || !found {
@@ -333,7 +333,7 @@ func scanLocation(row rowScanner) (domain.Location, bool, error) {
 
 func scanLocationValues(row rowScanner) (domain.Location, error) {
 	var location domain.Location
-	if err := row.Scan(&location.ID, &location.TenantID, &location.Name, &location.Timezone, &location.ResponseThresholdMinutes, &location.Active, &location.CreatedAt, &location.UpdatedAt); err != nil {
+	if err := row.Scan(&location.ID, &location.TenantID, &location.Name, &location.Timezone, &location.ResponseThresholdMinutes, &location.AgreementThresholdMinutes, &location.Active, &location.CreatedAt, &location.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Location{}, err
 		}

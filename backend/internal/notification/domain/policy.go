@@ -20,13 +20,14 @@ const (
 	RiskPromiseNotFulfilled      RiskType = "PROMISE_NOT_FULFILLED"
 	RiskCustomerSilentAfterPrice RiskType = "CUSTOMER_SILENT_AFTER_PRICE"
 	RiskFollowUpCandidate        RiskType = "FOLLOW_UP_CANDIDATE"
+	RiskUnfinishedAgreement      RiskType = "UNFINISHED_AGREEMENT"
 )
 
 // RiskTypes перечисляет типы в каноническом порядке ТЗ §46.
 func RiskTypes() []RiskType {
 	return []RiskType{
 		RiskNoResponse, RiskBookingNotConfirmed, RiskPromiseNotFulfilled,
-		RiskCustomerSilentAfterPrice, RiskFollowUpCandidate,
+		RiskCustomerSilentAfterPrice, RiskFollowUpCandidate, RiskUnfinishedAgreement,
 	}
 }
 
@@ -133,7 +134,7 @@ type Preference struct {
 // DefaultDeliveryMode возвращает режим по умолчанию ТЗ §46.
 func DefaultDeliveryMode(riskType RiskType) DeliveryMode {
 	switch riskType {
-	case RiskCustomerSilentAfterPrice, RiskFollowUpCandidate:
+	case RiskCustomerSilentAfterPrice, RiskFollowUpCandidate, RiskUnfinishedAgreement:
 		return ModeDigest
 	default:
 		return ModeImmediate

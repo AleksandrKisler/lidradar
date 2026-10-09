@@ -206,7 +206,7 @@ func TestPostgresAnalyticsSummaryCountsRawFactsInsidePeriod(t *testing.T) {
 	if summary.Outcomes != (domain.Outcomes{Booked: 1, Paid: 1, Lost: 1}) {
 		t.Fatalf("исходы = %#v", summary.Outcomes)
 	}
-	if summary.Revenue != (domain.Revenue{Currency: "RUB", Potential: "5000.00", Confirmed: "50000.00", ConfirmedRecovered: "47000.00", ConfirmedPayments: 2}) {
+	if summary.Revenue != (domain.Revenue{AtRiskPotential: "5000.00", AtRiskOpportunities: 1, Currency: "RUB", Potential: "5000.00", Confirmed: "50000.00", ConfirmedRecovered: "47000.00", ConfirmedPayments: 2}) {
 		t.Fatalf("деньги = %#v", summary.Revenue)
 	}
 	// Дневной ряд и разбивка атрибуций (GAP-API-007): дни — по часовому поясу
@@ -258,5 +258,43 @@ func TestPostgresAnalyticsSummaryCountsRawFactsInsidePeriod(t *testing.T) {
 	if blank, err := store.Summary(ctx, pair.A.TenantID, empty, "RUB"); err != nil || blank.Messages.Total != 0 || blank.Revenue.Potential != "0.00" ||
 		blank.Revenue.ConfirmedRecovered != "0.00" || blank.Opportunities.Created != 0 {
 		t.Fatalf("пустое окно = %#v, %v", blank, err)
+	}
+}
+
+func TestAtRiskRevenueCountsUnknownAndDeduplicatesOpportunities(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	pair := testsupport.TwoTenants(t, ctx, pool)
+	seed := analyticsSeed{t: t, pool: pool, tenant: pair.A, ctx: ctx}
+	connection, contact := seed.id(), seed.id()
+	stamp := at("2026-08-10T10:00:00Z")
+	seed.exec(`INSERT INTO channel_connections(id,tenant_id,location_id,provider,name,status,capabilities,verification_secret_hash,created_at,updated_at)
+ VALUES($1,$2,$3,'TEST','Analytic test','ACTIVE','["RECEIVE_MESSAGES"]',repeat('0',64),$4,$4)`, connection, pair.A.TenantID, pair.A.LocationID, stamp)
+	seed.exec(`INSERT INTO contacts(id,tenant_id,display_name) VALUES($1,$2,'Client')`, contact, pair.A.TenantID)
+	knownConversation := seed.conversation(connection, contact, &stamp)
+	unknownConversation := seed.conversation(connection, contact, &stamp)
+	known := seed.opportunity(knownConversation, "NEW", "18000", "RUB", stamp, nil)
+	unknown := seed.opportunity(unknownConversation, "NEW", "1", "RUB", stamp, nil)
+	seed.exec(`UPDATE opportunities SET estimated_amount=NULL WHERE id=$1`, unknown)
+	message := seed.message(knownConversation, connection, "INCOMING", stamp)
+	unknownMessage := seed.message(unknownConversation, connection, "INCOMING", stamp)
+	seed.risk(known, message, "OPEN", stamp, nil, nil, nil)
+	seed.risk(unknown, unknownMessage, "OPEN", stamp, nil, nil, nil)
+	seed.exec(`INSERT INTO risk_signals(id,tenant_id,opportunity_id,location_id,type,severity,status,reason_code,reason_text,source,risk_engine_version,trigger_message_id,detected_at,due_at,created_at,updated_at)
+ VALUES($1,$2,$3,$4,'UNFINISHED_AGREEMENT','MEDIUM','OPEN','AWAITING_CUSTOMER','Ожидает подтверждения','RULE','unfinished-agreement/v1',$5,$6,$6,$6,$6)`, seed.id(), pair.A.TenantID, known, pair.A.LocationID, message, stamp)
+	location, _ := time.LoadLocation("Europe/Moscow")
+	period, _ := domain.ResolvePeriod("2026-08-01", "2026-08-31", stamp, location)
+	summary, err := NewPostgresStore(pool).Summary(ctx, pair.A.TenantID, period, "RUB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Revenue.AtRiskPotential != "18000.00" || summary.Revenue.AtRiskOpportunities != 2 || summary.Revenue.AtRiskUnknownAmountOpportunities != 1 {
+		t.Fatalf("risk revenue: %#v", summary.Revenue)
+	}
+	// A resolved risk no longer contributes an unknown-valued active deal.
+	seed.exec(`UPDATE risk_signals SET status='RESOLVED',resolved_at=$2 WHERE opportunity_id=$1`, unknown, stamp.Add(time.Hour))
+	summary, err = NewPostgresStore(pool).Summary(ctx, pair.A.TenantID, period, "RUB")
+	if err != nil || summary.Revenue.AtRiskOpportunities != 1 || summary.Revenue.AtRiskUnknownAmountOpportunities != 0 {
+		t.Fatalf("resolved: %#v %v", summary.Revenue, err)
 	}
 }

@@ -67,7 +67,7 @@ func TestSummaryRequiresOwnerPermissionAndValidPeriod(t *testing.T) {
 		!repository.period.To.Equal(time.Date(2026, 8, 31, 21, 0, 0, 0, time.UTC)) {
 		t.Fatalf("сводка = %#v, ошибка = %v, окно хранилища = %#v", summary, err, repository.period)
 	}
-	if len(summary.Risks.ByType) != 5 || summary.Risks.Detected != 1 || summary.Risks.Acted != 1 || summary.Revenue.Currency != "RUB" ||
+	if len(summary.Risks.ByType) != len(domain.RiskTypes()) || summary.Risks.Detected != 1 || summary.Risks.Acted != 1 || summary.Revenue.Currency != "RUB" ||
 		summary.Messages.Total != 3 || summary.Revenue.ConfirmedRecovered != "47000.00" {
 		t.Fatalf("нормализация сводки = %#v", summary)
 	}

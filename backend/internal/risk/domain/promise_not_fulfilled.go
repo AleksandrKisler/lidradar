@@ -45,6 +45,12 @@ func (policy PromiseNotFulfilledPolicy) Evaluate(state ConversationState, at tim
 	if !state.ActiveOpportunity {
 		return Decision{Resolve: true}, nil
 	}
+	if state.AgreementsCurrent {
+		return policy.evaluateV2(state, at)
+	}
+	if state.V2SnapshotUnavailable {
+		return Decision{}, nil
+	}
 	// Активный риск закрывается, как только компания написала клиенту после
 	// сообщения-основания, даже если проекция AI уже не содержит факта.
 	active, hasActive := state.ActiveRisks[TypePromiseNotFulfilled]
@@ -92,6 +98,63 @@ func (policy PromiseNotFulfilledPolicy) Evaluate(state ConversationState, at tim
 		Severity: SeverityHigh, PolicyVersion: policy.Version(),
 		ReasonCode: "PROMISE_NOT_FULFILLED_AFTER_DUE", Reason: reason,
 		DueAt: due, Source: SourceHybrid, Confidence: &confidence, AIRunID: &runID,
+	}
+	return decision, nil
+}
+
+// v2 requires an explicit semantic resolution. A greeting, emoji, or unrelated
+// outgoing message cannot fulfill a commitment.
+func (policy PromiseNotFulfilledPolicy) evaluateV2(state ConversationState, at time.Time) (Decision, error) {
+	active, hasActive := state.ActiveRisks[TypePromiseNotFulfilled]
+	var pending *AgreementSignal
+	resolvedActive := false
+	for i := range state.Agreements {
+		a := &state.Agreements[i]
+		if a.Kind != "COMMITMENT" || a.WaitingFor != "BUSINESS" || a.Confidence < StrongCommitmentConfidence {
+			continue
+		}
+		if hasActive && a.TriggerMessageID == active.TriggerMessageID &&
+			(a.Status == "RESOLVED" || a.Status == "CANCELLED") {
+			resolvedActive = true
+		}
+		if a.Status == "PENDING" && (pending == nil || a.TriggerAt.After(pending.TriggerAt)) {
+			pending = a
+		}
+	}
+	if pending == nil {
+		return Decision{Resolve: resolvedActive}, nil
+	}
+	if hasActive && active.TriggerMessageID != pending.TriggerMessageID && !active.TriggerAt.IsZero() &&
+		!pending.TriggerAt.After(active.TriggerAt) {
+		return Decision{}, nil
+	}
+	location, err := time.LoadLocation(state.BusinessHours.Timezone)
+	if err != nil {
+		return Decision{}, ErrInvalidBusinessHours
+	}
+	promised, parsed := ParsePromisedDue(pending.TriggerText, pending.TriggerAt, location)
+	due := promised.At
+	if !parsed {
+		if due, err = state.BusinessHours.AddBusinessTime(pending.TriggerAt, PromiseFallbackThreshold); err != nil {
+			return Decision{}, err
+		}
+	}
+	decision := Decision{DueAt: due, TriggerMessageID: pending.TriggerMessageID, PolicyVersion: "promise-not-fulfilled/v2",
+		Resolve: hasActive && active.TriggerMessageID != pending.TriggerMessageID}
+	if at.Before(due) {
+		return decision, nil
+	}
+	reason := "Компания дала клиенту обязательство, которое ещё не выполнено"
+	if parsed {
+		reason = fmt.Sprintf("Компания обещала действие к %s («%s»), подтверждения выполнения пока нет",
+			due.In(location).Format("02.01 15:04"), promised.Phrase)
+	}
+	confidence, runID := pending.Confidence, pending.AIRunID
+	decision.Finding = &Finding{
+		TenantID: state.TenantID, OpportunityID: state.OpportunityID, LocationID: state.LocationID,
+		TriggerMessageID: pending.TriggerMessageID, Severity: SeverityHigh, PolicyVersion: "promise-not-fulfilled/v2",
+		ReasonCode: "PROMISE_NOT_FULFILLED_AFTER_DUE", Reason: reason, DueAt: due,
+		Source: SourceHybrid, Confidence: &confidence, AIRunID: &runID,
 	}
 	return decision, nil
 }

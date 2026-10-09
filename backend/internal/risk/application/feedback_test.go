@@ -160,7 +160,7 @@ func TestFeedbackValidationPermissionsAndConsent(t *testing.T) {
 	}
 }
 
-// Отчёт содержит все пять типов, окно по умолчанию — с начала до сейчас, а
+// Отчёт содержит все типы, окно по умолчанию — с начала до сейчас, а
 // доступ ограничен разрешением analytics.read.
 func TestPrecisionReportCoversEveryTypeAndRequiresAnalytics(t *testing.T) {
 	store, _, _, service := feedbackFixture(t)
@@ -171,7 +171,7 @@ func TestPrecisionReportCoversEveryTypeAndRequiresAnalytics(t *testing.T) {
 		t.Fatalf("менеджер получил метрики: %v", err)
 	}
 	report, err := service.Precision(context.Background(), "owner", "tenant", time.Time{}, time.Time{})
-	if err != nil || len(report.Items) != 5 || report.MinimumCoverage != domain.MilestoneCoverage ||
+	if err != nil || len(report.Items) != 6 || report.MinimumCoverage != domain.MilestoneCoverage ||
 		!store.lastWindow[0].Equal(time.Unix(0, 0)) || !store.lastWindow[1].Equal(time.Date(2026, 9, 3, 13, 0, 0, 0, time.UTC)) {
 		t.Fatalf("отчёт = %#v, ошибка = %v, окно = %v", report, err, store.lastWindow)
 	}

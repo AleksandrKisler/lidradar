@@ -14,13 +14,16 @@ import (
 
 const (
 	AnalysisSchemaV1      = "analyze-conversation.v1"
+	AnalysisSchemaV2      = "analyze-conversation.v2"
 	AnalysisPromptV1      = "analyze-conversation.prompt.v1"
 	AnalysisPromptV2      = "analyze-conversation.prompt.v2"
 	AnalysisPromptV3      = "analyze-conversation.prompt.v3"
 	AnalysisPromptV4      = "analyze-conversation.prompt.v4"
 	AnalysisPromptV5      = "analyze-conversation.prompt.v5"
 	AnalysisPromptV6      = "analyze-conversation.prompt.v6"
-	CurrentAnalysisPrompt = AnalysisPromptV6
+	AnalysisPromptV7      = "analyze-conversation.prompt.v7"
+	AnalysisPromptV8      = "analyze-conversation.prompt.v8"
+	CurrentAnalysisPrompt = AnalysisPromptV8
 	DefaultModelVersion   = "lidradar-main-v1"
 	MaxContextMessages    = 20
 	MaxContextRunes       = 12000 // консервативная оценка для цели в 3000 токенов
@@ -30,7 +33,7 @@ var ErrInvalidAIOutput = errors.New("invalid AI output")
 
 func SupportedAnalysisPrompt(version string) bool {
 	switch version {
-	case AnalysisPromptV1, AnalysisPromptV2, AnalysisPromptV3, AnalysisPromptV4, AnalysisPromptV5, AnalysisPromptV6:
+	case AnalysisPromptV1, AnalysisPromptV2, AnalysisPromptV3, AnalysisPromptV4, AnalysisPromptV5, AnalysisPromptV6, AnalysisPromptV7, AnalysisPromptV8:
 		return true
 	default:
 		return false
@@ -61,6 +64,10 @@ type AnalyzeConversationRequestV1 struct {
 	Messages                 []ContextMessage `json:"messages"`
 }
 
+// AnalyzeConversationRequestV2 uses the same bounded context envelope; its
+// schema and prompt versions select the new result contract.
+type AnalyzeConversationRequestV2 = AnalyzeConversationRequestV1
+
 // BuildAnalysisContext строит ограниченный версионированный запрос из последних
 // сообщений. Идентификатор организации нужен для проверки, но намеренно не
 // передаётся модели.
@@ -85,7 +92,7 @@ func BuildAnalysisContext(c ConversationContext) (AnalyzeConversationRequestV1, 
 		}
 	}
 	return AnalyzeConversationRequestV1{
-		Task: "ANALYZE_CONVERSATION", SchemaVersion: AnalysisSchemaV1, PromptVersion: CurrentAnalysisPrompt,
+		Task: "ANALYZE_CONVERSATION", SchemaVersion: AnalysisSchemaV2, PromptVersion: CurrentAnalysisPrompt,
 		ConversationID: c.ConversationID, BaseConversationRevision: c.Revision,
 		AnalysisThroughMessageID: messages[len(messages)-1].ID, CompanyContext: c.CompanyContext,
 		ConversationSummary: c.ExistingSummary, Messages: messages,
@@ -134,25 +141,90 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 	if utf8.RuneCountInString(result.Summary) > 2000 {
 		return result, fmt.Errorf("%w: summary too long", ErrInvalidAIOutput)
 	}
-	normalizedFacts := make([]domain.SemanticFact, 0, len(result.Facts))
-	factIndexes := make(map[domain.FactType]int, len(result.Facts))
-	for i, fact := range result.Facts {
+	normalizedFacts, err := validateFacts(result.Facts, false)
+	if err != nil {
+		return result, err
+	}
+	result.Facts = normalizedFacts
+	return result, nil
+}
+
+// ValidateAnalysisResultV2 keeps v2 authority separate from legacy v1 runs.
+// In particular, a v1 result cannot create agreements or purchase intent.
+func ValidateAnalysisResultV2(raw string, throughMessageID string) (domain.AnalysisResultV2, error) {
+	var result domain.AnalysisResultV2
+	dec := json.NewDecoder(bytes.NewBufferString(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&result); err != nil {
+		return result, fmt.Errorf("%w: JSON: %v", ErrInvalidAIOutput, err)
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return result, fmt.Errorf("%w: trailing data after JSON", ErrInvalidAIOutput)
+	}
+	if result.SchemaVersion != AnalysisSchemaV2 || result.AnalysisThroughMessageID == "" || (throughMessageID != "" && result.AnalysisThroughMessageID != throughMessageID) || strings.TrimSpace(result.Summary) == "" || result.Facts == nil || result.Agreements == nil || utf8.RuneCountInString(result.Summary) > 2000 {
+		return result, fmt.Errorf("%w: missing or mismatched required field", ErrInvalidAIOutput)
+	}
+	var err error
+	result.Facts, err = validateFacts(result.Facts, true)
+	if err != nil {
+		return result, err
+	}
+	seen := make(map[string]domain.AgreementObservation)
+	for i := range result.Agreements {
+		a := &result.Agreements[i]
+		switch a.Kind {
+		case domain.AgreementBookingConfirmation, domain.AgreementReschedule, domain.AgreementCommitment, domain.AgreementPurchaseBlocker:
+		default:
+			return result, fmt.Errorf("%w: unknown agreement kind", ErrInvalidAIOutput)
+		}
+		if a.WaitingFor != domain.AgreementCustomer && a.WaitingFor != domain.AgreementBusiness {
+			return result, fmt.Errorf("%w: unknown waiting actor", ErrInvalidAIOutput)
+		}
+		if a.Status != domain.AgreementPending && a.Status != domain.AgreementResolved && a.Status != domain.AgreementCancelled {
+			return result, fmt.Errorf("%w: unknown agreement status", ErrInvalidAIOutput)
+		}
+		if a.Confidence < 0 || a.Confidence > 1 || strings.TrimSpace(a.TriggerMessageID) == "" || len(a.EvidenceMessageIDs) == 0 {
+			return result, fmt.Errorf("%w: incomplete agreement", ErrInvalidAIOutput)
+		}
+		for _, id := range a.EvidenceMessageIDs {
+			if strings.TrimSpace(id) == "" {
+				return result, fmt.Errorf("%w: empty agreement evidence", ErrInvalidAIOutput)
+			}
+		}
+		a.EvidenceMessageIDs = appendUnique(nil, a.EvidenceMessageIDs...)
+		key := string(a.Kind) + "\x00" + a.TriggerMessageID
+		if _, duplicate := seen[key]; duplicate {
+			return result, fmt.Errorf("%w: duplicate or contradictory agreement", ErrInvalidAIOutput)
+		}
+		seen[key] = *a
+	}
+	return result, nil
+}
+
+func validateFacts(facts []domain.SemanticFact, allowPurchase bool) ([]domain.SemanticFact, error) {
+	normalizedFacts := make([]domain.SemanticFact, 0, len(facts))
+	factIndexes := make(map[domain.FactType]int, len(facts))
+	for i, fact := range facts {
 		switch fact.Type {
 		case domain.FactBookingIntent, domain.FactBusinessCommitment, domain.FactPriceMentioned, domain.FactFollowUpCandidate:
+		case domain.FactPurchaseIntent:
+			if !allowPurchase {
+				return nil, fmt.Errorf("%w: fact %d has unknown type", ErrInvalidAIOutput, i)
+			}
 		default:
-			return result, fmt.Errorf("%w: fact %d has unknown type", ErrInvalidAIOutput, i)
+			return nil, fmt.Errorf("%w: fact %d has unknown type", ErrInvalidAIOutput, i)
 		}
 		if fact.Confidence < 0 || fact.Confidence > 1 {
-			return result, fmt.Errorf("%w: fact %d confidence out of range", ErrInvalidAIOutput, i)
+			return nil, fmt.Errorf("%w: fact %d confidence out of range", ErrInvalidAIOutput, i)
 		}
 		if len(fact.EvidenceMessageIDs) == 0 {
-			return result, fmt.Errorf("%w: fact %d has no evidence", ErrInvalidAIOutput, i)
+			return nil, fmt.Errorf("%w: fact %d has no evidence", ErrInvalidAIOutput, i)
 		}
 		evidenceSeen := make(map[string]struct{}, len(fact.EvidenceMessageIDs))
 		normalizedEvidence := make([]string, 0, len(fact.EvidenceMessageIDs))
 		for _, id := range fact.EvidenceMessageIDs {
 			if strings.TrimSpace(id) == "" {
-				return result, fmt.Errorf("%w: empty evidence id", ErrInvalidAIOutput)
+				return nil, fmt.Errorf("%w: empty evidence id", ErrInvalidAIOutput)
 			}
 			if _, duplicated := evidenceSeen[id]; !duplicated {
 				evidenceSeen[id] = struct{}{}
@@ -166,18 +238,18 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 				fact.Amount = &amount
 			}
 			if fact.Value && (fact.Amount == nil || !validDecimalAmount(*fact.Amount) || !validCurrency(fact.Currency)) {
-				return result, fmt.Errorf("%w: mentioned price lacks amount/currency", ErrInvalidAIOutput)
+				return nil, fmt.Errorf("%w: mentioned price lacks amount/currency", ErrInvalidAIOutput)
 			}
 			if !fact.Value && (fact.Amount != nil || fact.Currency != "") {
-				return result, fmt.Errorf("%w: unmentioned price has amount/currency", ErrInvalidAIOutput)
+				return nil, fmt.Errorf("%w: unmentioned price has amount/currency", ErrInvalidAIOutput)
 			}
 		} else if fact.Amount != nil || fact.Currency != "" {
-			return result, fmt.Errorf("%w: price fields on non-price fact", ErrInvalidAIOutput)
+			return nil, fmt.Errorf("%w: price fields on non-price fact", ErrInvalidAIOutput)
 		}
 		if index, duplicated := factIndexes[fact.Type]; duplicated {
 			existing := &normalizedFacts[index]
 			if existing.Value != fact.Value || existing.Currency != fact.Currency || !sameOptionalString(existing.Amount, fact.Amount) {
-				return result, fmt.Errorf("%w: fact %d contradicts type %s", ErrInvalidAIOutput, i, fact.Type)
+				return nil, fmt.Errorf("%w: fact %d contradicts type %s", ErrInvalidAIOutput, i, fact.Type)
 			}
 			if fact.Confidence < existing.Confidence {
 				existing.Confidence = fact.Confidence
@@ -188,8 +260,7 @@ func ValidateAnalysisResultV1(raw string, throughMessageID string) (domain.Analy
 		factIndexes[fact.Type] = len(normalizedFacts)
 		normalizedFacts = append(normalizedFacts, fact)
 	}
-	result.Facts = normalizedFacts
-	return result, nil
+	return normalizedFacts, nil
 }
 
 func sameOptionalString(left, right *string) bool {

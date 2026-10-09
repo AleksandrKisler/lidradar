@@ -52,11 +52,11 @@ func TestRisksFromTypesFillsCanonicalOrderAndTotals(t *testing.T) {
 		{RiskType: "FOLLOW_UP_CANDIDATE", RiskCounters: RiskCounters{Detected: 2, Resolved: 1}},
 		{RiskType: "NO_RESPONSE", RiskCounters: RiskCounters{Detected: 3, Acted: 2, FalsePositive: 1}},
 	})
-	if len(risks.ByType) != 5 || risks.ByType[0].RiskType != "NO_RESPONSE" || risks.ByType[4].RiskType != "FOLLOW_UP_CANDIDATE" ||
+	if len(risks.ByType) != len(RiskTypes()) || risks.ByType[0].RiskType != "NO_RESPONSE" || risks.ByType[4].RiskType != "FOLLOW_UP_CANDIDATE" ||
 		risks.ByType[1].Detected != 0 || risks.Detected != 5 || risks.Acted != 2 || risks.Resolved != 1 || risks.FalsePositive != 1 {
 		t.Fatalf("разрез по типам = %#v", risks)
 	}
-	if empty := RisksFromTypes(nil); len(empty.ByType) != 5 || empty.Detected != 0 {
+	if empty := RisksFromTypes(nil); len(empty.ByType) != len(RiskTypes()) || empty.Detected != 0 {
 		t.Fatalf("пустой разрез = %#v", empty)
 	}
 }

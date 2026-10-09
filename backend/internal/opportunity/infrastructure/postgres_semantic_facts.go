@@ -49,6 +49,9 @@ func (source *PostgresSemanticFacts) trustedIncomingFact(
 		SELECT summary.ai_run_id::text,
 		       to_char(max((item.value ->> 'confidence')::numeric), 'FM0.000')
 		FROM conversation_summaries AS summary
+		JOIN conversations AS conversation ON conversation.tenant_id=summary.tenant_id
+		  AND conversation.id=summary.conversation_id AND conversation.status='ACTIVE'
+		  AND conversation.revision=summary.base_conversation_revision
 		CROSS JOIN LATERAL jsonb_array_elements(summary.semantic_facts) AS item(value)
 		WHERE summary.tenant_id = $1 AND summary.conversation_id = $2 AND summary.ai_run_id = $3
 		  AND item.value ->> 'type' = $4
@@ -61,6 +64,8 @@ func (source *PostgresSemanticFacts) trustedIncomingFact(
 			  ON message.tenant_id = summary.tenant_id AND message.conversation_id = summary.conversation_id
 			 AND message.id::text = evidence.id AND message.direction = 'INCOMING'
 			 AND message.provider_deleted_at IS NULL
+			 AND message.sent_at > COALESCE((SELECT max(closed_at) FROM opportunities
+			     WHERE tenant_id=summary.tenant_id AND conversation_id=summary.conversation_id), '-infinity'::timestamptz)
 		  )
 		GROUP BY summary.ai_run_id`, tenantID, conversationID, runID, factType,
 	).Scan(&fact.RunID, &fact.Confidence)
@@ -88,6 +93,9 @@ func (source *PostgresSemanticFacts) TrustedPriceMentioned(
 		       to_char((item.value ->> 'confidence')::numeric, 'FM0.000'),
 		       item.value ->> 'amount', item.value ->> 'currency'
 		FROM conversation_summaries AS summary
+		JOIN conversations AS conversation ON conversation.tenant_id=summary.tenant_id
+		  AND conversation.id=summary.conversation_id AND conversation.status='ACTIVE'
+		  AND conversation.revision=summary.base_conversation_revision
 		CROSS JOIN LATERAL jsonb_array_elements(summary.semantic_facts) AS item(value)
 		WHERE summary.tenant_id = $1 AND summary.conversation_id = $2 AND summary.ai_run_id = $3
 		  AND item.value ->> 'type' = 'PRICE_MENTIONED'
@@ -101,6 +109,8 @@ func (source *PostgresSemanticFacts) TrustedPriceMentioned(
 			  ON message.tenant_id = summary.tenant_id AND message.conversation_id = summary.conversation_id
 			 AND message.id::text = evidence.id AND message.direction = 'OUTGOING'
 			 AND message.provider_deleted_at IS NULL
+			 AND message.sent_at > COALESCE((SELECT max(closed_at) FROM opportunities
+			     WHERE tenant_id=summary.tenant_id AND conversation_id=summary.conversation_id), '-infinity'::timestamptz)
 		  )
 		ORDER BY (item.value ->> 'confidence')::numeric DESC
 		LIMIT 1`, tenantID, conversationID, runID,

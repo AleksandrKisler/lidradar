@@ -154,7 +154,7 @@ func TestAnalyticsSummaryMatchesRawDomainData(t *testing.T) {
 	requireStatus(t, revenue, http.StatusCreated)
 
 	after := fetchAnalytics(t, fixture, owner.Cookie, tenantID, "")
-	if after.Risks.Detected != 1 || after.Risks.Acted != 1 || len(after.Risks.ByType) != 5 || after.Risks.ByType[0].RiskType != "NO_RESPONSE" ||
+	if after.Risks.Detected != 1 || after.Risks.Acted != 1 || len(after.Risks.ByType) != 6 || after.Risks.ByType[0].RiskType != "NO_RESPONSE" ||
 		after.Risks.ByType[0].Acted != 1 || after.Outcomes.Booked != 1 || after.Outcomes.Paid != 1 || after.Outcomes.Lost != 0 ||
 		after.Revenue.Currency != "RUB" || after.Revenue.Potential != "5000.00" || after.Revenue.Confirmed != "47000.00" ||
 		after.Revenue.ConfirmedRecovered != "47000.00" || after.Revenue.ConfirmedPayments != 1 || after.Opportunities.Created != 1 {

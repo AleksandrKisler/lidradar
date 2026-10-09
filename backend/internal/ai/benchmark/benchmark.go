@@ -40,11 +40,12 @@ const GoldenDigestMismatch = "GOLDEN_DIGEST_MISMATCH"
 func (split Split) Valid() bool { return split == SplitGolden || split == SplitDev }
 
 type Case struct {
-	Version  string                                   `json:"version"`
-	ID       string                                   `json:"id"`
-	Split    Split                                    `json:"split"`
-	Input    application.AnalyzeConversationRequestV1 `json:"input"`
-	Expected []domain.SemanticFact                    `json:"expectedFacts"`
+	Version            string                                   `json:"version"`
+	ID                 string                                   `json:"id"`
+	Split              Split                                    `json:"split"`
+	Input              application.AnalyzeConversationRequestV1 `json:"input"`
+	Expected           []domain.SemanticFact                    `json:"expectedFacts"`
+	ExpectedAgreements []domain.AgreementObservation            `json:"expectedAgreements"`
 }
 
 type Provider interface {
@@ -78,6 +79,9 @@ type Report struct {
 	ExactRate                float64                `json:"exactRate"`
 	ValidRate                float64                `json:"validRate"`
 	EvidenceExactRate        float64                `json:"evidenceExactRate"`
+	AgreementCases           int                    `json:"agreementCases,omitempty"`
+	AgreementExact           int                    `json:"agreementExact,omitempty"`
+	AgreementExactRate       float64                `json:"agreementExactRate,omitempty"`
 	P50MS                    int64                  `json:"p50Ms"`
 	P95MS                    int64                  `json:"p95Ms"`
 	P99MS                    int64                  `json:"p99Ms"`
@@ -97,10 +101,12 @@ type FactMetrics struct {
 }
 
 type Failure struct {
-	CaseID   string                `json:"caseId"`
-	Reason   string                `json:"reason"`
-	Expected []domain.SemanticFact `json:"expectedFacts,omitempty"`
-	Actual   []domain.SemanticFact `json:"actualFacts,omitempty"`
+	CaseID             string                        `json:"caseId"`
+	Reason             string                        `json:"reason"`
+	Expected           []domain.SemanticFact         `json:"expectedFacts,omitempty"`
+	Actual             []domain.SemanticFact         `json:"actualFacts,omitempty"`
+	ExpectedAgreements []domain.AgreementObservation `json:"expectedAgreements,omitempty"`
+	ActualAgreements   []domain.AgreementObservation `json:"actualAgreements,omitempty"`
 }
 
 func Load(r io.Reader) ([]Case, string, error) {
@@ -163,6 +169,9 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	matchedFacts := 0
 	exactEvidence := 0
 	for _, c := range cases {
+		if c.ExpectedAgreements != nil {
+			report.AgreementCases++
+		}
 		if !slices.Contains(report.PromptVersions, c.Input.PromptVersion) {
 			report.PromptVersions = append(report.PromptVersions, c.Input.PromptVersion)
 		}
@@ -183,7 +192,19 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "ошибка вызова модели", Expected: c.Expected})
 			continue
 		}
-		result, err := application.ValidateAnalysisResultV1(raw, c.Input.AnalysisThroughMessageID)
+		var result domain.AnalysisResultV1
+		var agreements []domain.AgreementObservation
+		if c.Input.SchemaVersion == application.AnalysisSchemaV2 {
+			var v2 domain.AnalysisResultV2
+			v2, err = application.ValidateAnalysisResultV2(raw, c.Input.AnalysisThroughMessageID)
+			if err == nil {
+				err = application.ValidateAgreementEvidence(v2, prompt)
+			}
+			result = domain.AnalysisResultV1{SchemaVersion: v2.SchemaVersion, AnalysisThroughMessageID: v2.AnalysisThroughMessageID, Summary: v2.Summary, Facts: v2.Facts}
+			agreements = v2.Agreements
+		} else {
+			result, err = application.ValidateAnalysisResultV1(raw, c.Input.AnalysisThroughMessageID)
+		}
 		if err == nil {
 			err = application.ValidatePriceEvidence(result, prompt)
 		}
@@ -195,16 +216,24 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 			continue
 		}
 		actual := application.TrustedFacts(result)
+		agreementsMatch := c.ExpectedAgreements == nil || sameAgreementStates(agreements, c.ExpectedAgreements)
+		if c.ExpectedAgreements != nil && agreementsMatch {
+			report.AgreementExact++
+		}
 		tp, fp, fn, evidenceMatches := compareDetailed(actual, c.Expected, report.ByFactType)
 		matchedFacts += tp
 		exactEvidence += evidenceMatches
 		report.TruePositive += tp
 		report.FalsePositive += fp
 		report.FalseNegative += fn
-		if fp == 0 && fn == 0 {
+		if fp == 0 && fn == 0 && agreementsMatch {
 			report.Exact++
 		} else {
-			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "факты не совпали с разметкой", Expected: c.Expected, Actual: actual})
+			reason := "факты не совпали с разметкой"
+			if !agreementsMatch {
+				reason = "состояния договорённостей не совпали с разметкой"
+			}
+			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: reason, Expected: c.Expected, Actual: actual, ExpectedAgreements: c.ExpectedAgreements, ActualAgreements: agreements})
 		}
 	}
 	report.Precision = ratio(report.TruePositive, report.TruePositive+report.FalsePositive)
@@ -213,6 +242,9 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	report.ExactRate = ratio(report.Exact, report.Cases)
 	report.ValidRate = ratio(report.Cases-report.Invalid, report.Cases)
 	report.EvidenceExactRate = ratio(exactEvidence, matchedFacts)
+	if report.AgreementCases > 0 {
+		report.AgreementExactRate = ratio(report.AgreementExact, report.AgreementCases)
+	}
 	for factType, counts := range report.ByFactType {
 		counts.Precision = ratio(counts.TruePositive, counts.TruePositive+counts.FalsePositive)
 		counts.Recall = ratio(counts.TruePositive, counts.TruePositive+counts.FalseNegative)
@@ -224,6 +256,9 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 		if report.ByFactType[string(factType)].Precision < thresholds.MinimumFactPrecision {
 			factPrecisionPassed = false
 		}
+	}
+	if purchase, ok := report.ByFactType[string(domain.FactPurchaseIntent)]; ok && purchase.Precision < thresholds.MinimumFactPrecision {
+		factPrecisionPassed = false
 	}
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 	report.P50MS = percentile(latencies, .50).Milliseconds()
@@ -239,6 +274,9 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 		maxP95 = time.Duration(thresholds.MaximumP95MS) * time.Millisecond
 	}
 	report.Passed = report.Precision >= thresholds.MinimumPrecision && factPrecisionPassed && report.Recall >= thresholds.MinimumRecall && report.F1 >= thresholds.MinimumF1 && report.ExactRate >= thresholds.MinimumExactRate && report.ValidRate >= thresholds.MinimumValidRate && report.EvidenceExactRate >= thresholds.MinimumEvidenceExactRate && (maxP95 == 0 || p95 <= maxP95)
+	if report.AgreementCases > 0 && report.AgreementExactRate < thresholds.MinimumExactRate {
+		report.Passed = false
+	}
 	return report, nil
 }
 
@@ -283,7 +321,11 @@ func AuditCases(cases []Case) (Audit, error) {
 
 func validateCase(c Case) error {
 	input := c.Input
-	if input.Task != "ANALYZE_CONVERSATION" || input.SchemaVersion != application.AnalysisSchemaV1 || !application.SupportedAnalysisPrompt(input.PromptVersion) {
+	v2Prompt := input.PromptVersion == application.AnalysisPromptV7 || input.PromptVersion == application.AnalysisPromptV8
+	if input.Task != "ANALYZE_CONVERSATION" || !application.SupportedAnalysisPrompt(input.PromptVersion) ||
+		(input.SchemaVersion != application.AnalysisSchemaV1 && input.SchemaVersion != application.AnalysisSchemaV2) ||
+		(input.SchemaVersion == application.AnalysisSchemaV2 && !v2Prompt) ||
+		(input.SchemaVersion == application.AnalysisSchemaV1 && v2Prompt) {
 		return errors.New("несовместимый входной контракт")
 	}
 	if input.ConversationID == "" || input.BaseConversationRevision < 1 || len(input.Messages) == 0 || len(input.Messages) > application.MaxContextMessages {
@@ -306,6 +348,10 @@ func validateCase(c Case) error {
 	for _, fact := range c.Expected {
 		switch fact.Type {
 		case domain.FactBookingIntent, domain.FactBusinessCommitment, domain.FactPriceMentioned, domain.FactFollowUpCandidate:
+		case domain.FactPurchaseIntent:
+			if input.SchemaVersion != application.AnalysisSchemaV2 {
+				return fmt.Errorf("неизвестный ожидаемый тип факта %q", fact.Type)
+			}
 		default:
 			return fmt.Errorf("неизвестный ожидаемый тип факта %q", fact.Type)
 		}
@@ -329,7 +375,40 @@ func validateCase(c Case) error {
 			return fmt.Errorf("неценовой факт %q содержит поля цены", fact.Type)
 		}
 	}
+	if c.ExpectedAgreements != nil {
+		if input.SchemaVersion != application.AnalysisSchemaV2 {
+			return errors.New("договорённости требуют контракта v2")
+		}
+		for _, a := range c.ExpectedAgreements {
+			if a.Confidence != 1 {
+				return errors.New("ожидаемая договорённость должна иметь уверенность 1")
+			}
+		}
+		raw, _ := json.Marshal(domain.AnalysisResultV2{SchemaVersion: input.SchemaVersion, AnalysisThroughMessageID: input.AnalysisThroughMessageID, Summary: "Разметка синтетического случая.", Facts: c.Expected, Agreements: c.ExpectedAgreements})
+		result, err := application.ValidateAnalysisResultV2(string(raw), input.AnalysisThroughMessageID)
+		if err != nil {
+			return err
+		}
+		prompt, _ := application.EncodeAnalysisRequest(input)
+		if err := application.ValidateAgreementEvidence(result, prompt); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func sameAgreementStates(actual, expected []domain.AgreementObservation) bool {
+	keys := func(items []domain.AgreementObservation) []string {
+		result := []string{}
+		for _, a := range items {
+			if a.Confidence >= .85 {
+				result = append(result, string(a.Kind)+"|"+string(a.WaitingFor)+"|"+string(a.Status)+"|"+a.TriggerMessageID)
+			}
+		}
+		sort.Strings(result)
+		return result
+	}
+	return slices.Equal(keys(actual), keys(expected))
 }
 
 func conversationFingerprint(c Case) string {

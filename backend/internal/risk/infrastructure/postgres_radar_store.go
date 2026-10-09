@@ -404,7 +404,8 @@ func (store *PostgresRadarStore) Summary(
 		), risky_opportunities AS (
 			SELECT DISTINCT opportunity_id FROM matching
 		), potential_money AS (
-			SELECT COALESCE(sum(o.estimated_amount), 0)::numeric(20,2)::text AS potential_revenue
+			SELECT COALESCE(sum(o.estimated_amount), 0)::numeric(20,2)::text AS potential_revenue,
+			       count(*) AS opportunities_at_risk, count(*) FILTER (WHERE o.estimated_amount IS NULL) AS unknown_amount
 			FROM risky_opportunities AS risky
 			JOIN opportunities AS o ON o.tenant_id = $1 AND o.id = risky.opportunity_id
 			JOIN organizations AS organization ON organization.id = o.tenant_id
@@ -423,12 +424,13 @@ func (store *PostgresRadarStore) Summary(
 			  AND event.currency = organization.default_currency
 		)
 		SELECT counts.open_risks, counts.critical_risks,
-		       potential_money.potential_revenue,
+		       potential_money.potential_revenue, potential_money.opportunities_at_risk, potential_money.unknown_amount,
 		       recovered_money.confirmed_recovered_revenue
 		FROM counts CROSS JOIN potential_money CROSS JOIN recovered_money`
 	var summary application.Summary
 	if err := store.pool.QueryRow(ctx, query, arguments...).Scan(
 		&summary.OpenRisks, &summary.CriticalRisks, &summary.PotentialRevenue,
+		&summary.OpportunitiesAtRisk, &summary.OpportunitiesWithUnknownAmount,
 		&summary.ConfirmedRecoveredRevenue,
 	); err != nil {
 		return application.Summary{}, mapRadarError("чтение сводки Radar", err)

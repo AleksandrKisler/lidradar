@@ -2,12 +2,73 @@ package benchmark
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
+	"lidradar/backend/internal/ai/application"
 	"lidradar/backend/internal/ai/domain"
 	"lidradar/backend/internal/ai/infrastructure"
 )
+
+func TestAgreementLabelsCannotPassOnFactsAlone(t *testing.T) {
+	c := Case{Version: DatasetVersion, ID: "agreement-test", Split: SplitDev,
+		Input:              application.AnalyzeConversationRequestV1{Task: "ANALYZE_CONVERSATION", SchemaVersion: application.AnalysisSchemaV2, PromptVersion: application.AnalysisPromptV8, ConversationID: "test", BaseConversationRevision: 1, AnalysisThroughMessageID: "m", Messages: []application.ContextMessage{{ID: "m", Direction: "INCOMING", Body: "Хочу записаться"}}},
+		Expected:           []domain.SemanticFact{{Type: domain.FactBookingIntent, Value: true, Confidence: 1, EvidenceMessageIDs: []string{"m"}}},
+		ExpectedAgreements: []domain.AgreementObservation{{Kind: domain.AgreementBookingConfirmation, WaitingFor: domain.AgreementBusiness, Status: domain.AgreementPending, TriggerMessageID: "m", EvidenceMessageIDs: []string{"m"}, Confidence: 1}},
+	}
+	encoded, _ := json.Marshal(c)
+	cases, digest, err := Load(strings.NewReader(string(encoded)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		agreement  bool
+		confidence float64
+		passed     bool
+	}{
+		{"missing", false, 0, false}, {"weak", true, .7, false}, {"strong", true, .96, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := domain.AnalysisResultV2{SchemaVersion: application.AnalysisSchemaV2, AnalysisThroughMessageID: "m", Summary: "Запрос записи.", Facts: c.Expected, Agreements: []domain.AgreementObservation{}}
+			if tc.agreement {
+				a := c.ExpectedAgreements[0]
+				a.Confidence = tc.confidence
+				result.Agreements = append(result.Agreements, a)
+			}
+			raw, _ := json.Marshal(result)
+			r, err := Run(context.Background(), infrastructure.FakeProvider{Output: string(raw)}, cases, digest, Thresholds{MinimumExactRate: 1, MinimumValidRate: 1})
+			if err != nil || r.Passed != tc.passed || r.AgreementCases != 1 {
+				t.Fatalf("report: %+v, error: %v", r, err)
+			}
+		})
+	}
+}
+
+func TestSyntheticAgreementDatasetHasValidIndependentLabels(t *testing.T) {
+	f, err := os.Open("../../../../models/datasets/agreements_dev_v2.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cases, _, err := Load(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) < 20 {
+		t.Fatal("missing agreement lifecycle cases")
+	}
+	for _, c := range cases {
+		if c.Split != SplitDev || c.ExpectedAgreements == nil {
+			t.Fatalf("unlabelled or non-development case: %s", c.ID)
+		}
+	}
+	if _, err := AuditCases(cases); err != nil {
+		t.Fatal(err)
+	}
+}
 
 const dataset = `{"version":"lidradar-ai-benchmark.v1","id":"booking-001","split":"GOLDEN","input":{"task":"ANALYZE_CONVERSATION","schemaVersion":"analyze-conversation.v1","promptVersion":"analyze-conversation.prompt.v5","conversationId":"conversation-1","baseConversationRevision":1,"analysisThroughMessageId":"message-1","companyContext":"Детейлинг","messages":[{"id":"message-1","direction":"INCOMING","body":"Можно завтра?"}]},"expectedFacts":[{"type":"BOOKING_INTENT","value":true,"confidence":1,"evidenceMessageIds":["message-1"]}]}
 `
@@ -33,6 +94,23 @@ func TestLoadRunAndGoldenProtection(t *testing.T) {
 	}
 	if len(report.PromptVersions) != 1 || report.PromptVersions[0] != cases[0].Input.PromptVersion {
 		t.Fatal("report must record evaluated prompt version")
+	}
+}
+
+func TestV2DatasetParserAndProductionValidation(t *testing.T) {
+	v2 := strings.Replace(dataset, `"schemaVersion":"analyze-conversation.v1"`, `"schemaVersion":"analyze-conversation.v2"`, 1)
+	v2 = strings.Replace(v2, `"promptVersion":"analyze-conversation.prompt.v5"`, `"promptVersion":"analyze-conversation.prompt.v7"`, 1)
+	v2 = strings.Replace(v2, `"id":"booking-001"`, `"id":"purchase-v2"`, 1)
+	v2 = strings.Replace(v2, `"Можно завтра?"`, `"Хочу купить, оформите заказ."`, 1)
+	v2 = strings.Replace(v2, `"type":"BOOKING_INTENT"`, `"type":"PURCHASE_INTENT"`, 1)
+	cases, digest, err := Load(strings.NewReader(v2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := `{"schemaVersion":"analyze-conversation.v2","analysisThroughMessageId":"message-1","summary":"Клиент оформляет заказ.","facts":[{"type":"PURCHASE_INTENT","value":true,"confidence":0.95,"evidenceMessageIds":["message-1"]}],"agreements":[]}`
+	report, err := Run(context.Background(), infrastructure.FakeProvider{Output: output}, cases, digest, Thresholds{MinimumPrecision: .9, MinimumRecall: .9})
+	if err != nil || !report.Passed || report.TruePositive != 1 {
+		t.Fatalf("v2 benchmark: %+v %v", report, err)
 	}
 }
 
@@ -120,5 +198,24 @@ func TestRunAppliesValidRateThreshold(t *testing.T) {
 	}
 	if report.ValidRate != 0 || report.Passed {
 		t.Fatalf("unexpected valid-rate result: %+v", report)
+	}
+}
+
+func TestEmptyAgreementLabelsSurviveDatasetRoundTrip(t *testing.T) {
+	cases, _, err := Load(strings.NewReader(dataset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := cases[0]
+	c.Input.SchemaVersion = application.AnalysisSchemaV2
+	c.Input.PromptVersion = application.AnalysisPromptV8
+	c.ExpectedAgreements = []domain.AgreementObservation{}
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, _, err := Load(strings.NewReader(string(encoded)))
+	if err != nil || decoded[0].ExpectedAgreements == nil {
+		t.Fatalf("negative agreement label lost: %s; %v", encoded, err)
 	}
 }

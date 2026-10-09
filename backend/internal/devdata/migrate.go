@@ -23,9 +23,9 @@ import (
 const Version = "frontend-v1"
 
 // SchemaVersion — последняя миграция схемы, на которой проверен набор.
-// Миграция 000022 добавила только таблицу приглашений с RLS; набор её не
-// заполняет, поэтому проверен без изменений содержимого.
-const SchemaVersion = "000022_membership_invitations"
+// Миграция 000023 аддитивна: договорённости пусты, порог 120 минут.
+// Содержимое учебной миграции не меняется; up/down проверяются тестами.
+const SchemaVersion = "000023_unfinished_agreements"
 const DatabaseName = "lidradar_frontend"
 
 //go:embed migrations/*.sql

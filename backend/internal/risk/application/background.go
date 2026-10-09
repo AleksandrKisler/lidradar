@@ -29,6 +29,8 @@ const (
 	PriceEvaluationJobType       = "risk.evaluate-customer-silent-after-price.v1"
 	FollowUpCheckType            = "FOLLOW_UP_CANDIDATE_DUE"
 	FollowUpEvaluationJobType    = "risk.evaluate-follow-up-candidate.v1"
+	AgreementCheckType           = "UNFINISHED_AGREEMENT_DUE"
+	AgreementEvaluationJobType   = "risk.evaluate-unfinished-agreement.v1"
 )
 
 type refreshPayload struct {
@@ -135,6 +137,14 @@ func (planner Planner) Evaluate(ctx context.Context, tenantID, opportunityID str
 	if err != nil {
 		return err
 	}
+	// A queued check may have belonged to an edited or superseded trigger.
+	// Replan the current trigger as well as any escalation; never use the old
+	// check's due time as permission to open a new early risk.
+	if decision.DueAt.After(planner.now().UTC()) {
+		if err := planner.schedule(ctx, tenantID, opportunityID, decision, decision.DueAt, ""); err != nil {
+			return err
+		}
+	}
 	return planner.scheduleNext(ctx, tenantID, opportunityID, decision)
 }
 
@@ -169,7 +179,16 @@ func (planner Planner) schedule(
 		return err
 	}
 	payload, _ := json.Marshal(refreshPayload{OpportunityID: opportunityID})
-	dedupKey := fmt.Sprintf("opportunity:%s:message:%s:policy:%s", opportunityID, triggerID, planner.policy.Version())
+	policyVersion := planner.policy.Version()
+	if decision.PolicyVersion != "" {
+		policyVersion = decision.PolicyVersion
+	}
+	dedupKey := fmt.Sprintf("opportunity:%s:message:%s:policy:%s", opportunityID, triggerID, policyVersion)
+	if planner.policy.Type() == domain.TypeUnfinishedAgreement || policyVersion == "promise-not-fulfilled/v2" {
+		// An edit or a threshold change may move the same trigger's deadline.
+		// A materialized old check must not swallow the replacement schedule.
+		dedupKey += ":due:" + dueAt.UTC().Format(time.RFC3339Nano)
+	}
 	if suffix != "" {
 		dedupKey += ":" + suffix
 	}
@@ -200,6 +219,8 @@ func workTypes(riskType domain.Type) (string, string, error) {
 		return PriceCheckType, PriceEvaluationJobType, nil
 	case domain.TypeFollowUpCandidate:
 		return FollowUpCheckType, FollowUpEvaluationJobType, nil
+	case domain.TypeUnfinishedAgreement:
+		return AgreementCheckType, AgreementEvaluationJobType, nil
 	default:
 		return "", "", ErrInvalidCheck
 	}

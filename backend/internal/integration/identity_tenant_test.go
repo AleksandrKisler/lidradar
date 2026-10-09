@@ -79,6 +79,10 @@ type apiFixture struct {
 }
 
 func newAPIFixture(t *testing.T) apiFixture {
+	return newAPIFixtureForAnalysis(t, false)
+}
+
+func newAPIFixtureForAnalysis(t *testing.T, current bool) apiFixture {
 	t.Helper()
 	pools := testsupport.PostgresRoles(t)
 	// Репозитории API и обработчиков работают под ролью с RLS; захват заданий,
@@ -109,7 +113,10 @@ func newAPIFixture(t *testing.T) apiFixture {
 	jobStore := jobsinfrastructure.NewPostgresStore(pool)
 	eventStore := eventsinfrastructure.NewPostgresStore(pools.Platform)
 	aiStore := aiinfrastructure.NewPostgresStore(pool)
-	aiBuilder := aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, aiapplication.DefaultModelVersion)
+	var aiBuilder aiapplication.StaleJobBuilder = legacyAnalysisJobBuilder(pool, aiapplication.DefaultModelVersion)
+	if current {
+		aiBuilder = aiinfrastructure.NewPostgresAnalysisJobBuilder(pool, aiapplication.DefaultModelVersion)
+	}
 	aiService := aiapplication.NewService(aiStore, ids.Generator{}, time.Now, aiapplication.DefaultLease).WithAnalysisDebounce(0).
 		WithStaleJobBuilder(aiBuilder)
 	riskRepository := riskinfrastructure.NewPostgresRepository(pool)
@@ -159,6 +166,9 @@ func newAPIFixture(t *testing.T) apiFixture {
 	followUpPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, followUpEvaluator, followUpPolicy, ids.Generator{}, time.Now,
 	)
+	agreementPolicy := riskdomain.UnfinishedAgreementPolicy{}
+	agreementEvaluator := riskapplication.NewEvaluator(riskRepository, riskStates, agreementPolicy, ids.Generator{}, time.Now).WithInvalidator(riskEvents)
+	agreementPlanner := riskapplication.NewPlanner(riskStates, riskStates, jobStore, agreementEvaluator, agreementPolicy, ids.Generator{}, time.Now)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	notificationService := notificationapplication.NewService(
 		notificationRepository, notificationRepository, notificationinfrastructure.StubTransport{}, ids.Generator{}, time.Now,
@@ -192,12 +202,13 @@ func newAPIFixture(t *testing.T) apiFixture {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner, followUpPlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner, followUpPlanner, agreementPlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskPlanner),
 			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingPlanner),
 			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
 			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
 			riskapplication.FollowUpEvaluationJobType:   riskapplication.EvaluationJobHandler(followUpPlanner),
+			riskapplication.AgreementEvaluationJobType:  riskapplication.EvaluationJobHandler(agreementPlanner),
 			notificationapplication.DigestJobType:       notificationapplication.DigestJobHandler(notificationService),
 			notificationapplication.EscalationJobType:   notificationapplication.EscalationJobHandler(notificationService),
 		}, time.Now, jobsapplication.DefaultLease,
@@ -296,6 +307,19 @@ func TestIdentityTenantOwnerFlowPermissionsAndIsolation(t *testing.T) {
 	}`, owner.Cookie, organizationID)
 	requireStatus(t, locationResponse, http.StatusCreated)
 	locationID := jsonID(t, locationResponse)
+	if !strings.Contains(locationResponse.Body.String(), `"agreementThresholdMinutes":120`) {
+		t.Fatalf("default agreement threshold missing: %s", locationResponse.Body.String())
+	}
+	for _, invalid := range []string{"0", "1441"} {
+		requireStatus(t, request(t, fixture.handler, http.MethodPatch, "/api/v1/locations/"+locationID,
+			`{"agreementThresholdMinutes":`+invalid+`}`, owner.Cookie, organizationID), http.StatusBadRequest)
+	}
+	updated := request(t, fixture.handler, http.MethodPatch, "/api/v1/locations/"+locationID,
+		`{"agreementThresholdMinutes":180}`, owner.Cookie, organizationID)
+	requireStatus(t, updated, http.StatusOK)
+	if !strings.Contains(updated.Body.String(), `"agreementThresholdMinutes":180`) {
+		t.Fatalf("agreement threshold update missing: %s", updated.Body.String())
+	}
 
 	hoursResponse := request(t, fixture.handler, http.MethodPut, "/api/v1/locations/"+locationID+"/business-hours", `{
 		"timezone":"Europe/Moscow","days":[

@@ -41,7 +41,7 @@ func quietPreference(t *testing.T, riskType RiskType, mode DeliveryMode, start, 
 func TestDefaultPreferencesFollowSpecification(t *testing.T) {
 	want := map[RiskType]DeliveryMode{
 		RiskNoResponse: ModeImmediate, RiskBookingNotConfirmed: ModeImmediate, RiskPromiseNotFulfilled: ModeImmediate,
-		RiskCustomerSilentAfterPrice: ModeDigest, RiskFollowUpCandidate: ModeDigest,
+		RiskCustomerSilentAfterPrice: ModeDigest, RiskFollowUpCandidate: ModeDigest, RiskUnfinishedAgreement: ModeDigest,
 	}
 	for _, riskType := range RiskTypes() {
 		preference := DefaultPreference("tenant", "user", riskType)

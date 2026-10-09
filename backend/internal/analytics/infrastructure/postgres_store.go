@@ -135,6 +135,20 @@ func (store *PostgresStore) Summary(
 	); err != nil {
 		return domain.Summary{}, fmt.Errorf("подсчёт денег: %w", err)
 	}
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(sum(opportunity.estimated_amount),0)::numeric(20,2)::text,
+		       count(*), count(*) FILTER (WHERE opportunity.estimated_amount IS NULL)
+		FROM opportunities opportunity
+		WHERE opportunity.tenant_id=$1 AND opportunity.currency=$4
+		  AND opportunity.stage NOT IN ('WON','LOST','ARCHIVED')
+		  AND EXISTS (SELECT 1 FROM risk_signals risk
+		      WHERE risk.tenant_id=opportunity.tenant_id AND risk.opportunity_id=opportunity.id
+		        AND risk.status IN ('OPEN','ACKNOWLEDGED','ACTED')
+		        AND risk.detected_at >= $2 AND risk.detected_at < $3)`, tenantID, from, to, currency).Scan(
+		&summary.Revenue.AtRiskPotential, &summary.Revenue.AtRiskOpportunities, &summary.Revenue.AtRiskUnknownAmountOpportunities,
+	); err != nil {
+		return domain.Summary{}, fmt.Errorf("подсчёт сделок с рисками: %w", err)
+	}
 	// Дневной ряд: дни считаются в часовом поясе организации, деньги — в её валюте.
 	days, err := tx.Query(ctx, `
 		WITH message_days AS (

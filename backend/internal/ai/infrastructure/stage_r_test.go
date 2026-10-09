@@ -199,7 +199,7 @@ func TestPostgresOlderRunNeverOverwritesNewerSummary(t *testing.T) {
 	store := infrastructure.NewPostgresStore(pool)
 	service := application.NewService(store, ids.Generator{}, func() time.Time { return now }, application.DefaultLease).
 		WithAnalysisDebounce(0).
-		WithStaleJobBuilder(infrastructure.NewPostgresAnalysisJobBuilder(pool, "test-model-v1"))
+		WithStaleJobBuilder(legacyAnalysisJobBuilder(pool, "test-model-v1"))
 	first, err := service.RegisterNode(ctx, tenant.TenantID, "AI-NODE-A", stageRFirstSecret)
 	if err != nil {
 		t.Fatal(err)

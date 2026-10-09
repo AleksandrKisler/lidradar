@@ -182,7 +182,7 @@ func (h Handler) summary(w http.ResponseWriter, r *http.Request) {
 	if handleError(w, r, err) {
 		return
 	}
-	writeJSON(w, 200, map[string]any{"openRisks": s.OpenRisks, "criticalRisks": s.CriticalRisks, "potentialRevenue": s.PotentialRevenue, "confirmedRecoveredRevenue": s.ConfirmedRecoveredRevenue})
+	writeJSON(w, 200, map[string]any{"openRisks": s.OpenRisks, "criticalRisks": s.CriticalRisks, "potentialRevenue": s.PotentialRevenue, "confirmedRecoveredRevenue": s.ConfirmedRecoveredRevenue, "opportunitiesAtRisk": s.OpportunitiesAtRisk, "opportunitiesWithUnknownAmount": s.OpportunitiesWithUnknownAmount})
 }
 func (h Handler) acknowledge(w http.ResponseWriter, r *http.Request) {
 	h.command(w, r, h.radar.Acknowledge)

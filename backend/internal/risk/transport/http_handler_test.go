@@ -3,6 +3,7 @@ package transport
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,22 @@ func (allowAll) Allowed(context.Context, string, string, string) (bool, error) {
 type denyAll struct{}
 
 func (denyAll) Allowed(context.Context, string, string, string) (bool, error) { return false, nil }
+
+type summaryStore struct{ application.RadarStore }
+
+func (summaryStore) Summary(context.Context, string, application.Filters) (application.Summary, error) {
+	return application.Summary{OpportunitiesAtRisk: 2, OpportunitiesWithUnknownAmount: 1, PotentialRevenue: "1000.00", ConfirmedRecoveredRevenue: "0.00"}, nil
+}
+
+func TestRadarHTTPPreservesUnknownAmountCounts(t *testing.T) {
+	handler := NewHandler(application.NewRadar(summaryStore{}, allowAll{}, nil, time.Now), testPrincipal{"user", "tenant"}, nil).Router()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/radar", nil))
+	var body map[string]any
+	if recorder.Code != 200 || json.Unmarshal(recorder.Body.Bytes(), &body) != nil || body["opportunitiesAtRisk"] != float64(2) || body["opportunitiesWithUnknownAmount"] != float64(1) {
+		t.Fatalf("unknown amounts lost in HTTP response: %d %s", recorder.Code, recorder.Body.String())
+	}
+}
 
 func TestRiskHTTPListAndTenantIsNotExposed(t *testing.T) {
 	repo := infrastructure.NewTestMemoryRepository()

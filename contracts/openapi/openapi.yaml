@@ -1501,12 +1501,13 @@ components:
         closesAt: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
     Location:
       type: object
-      required: [id, name, timezone, responseThresholdMinutes, active, businessHours, createdAt, updatedAt]
+      required: [id, name, timezone, responseThresholdMinutes, agreementThresholdMinutes, active, businessHours, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         timezone: { type: string, description: IANA timezone name. }
         responseThresholdMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        agreementThresholdMinutes: { type: integer, minimum: 1, maximum: 1440, default: 120 }
         active: { type: boolean }
         businessHours: { type: array, items: { $ref: '#/components/schemas/BusinessHour' } }
         createdAt: { type: string, format: date-time }
@@ -1523,6 +1524,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 200 }
         timezone: { type: string, minLength: 1 }
         responseThresholdMinutes: { type: integer, minimum: 1, maximum: 1440, default: 45 }
+        agreementThresholdMinutes: { type: integer, minimum: 1, maximum: 1440, default: 120 }
     UpdateLocationRequest:
       type: object
       additionalProperties: false
@@ -1531,6 +1533,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 200 }
         timezone: { type: string, minLength: 1 }
         responseThresholdMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        agreementThresholdMinutes: { type: integer, minimum: 1, maximum: 1440 }
         active: { type: boolean }
     BusinessHoursRequest:
       type: object
@@ -1878,7 +1881,7 @@ components:
         stage: { $ref: '#/components/schemas/OpportunityStage' }
     RiskStatus: { type: string, enum: [OPEN, ACKNOWLEDGED, ACTED, RESOLVED, FALSE_POSITIVE, IGNORED, EXPIRED] }
     RiskSeverity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
-    RiskType: { type: string, enum: [NO_RESPONSE, BOOKING_NOT_CONFIRMED, PROMISE_NOT_FULFILLED, CUSTOMER_SILENT_AFTER_PRICE, FOLLOW_UP_CANDIDATE] }
+    RiskType: { type: string, enum: [NO_RESPONSE, BOOKING_NOT_CONFIRMED, PROMISE_NOT_FULFILLED, CUSTOMER_SILENT_AFTER_PRICE, FOLLOW_UP_CANDIDATE, UNFINISHED_AGREEMENT] }
     TelegramLinkToken:
       type: object
       additionalProperties: false
@@ -2198,7 +2201,7 @@ components:
         - type: object
           required: [byType]
           properties:
-            byType: { type: array, items: { $ref: '#/components/schemas/AnalyticsRiskType' }, description: Всегда пять типов в порядке §27. }
+            byType: { type: array, items: { $ref: '#/components/schemas/AnalyticsRiskType' }, description: Все поддерживаемые типы риска в каноническом порядке. }
     AnalyticsOutcomes:
       type: object
       additionalProperties: false
@@ -2210,13 +2213,16 @@ components:
     AnalyticsRevenue:
       type: object
       additionalProperties: false
-      required: [currency, potential, confirmed, confirmedRecovered, confirmedPayments]
+      required: [currency, potential, confirmed, confirmedRecovered, confirmedPayments, atRiskPotential, atRiskOpportunities, atRiskUnknownAmountOpportunities]
       properties:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         potential: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: 'Оценка ещё открытых сделок, открытых в окне; не выручка.' }
         confirmed: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Подтверждённые события выручки окна. }
         confirmedRecovered: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: Их часть с атрибуцией RECOVERED (§39). }
         confirmedPayments: { type: integer, minimum: 0 }
+        atRiskPotential: { type: string, description: Сумма известных оценок уникальных активных сделок в валюте отчёта с активным риском обнаруженным в выбранном периоде. }
+        atRiskOpportunities: { type: integer, minimum: 0, description: Число этих сделок без повторов по рискам. }
+        atRiskUnknownAmountOpportunities: { type: integer, minimum: 0, description: Число этих сделок без определённой суммы. }
     AnalyticsDailyPoint:
       type: object
       additionalProperties: false
@@ -2525,8 +2531,10 @@ components:
         revenue: { type: array, items: { type: object, required: [eventId, opportunityId, amount, currency, status, confirmedAt], properties: { eventId: { type: string, format: uuid }, opportunityId: { type: string, format: uuid }, amount: { type: string }, currency: { type: string }, status: { type: string }, attribution: { type: [string, 'null'] }, riskId: { type: [string, 'null'], format: uuid }, confirmedAt: { type: string, format: date-time } } } }
     RadarSummary:
       type: object
-      required: [openRisks, criticalRisks, potentialRevenue, confirmedRecoveredRevenue]
+      required: [openRisks, criticalRisks, potentialRevenue, confirmedRecoveredRevenue, opportunitiesAtRisk, opportunitiesWithUnknownAmount]
       properties:
+        opportunitiesAtRisk: { type: integer, minimum: 0, description: Уникальные сделки под риском в валюте организации. }
+        opportunitiesWithUnknownAmount: { type: integer, minimum: 0, description: Из них без определённой суммы. }
         openRisks: { type: integer, minimum: 0 }
         criticalRisks: { type: integer, minimum: 0 }
         potentialRevenue: { type: string, pattern: '^[0-9]+\.[0-9]{2}$' }

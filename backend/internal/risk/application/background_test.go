@@ -81,6 +81,30 @@ func TestDueEvaluationAfterEarlyReplyDoesNotCreateRisk(t *testing.T) {
 	}
 }
 
+func TestAgreementThresholdChangeSchedulesReplacementCheck(t *testing.T) {
+	state := evaluationState()
+	state.LastMeaningful = domain.DirectionOutgoing
+	state.AgreementsCurrent = true
+	state.AgreementThreshold = 120 * time.Minute
+	state.Agreements = []domain.AgreementSignal{{Kind: "BOOKING_CONFIRMATION", WaitingFor: "CUSTOMER", Status: "PENDING",
+		TriggerMessageID: "offer", TriggerAt: state.LastMeaningfulAt, Confidence: .95, AIRunID: "run"}}
+	reader := &stateReader{state: state}
+	checks := &capturedChecks{}
+	planner := application.NewPlanner(fixedOpportunityLocator{opportunityID: state.OpportunityID}, reader, checks,
+		application.Evaluator{}, domain.UnfinishedAgreementPolicy{},
+		idFunction(func() (string, error) { return "check", nil }), func() time.Time { return state.LastMeaningfulAt })
+	if err := planner.RefreshOpportunity(context.Background(), state.TenantID, state.OpportunityID); err != nil {
+		t.Fatal(err)
+	}
+	reader.state.AgreementThreshold = 180 * time.Minute
+	if err := planner.RefreshOpportunity(context.Background(), state.TenantID, state.OpportunityID); err != nil {
+		t.Fatal(err)
+	}
+	if len(checks.checks) != 2 || checks.checks[0].DedupKey == checks.checks[1].DedupKey || !checks.checks[1].DueAt.After(checks.checks[0].DueAt) {
+		t.Fatalf("changed deadline reused materialized check: %+v", checks.checks)
+	}
+}
+
 type countingRepository struct{ upserts int }
 
 func newCountingRepository() *countingRepository { return &countingRepository{} }

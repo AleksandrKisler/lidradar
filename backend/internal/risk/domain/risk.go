@@ -18,13 +18,14 @@ const (
 	TypePromiseNotFulfilled      Type = "PROMISE_NOT_FULFILLED"
 	TypeCustomerSilentAfterPrice Type = "CUSTOMER_SILENT_AFTER_PRICE"
 	TypeFollowUpCandidate        Type = "FOLLOW_UP_CANDIDATE"
+	TypeUnfinishedAgreement      Type = "UNFINISHED_AGREEMENT"
 )
 
 // SupportedType сообщает, реализовано ли правило для типа риска.
 func SupportedType(riskType Type) bool {
 	switch riskType {
 	case TypeNoResponse, TypeBookingNotConfirmed, TypePromiseNotFulfilled,
-		TypeCustomerSilentAfterPrice, TypeFollowUpCandidate:
+		TypeCustomerSilentAfterPrice, TypeFollowUpCandidate, TypeUnfinishedAgreement:
 		return true
 	default:
 		return false
@@ -116,6 +117,10 @@ func NewCustomerSilentAfterPrice(id string, finding Finding, now time.Time) (Ris
 // NewFollowUpCandidate создаёт мягкий риск-кандидат на продолжение разговора.
 func NewFollowUpCandidate(id string, finding Finding, now time.Time) (Risk, error) {
 	return newRisk(id, TypeFollowUpCandidate, finding, now)
+}
+
+func NewUnfinishedAgreement(id string, finding Finding, now time.Time) (Risk, error) {
+	return newRisk(id, TypeUnfinishedAgreement, finding, now)
 }
 
 func newRisk(id string, riskType Type, finding Finding, now time.Time) (Risk, error) {
@@ -234,6 +239,9 @@ func (r Risk) Validate() error {
 	if r.Type == TypeFollowUpCandidate && r.Severity != SeverityMedium {
 		return ErrInvalidRisk
 	}
+	if r.Type == TypeUnfinishedAgreement && r.Severity != SeverityMedium {
+		return ErrInvalidRisk
+	}
 	switch r.Source {
 	case SourceRule, SourceManual:
 		if r.Confidence != nil || r.AIRunID != nil {
@@ -241,7 +249,7 @@ func (r Risk) Validate() error {
 		}
 	case SourceHybrid:
 		if (r.Type != TypeBookingNotConfirmed && r.Type != TypePromiseNotFulfilled &&
-			r.Type != TypeCustomerSilentAfterPrice && r.Type != TypeFollowUpCandidate) ||
+			r.Type != TypeCustomerSilentAfterPrice && r.Type != TypeFollowUpCandidate && r.Type != TypeUnfinishedAgreement) ||
 			r.Confidence == nil || *r.Confidence < 0 || *r.Confidence > 1 ||
 			r.AIRunID == nil || strings.TrimSpace(*r.AIRunID) == "" {
 			return ErrInvalidRisk
@@ -334,24 +342,28 @@ type ActiveRiskSnapshot struct {
 // ConversationState — свежая авторитетная проекция, читаемая при выполнении
 // проверки по расписанию. В полезной нагрузке хранятся только идентификаторы.
 type ConversationState struct {
-	TenantID          string
-	OpportunityID     string
-	LocationID        string
-	ActiveOpportunity bool
-	LastMeaningfulID  string
-	LastMeaningfulAt  time.Time
-	LastMeaningful    Direction
-	ResponseThreshold time.Duration
-	BusinessHours     BusinessHours
-	OpportunityStage  string
-	BookingIntent     *BookingIntentSignal
-	Commitment        *CommitmentSignal
-	Price             *PriceSignal
-	FollowUp          *FollowUpSignal
-	LastOutgoing      *MessageRef
-	LastIncoming      *MessageRef
-	LatestOutcome     string
-	ActiveRisks       map[Type]ActiveRiskSnapshot
+	TenantID              string
+	OpportunityID         string
+	LocationID            string
+	ActiveOpportunity     bool
+	LastMeaningfulID      string
+	LastMeaningfulAt      time.Time
+	LastMeaningful        Direction
+	ResponseThreshold     time.Duration
+	AgreementThreshold    time.Duration
+	BusinessHours         BusinessHours
+	AgreementsCurrent     bool
+	V2SnapshotUnavailable bool
+	Agreements            []AgreementSignal
+	OpportunityStage      string
+	BookingIntent         *BookingIntentSignal
+	Commitment            *CommitmentSignal
+	Price                 *PriceSignal
+	FollowUp              *FollowUpSignal
+	LastOutgoing          *MessageRef
+	LastIncoming          *MessageRef
+	LatestOutcome         string
+	ActiveRisks           map[Type]ActiveRiskSnapshot
 }
 
 // BookingIntentSignal — только проверенная производная семантика. Она не
@@ -362,6 +374,18 @@ type BookingIntentSignal struct {
 	AIRunID           string
 	EvidenceMessageID string
 	EvidenceAt        time.Time
+}
+
+// AgreementSignal is a server-trusted observation from a current v2 snapshot.
+// Trigger text is read from the canonical message for deterministic deadlines.
+type AgreementSignal struct {
+	EvidenceMessageIDs       []string
+	Kind, WaitingFor, Status string
+	TriggerMessageID         string
+	TriggerAt                time.Time
+	TriggerText              string
+	Confidence               float64
+	AIRunID                  string
 }
 
 type Finding struct {
@@ -384,6 +408,7 @@ type Decision struct {
 	Finding          *Finding
 	DueAt            time.Time
 	TriggerMessageID string
+	PolicyVersion    string
 	// NextDueAt назначает дополнительную проверку того же основания после
 	// наступившей (например эскалацию важности); NextCheckSuffix отличает её
 	// ключ от первой проверки.

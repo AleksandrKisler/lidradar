@@ -123,3 +123,62 @@ p99 и пропускную способность. Все пороги пере
 `>= 0.85`): слабый факт не открывает Risk и потому не считается обнаруженным. Значения, инструкция, параметры генерации
 и SHA-256 выбранного файла модели фиксируются в
 `models/manifests/lidradar-main-v1.json`.
+
+
+### Синтетические договорённости v2
+
+`agreements_dev_v2.jsonl` — 21 полностью вымышленный DEV-сценарий с инструкцией
+v8: подтверждение/отмена записи, перенос, проблема оплаты, выполнение обещания,
+формальный ответ, выполнение другого действия, отсрочка и переписки из 7/20 сообщений.
+Реальные Telegram-сообщения в набор не входят. Runner не читает и не изменяет базу
+приложения, поэтому закрытые пользователем риски не затрагиваются.
+
+`expectedAgreements` задаёт ожидаемые вид, сторону, состояние и сообщение-основание.
+Пустой массив требует отсутствия доверенных договорённостей; пропущенное поле
+сохраняет поведение старых наборов. `agreementExactRate` измеряет точное совпадение
+этих состояний и учитывается вместе с фактами в `exactRate`. Доказательства проходят
+ту же проверку привязки и переходов, что и рабочие ответы. Одних правильных фактов
+недостаточно для прохождения случая с неверным состоянием договорённости.
+
+```sh
+go run ./backend/cmd/ai-benchmark \
+  -dataset models/datasets/agreements_dev_v2.jsonl -checksum '' \
+  -endpoint http://127.0.0.1:18089/v1/chat/completions \
+  -minimum-precision 0.90 -minimum-fact-precision 0.85 \
+  -minimum-recall 0.90 -minimum-f1 0.90 -minimum-exact-rate 0.85 \
+  -minimum-valid-rate 0.99 -minimum-evidence-exact-rate 0.90 \
+  -maximum-p95-ms 8000
+```
+
+Адрес выше — локальный тестовый туннель к модели, он должен быть запущен отдельно.
+Прогон DEV не изменяет замороженный манифест v6 и не заменяет контрольную
+квалификацию новой версии перед релизом. Исходная GOLDEN-выборка не изменяется.
+
+Для сквозной проверки используется `TestUnpricedAgreementRiskPipeline` в
+`backend/internal/integration/unfinished_agreement_risk_test.go`: синтетический
+webhook, актуальная версия AI-контракта, сделка без услуги/суммы, отложенная
+проверка, карточка риска, подтверждение и отсутствие переоткрытия после ручного
+закрытия сделки. Тест создаёт отдельную схему PostgreSQL и удаляет её после
+выполнения; запуск входит в `make test-db` с отдельной тестовой базой.
+
+Регрессия v8 использует неизменённую разметку `dev_v1.jsonl`; адаптируются только
+версии входного конверта. Подготовка локальной копии:
+
+```sh
+python3 - <<'PYDATA'
+import json
+from pathlib import Path
+out = Path('runtime/dev-v2-regression.jsonl')
+out.parent.mkdir(parents=True, exist_ok=True)
+with out.open('w') as target:
+    for line in Path('models/datasets/dev_v1.jsonl').read_text().splitlines():
+        case = json.loads(line)
+        case['input']['schemaVersion'] = 'analyze-conversation.v2'
+        case['input']['promptVersion'] = 'analyze-conversation.prompt.v8'
+        target.write(json.dumps(case, ensure_ascii=False) + '\n')
+PYDATA
+```
+
+Эту копию передают тому же runner с теми же порогами вместо
+`models/datasets/agreements_dev_v2.jsonl`. Это регрессия старых фактов, а не
+независимая проверка новой семантики договорённостей.

@@ -344,7 +344,28 @@ func (s Service) Complete(ctx context.Context, id, secret, jobID, runID, output 
 	if run.Status != domain.RunRunning {
 		return domain.Run{}, ErrLeaseLost
 	}
-	result, validationErr := ValidateAnalysisResultV1(output, run.AnalysisThroughMessageID)
+	var result domain.AnalysisResultV1
+	var agreements []domain.Agreement
+	var validationErr error
+	if run.SchemaVersion == AnalysisSchemaV2 {
+		var v2 domain.AnalysisResultV2
+		v2, validationErr = ValidateAnalysisResultV2(output, run.AnalysisThroughMessageID)
+		if validationErr == nil {
+			var prompt string
+			prompt, validationErr = s.store.AnalysisPrompt(ctx, run.TenantID, run.JobID)
+			if validationErr == nil {
+				validationErr = ValidateAgreementEvidence(v2, prompt)
+			}
+		}
+		if validationErr == nil {
+			result = domain.AnalysisResultV1{SchemaVersion: v2.SchemaVersion, AnalysisThroughMessageID: v2.AnalysisThroughMessageID, Summary: v2.Summary, Facts: v2.Facts}
+			agreements = AppliedAgreements(v2)
+		}
+	} else if run.SchemaVersion == AnalysisSchemaV1 {
+		result, validationErr = ValidateAnalysisResultV1(output, run.AnalysisThroughMessageID)
+	} else {
+		validationErr = fmt.Errorf("%w: unsupported result schema", ErrInvalidAIOutput)
+	}
 	if validationErr == nil && hasPositivePrice(result) {
 		prompt, promptErr := s.store.AnalysisPrompt(ctx, run.TenantID, run.JobID)
 		if promptErr != nil {
@@ -386,7 +407,7 @@ func (s Service) Complete(ctx context.Context, id, secret, jobID, runID, output 
 				Text: strings.TrimSpace(result.Summary), BaseConversationRevision: snapshot.Revision,
 				AnalysisThroughMessageID: snapshot.LastMessageID, ModelVersion: run.ModelVersion,
 				PromptVersion: run.PromptVersion, SchemaVersion: run.SchemaVersion,
-				RunID: run.ID, Facts: AppliedFacts(result), UpdatedAt: now,
+				RunID: run.ID, Facts: AppliedFacts(result), Agreements: agreements, UpdatedAt: now,
 			}
 		}
 	}
@@ -435,11 +456,17 @@ func (s Service) newJob(command EnqueueCommand) (domain.Job, error) {
 	if command.ModelVersion == "" {
 		command.ModelVersion = DefaultModelVersion
 	}
-	if command.PromptVersion == "" {
-		command.PromptVersion = CurrentAnalysisPrompt
-	}
 	if command.SchemaVersion == "" {
+		// Callers predating versioned context construction retain the v1 reader.
+		// Production context builders always set the v2 schema explicitly.
 		command.SchemaVersion = AnalysisSchemaV1
+	}
+	if command.PromptVersion == "" {
+		if command.SchemaVersion == AnalysisSchemaV2 {
+			command.PromptVersion = CurrentAnalysisPrompt
+		} else {
+			command.PromptVersion = AnalysisPromptV6
+		}
 	}
 	now := s.now().UTC()
 	return domain.Job{

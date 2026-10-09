@@ -140,6 +140,10 @@ func TestAnalysisSystemPromptIsVersioned(t *testing.T) {
 	if err != nil || version != application.AnalysisPromptV5 || len(analysisFewShotMessagesV5) != 12 {
 		t.Fatal("версия v5 должна однозначно выбирать шесть пар синтетических примеров")
 	}
+	v7, version, err := analysisPromptDefinition(`{"promptVersion":"` + application.AnalysisPromptV7 + `"}`)
+	if err != nil || version != application.AnalysisPromptV7 || len(analysisFewShotMessagesV7) != 12 || !strings.Contains(v7, "PURCHASE_INTENT") || !strings.Contains(v7, "triggerMessageId") {
+		t.Fatal("v7 must select the unfinished agreement contract and examples")
+	}
 	if _, err := analysisSystemPrompt(`{"promptVersion":"unknown"}`); err == nil {
 		t.Fatal("неизвестная версия инструкции должна отклоняться")
 	}

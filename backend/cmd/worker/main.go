@@ -127,6 +127,13 @@ func run(ctx context.Context, configuration config.Config) error {
 	followUpPlanner := riskapplication.NewPlanner(
 		riskStates, riskStates, jobStore, followUpEvaluator, followUpPolicy, generator, time.Now,
 	)
+	agreementPolicy := riskdomain.UnfinishedAgreementPolicy{}
+	agreementEvaluator := riskapplication.NewEvaluator(
+		riskRepository, riskStates, agreementPolicy, generator, time.Now,
+	).WithInvalidator(riskInvalidator)
+	agreementPlanner := riskapplication.NewPlanner(
+		riskStates, riskStates, jobStore, agreementEvaluator, agreementPolicy, generator, time.Now,
+	)
 	notificationRepository := notificationinfrastructure.NewPostgresRepository(pool)
 	deliveryRepository := notificationinfrastructure.NewPostgresRepository(platformPool)
 	var notificationTransport notificationapplication.Transport
@@ -188,12 +195,13 @@ func run(ctx context.Context, configuration config.Config) error {
 		map[string]jobsapplication.Handler{
 			connectorapplication.NormalizationJobType:   connectorapplication.NormalizationJobHandler(normalization),
 			opportunityapplication.CandidateJobType:     opportunityapplication.CandidateJobHandler(candidateProcessor),
-			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner, followUpPlanner),
+			riskapplication.RefreshJobType:              riskapplication.RefreshPlansJobHandler(riskPlanner, bookingPlanner, promisePlanner, pricePlanner, followUpPlanner, agreementPlanner),
 			riskapplication.NoResponseEvaluationJobType: riskapplication.EvaluationJobHandler(riskPlanner),
 			riskapplication.BookingEvaluationJobType:    riskapplication.EvaluationJobHandler(bookingPlanner),
 			riskapplication.PromiseEvaluationJobType:    riskapplication.EvaluationJobHandler(promisePlanner),
 			riskapplication.PriceEvaluationJobType:      riskapplication.EvaluationJobHandler(pricePlanner),
 			riskapplication.FollowUpEvaluationJobType:   riskapplication.EvaluationJobHandler(followUpPlanner),
+			riskapplication.AgreementEvaluationJobType:  riskapplication.EvaluationJobHandler(agreementPlanner),
 			notificationapplication.DigestJobType:       notificationapplication.DigestJobHandler(notificationService),
 			notificationapplication.EscalationJobType:   notificationapplication.EscalationJobHandler(notificationService),
 		},

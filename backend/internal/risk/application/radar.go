@@ -202,10 +202,12 @@ type Page struct {
 	NextCursor string
 }
 type Summary struct {
-	OpenRisks                 int    `json:"openRisks"`
-	CriticalRisks             int    `json:"criticalRisks"`
-	PotentialRevenue          string `json:"potentialRevenue"`
-	ConfirmedRecoveredRevenue string `json:"confirmedRecoveredRevenue"`
+	OpportunitiesAtRisk            int    `json:"opportunitiesAtRisk"`
+	OpportunitiesWithUnknownAmount int    `json:"opportunitiesWithUnknownAmount"`
+	OpenRisks                      int    `json:"openRisks"`
+	CriticalRisks                  int    `json:"criticalRisks"`
+	PotentialRevenue               string `json:"potentialRevenue"`
+	ConfirmedRecoveredRevenue      string `json:"confirmedRecoveredRevenue"`
 }
 
 type Mutation struct {

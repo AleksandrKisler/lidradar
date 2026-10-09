@@ -49,6 +49,30 @@ func (policy BookingNotConfirmedPolicy) Evaluate(state ConversationState, at tim
 		return Decision{}, nil
 	}
 
+	if state.V2SnapshotUnavailable {
+		return Decision{}, nil
+	}
+	if state.AgreementsCurrent {
+		var latest *AgreementSignal
+		for i := range state.Agreements {
+			a := &state.Agreements[i]
+			if a.Kind == "BOOKING_CONFIRMATION" && a.Confidence >= StrongBookingIntentConfidence &&
+				(latest == nil || a.TriggerAt.After(latest.TriggerAt)) {
+				latest = a
+			}
+		}
+		if latest == nil {
+			return Decision{}, nil
+		}
+		if latest.Status != "PENDING" || latest.WaitingFor == "CUSTOMER" {
+			return Decision{Resolve: true}, nil
+		}
+		// Historical intent and a monotonic stage must not override the current
+		// party expected to act or restart an already completed booking wait.
+		state.BookingIntent = &BookingIntentSignal{Value: true, Confidence: latest.Confidence,
+			AIRunID: latest.AIRunID, EvidenceMessageID: latest.TriggerMessageID, EvidenceAt: latest.TriggerAt}
+	}
+
 	// waitingFor = BUSINESS выводится из последнего канонического направления.
 	// Ответ бизнеса не подтверждает запись и потому сам по себе не закрывает
 	// уже открытый риск, но новую проверку после него не создаёт.

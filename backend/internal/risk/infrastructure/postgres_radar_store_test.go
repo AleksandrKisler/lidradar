@@ -507,3 +507,34 @@ func newRadarID(t *testing.T) string {
 	}
 	return value
 }
+
+func TestRadarSummaryDistinguishesUnknownAmountsAndDeduplicatesDeals(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	tenants := testsupport.TwoTenants(t, ctx, pool)
+	known := insertRiskFixture(t, pool, tenants.A.TenantID, tenants.A.LocationID, domain.DirectionIncoming)
+	unknown := insertRiskFixture(t, pool, tenants.A.TenantID, tenants.A.LocationID, domain.DirectionIncoming)
+	setRadarOpportunity(t, pool, known, "NEW", "1000", "RUB")
+	setRadarOpportunity(t, pool, unknown, "NEW", "1", "RUB")
+	if _, err := pool.Exec(ctx, `UPDATE opportunities SET estimated_amount=NULL,estimated_amount_confidence=NULL WHERE id=$1`, unknown.opportunityID); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	first := storeRadarRisk(t, pool, known, domain.SeverityHigh, at.Add(-time.Hour), at)
+	storeRadarRisk(t, pool, unknown, domain.SeverityHigh, at.Add(-time.Hour), at)
+	id, err := (ids.Generator{}).NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := domain.NewUnfinishedAgreement(id, domain.Finding{TenantID: first.TenantID, OpportunityID: first.OpportunityID, LocationID: first.LocationID, TriggerMessageID: first.TriggerMessageID, Severity: domain.SeverityMedium, PolicyVersion: domain.UnfinishedAgreementPolicyVersion, ReasonCode: "UNFINISHED_AGREEMENT_DUE", Reason: "Ожидается подтверждение", DueAt: at, Source: domain.SourceRule}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := NewPostgresRepository(pool).UpsertActive(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := NewPostgresRadarStore(pool).Summary(ctx, tenants.A.TenantID, application.Filters{})
+	if err != nil || summary.OpenRisks != 3 || summary.OpportunitiesAtRisk != 2 || summary.OpportunitiesWithUnknownAmount != 1 || summary.PotentialRevenue != "1000.00" {
+		t.Fatalf("unknown and duplicate: %#v %v", summary, err)
+	}
+}

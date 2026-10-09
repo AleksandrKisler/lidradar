@@ -98,6 +98,8 @@ func (e Evaluator) Apply(ctx context.Context, tenantID, opportunityID string) (d
 		risk, err = domain.NewCustomerSilentAfterPrice(riskID, *decision.Finding, now)
 	case domain.TypeFollowUpCandidate:
 		risk, err = domain.NewFollowUpCandidate(riskID, *decision.Finding, now)
+	case domain.TypeUnfinishedAgreement:
+		risk, err = domain.NewUnfinishedAgreement(riskID, *decision.Finding, now)
 	default:
 		return decision, domain.Risk{}, false, ErrInvalidCheck
 	}

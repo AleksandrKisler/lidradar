@@ -102,6 +102,40 @@ func TestPostgresRiskDedupResolveAndTenantIsolation(t *testing.T) {
 	}
 }
 
+func TestPostgresUnfinishedAgreementMigrationAndRisk(t *testing.T) {
+	pool := testsupport.Postgres(t)
+	ctx := context.Background()
+	tenant := testsupport.TwoTenants(t, ctx, pool).A
+	fixture := insertRiskFixture(t, pool, tenant.TenantID, tenant.LocationID, domain.DirectionOutgoing)
+	var threshold int
+	if err := pool.QueryRow(ctx, `SELECT agreement_threshold_minutes FROM locations WHERE tenant_id=$1 AND id=$2`,
+		tenant.TenantID, tenant.LocationID).Scan(&threshold); err != nil || threshold != 120 {
+		t.Fatalf("default agreement threshold=%d: %v", threshold, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE locations SET agreement_threshold_minutes=0 WHERE tenant_id=$1 AND id=$2`,
+		tenant.TenantID, tenant.LocationID); err == nil {
+		t.Fatal("agreement threshold accepted zero")
+	}
+	riskID, err := (ids.Generator{}).NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	risk, err := domain.NewUnfinishedAgreement(riskID, domain.Finding{
+		TenantID: tenant.TenantID, OpportunityID: fixture.opportunityID, LocationID: tenant.LocationID,
+		TriggerMessageID: fixture.messageID, Severity: domain.SeverityMedium,
+		PolicyVersion: domain.UnfinishedAgreementPolicyVersion, ReasonCode: "UNFINISHED_AGREEMENT_DUE",
+		Reason: "Ожидается подтверждение клиента", DueAt: fixture.messageAt,
+		Source: domain.SourceRule,
+	}, fixture.messageAt.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, created, err := NewPostgresRepository(pool).UpsertActive(ctx, risk)
+	if err != nil || !created || stored.Type != domain.TypeUnfinishedAgreement {
+		t.Fatalf("store unfinished agreement: %+v created=%v err=%v", stored, created, err)
+	}
+}
+
 func TestPostgresStateReaderUsesLatestCanonicalMessageAndBusinessHours(t *testing.T) {
 	pool := testsupport.Postgres(t)
 	ctx := context.Background()

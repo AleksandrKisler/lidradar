@@ -153,7 +153,7 @@ func TestRiskFeedbackPrecisionAndLeadCorrectionFlow(t *testing.T) {
 			Reliable          bool     `json:"reliable"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal(precision.Body.Bytes(), &report); err != nil || len(report.Items) != 5 || report.MinimumCoverage != 0.5 {
+	if err := json.Unmarshal(precision.Body.Bytes(), &report); err != nil || len(report.Items) != 6 || report.MinimumCoverage != 0.5 {
 		t.Fatalf("отчёт точности: %s, %v", precision.Body.String(), err)
 	}
 	first := report.Items[0]

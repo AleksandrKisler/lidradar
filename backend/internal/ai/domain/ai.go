@@ -99,6 +99,7 @@ type ConversationSummary struct {
 	AnalysisThroughMessageID, ModelVersion string
 	PromptVersion, SchemaVersion, RunID    string
 	Facts                                  []AppliedFact
+	Agreements                             []Agreement
 	UpdatedAt                              time.Time
 }
 
@@ -117,7 +118,54 @@ const (
 	FactBusinessCommitment FactType = "BUSINESS_COMMITMENT"
 	FactPriceMentioned     FactType = "PRICE_MENTIONED"
 	FactFollowUpCandidate  FactType = "FOLLOW_UP_CANDIDATE"
+	FactPurchaseIntent     FactType = "PURCHASE_INTENT"
 )
+
+type AgreementKind string
+
+const (
+	AgreementBookingConfirmation AgreementKind = "BOOKING_CONFIRMATION"
+	AgreementReschedule          AgreementKind = "RESCHEDULE"
+	AgreementCommitment          AgreementKind = "COMMITMENT"
+	AgreementPurchaseBlocker     AgreementKind = "PURCHASE_BLOCKER"
+)
+
+type AgreementWaitingFor string
+
+const (
+	AgreementCustomer AgreementWaitingFor = "CUSTOMER"
+	AgreementBusiness AgreementWaitingFor = "BUSINESS"
+)
+
+type AgreementStatus string
+
+const (
+	AgreementPending   AgreementStatus = "PENDING"
+	AgreementResolved  AgreementStatus = "RESOLVED"
+	AgreementCancelled AgreementStatus = "CANCELLED"
+)
+
+// Agreement is a derived observation, never a risk or an authoritative booking.
+// Trusted is assigned only by Cloud Core after validation.
+type Agreement struct {
+	Kind               AgreementKind       `json:"kind"`
+	WaitingFor         AgreementWaitingFor `json:"waitingFor"`
+	Status             AgreementStatus     `json:"status"`
+	TriggerMessageID   string              `json:"triggerMessageId"`
+	EvidenceMessageIDs []string            `json:"evidenceMessageIds"`
+	Confidence         float64             `json:"confidence"`
+	Trusted            bool                `json:"trusted"`
+}
+
+// AgreementObservation is the model-facing shape without server authority.
+type AgreementObservation struct {
+	Kind               AgreementKind       `json:"kind"`
+	WaitingFor         AgreementWaitingFor `json:"waitingFor"`
+	Status             AgreementStatus     `json:"status"`
+	TriggerMessageID   string              `json:"triggerMessageId"`
+	EvidenceMessageIDs []string            `json:"evidenceMessageIds"`
+	Confidence         float64             `json:"confidence"`
+}
 
 // SemanticFact is an interpretation only. It deliberately contains no Risk
 // or Opportunity state transition.
@@ -144,6 +192,14 @@ type AnalysisResultV1 struct {
 	AnalysisThroughMessageID string         `json:"analysisThroughMessageId"`
 	Summary                  string         `json:"summary"`
 	Facts                    []SemanticFact `json:"facts"`
+}
+
+type AnalysisResultV2 struct {
+	SchemaVersion            string                 `json:"schemaVersion"`
+	AnalysisThroughMessageID string                 `json:"analysisThroughMessageId"`
+	Summary                  string                 `json:"summary"`
+	Facts                    []SemanticFact         `json:"facts"`
+	Agreements               []AgreementObservation `json:"agreements"`
 }
 
 // RawJSON retains the exact provider result in a run while typed values are

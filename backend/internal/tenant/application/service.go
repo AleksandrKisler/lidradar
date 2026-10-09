@@ -255,6 +255,10 @@ func (service Service) ListLocations(ctx context.Context, actorID, tenantID stri
 }
 
 func (service Service) CreateLocation(ctx context.Context, actorID, tenantID, name, timezone string, threshold int) (domain.Location, error) {
+	return service.CreateLocationWithAgreementThreshold(ctx, actorID, tenantID, name, timezone, threshold, 120)
+}
+
+func (service Service) CreateLocationWithAgreementThreshold(ctx context.Context, actorID, tenantID, name, timezone string, threshold, agreementThreshold int) (domain.Location, error) {
 	if err := service.requirePermission(ctx, actorID, tenantID, PermissionLocationManage); err != nil {
 		return domain.Location{}, err
 	}
@@ -262,7 +266,7 @@ func (service Service) CreateLocation(ctx context.Context, actorID, tenantID, na
 	if err != nil {
 		return domain.Location{}, err
 	}
-	location, err := domain.NewLocation(id, tenantID, name, timezone, threshold, service.now().UTC())
+	location, err := domain.NewLocation(id, tenantID, name, timezone, threshold, service.now().UTC(), agreementThreshold)
 	if err != nil {
 		return domain.Location{}, ErrInvalid
 	}
@@ -273,17 +277,18 @@ func (service Service) CreateLocation(ctx context.Context, actorID, tenantID, na
 }
 
 type LocationUpdate struct {
-	Name                     *string
-	Timezone                 *string
-	ResponseThresholdMinutes *int
-	Active                   *bool
+	Name                      *string
+	Timezone                  *string
+	ResponseThresholdMinutes  *int
+	AgreementThresholdMinutes *int
+	Active                    *bool
 }
 
 func (service Service) UpdateLocation(ctx context.Context, actorID, tenantID, locationID string, update LocationUpdate) (domain.Location, error) {
 	if err := service.requirePermission(ctx, actorID, tenantID, PermissionLocationManage); err != nil {
 		return domain.Location{}, err
 	}
-	if locationID == "" || update.Name == nil && update.Timezone == nil && update.ResponseThresholdMinutes == nil && update.Active == nil {
+	if locationID == "" || update.Name == nil && update.Timezone == nil && update.ResponseThresholdMinutes == nil && update.AgreementThresholdMinutes == nil && update.Active == nil {
 		return domain.Location{}, ErrInvalid
 	}
 	location, found, err := service.repository.Location(ctx, tenantID, locationID)
@@ -301,6 +306,9 @@ func (service Service) UpdateLocation(ctx context.Context, actorID, tenantID, lo
 	}
 	if update.ResponseThresholdMinutes != nil {
 		location.ResponseThresholdMinutes = *update.ResponseThresholdMinutes
+	}
+	if update.AgreementThresholdMinutes != nil {
+		location.AgreementThresholdMinutes = *update.AgreementThresholdMinutes
 	}
 	if update.Active != nil {
 		location.Active = *update.Active

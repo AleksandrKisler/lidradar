@@ -85,6 +85,8 @@ func RiskTypeLabel(riskType RiskType) string {
 		return "клиент молчит после цены"
 	case RiskFollowUpCandidate:
 		return "стоит напомнить о себе"
+	case RiskUnfinishedAgreement:
+		return "договорённость не завершена"
 	default:
 		return string(riskType)
 	}

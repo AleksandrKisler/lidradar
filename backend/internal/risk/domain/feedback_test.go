@@ -99,7 +99,7 @@ func TestPrecisionRowMetrics(t *testing.T) {
 	if empty.Precision() != nil || empty.FalsePositiveRate() != nil || empty.CoverageRate() != 0 || empty.Reliable() {
 		t.Fatalf("пустая строка даёт метрики: %#v", empty)
 	}
-	if len(Types()) != 5 || Types()[0] != TypeNoResponse || Types()[1] != TypeCustomerSilentAfterPrice {
+	if len(Types()) != 6 || Types()[0] != TypeNoResponse || Types()[1] != TypeCustomerSilentAfterPrice || Types()[5] != TypeUnfinishedAgreement {
 		t.Fatalf("порядок типов ТЗ §27 нарушен: %v", Types())
 	}
 }

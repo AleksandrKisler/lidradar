@@ -26,7 +26,7 @@ func TestContextBuilderBoundsAndVersionsRequest(t *testing.T) {
 	if len(r.Messages) != application.MaxContextMessages || r.Messages[0].ID != "f" || r.AnalysisThroughMessageID != "y" {
 		t.Fatalf("unexpected window: %#v", r.Messages)
 	}
-	if r.SchemaVersion != application.AnalysisSchemaV1 || r.PromptVersion != application.CurrentAnalysisPrompt {
+	if r.SchemaVersion != application.AnalysisSchemaV2 || r.PromptVersion != application.CurrentAnalysisPrompt {
 		t.Fatalf("versions = %q %q", r.SchemaVersion, r.PromptVersion)
 	}
 	encoded, err := application.EncodeAnalysisRequest(r)

@@ -83,17 +83,36 @@ func AnalysisAppliedEventHandler(
 		if err != nil {
 			return jobsdomain.Retryable("SEMANTIC_FACT_UNAVAILABLE", err)
 		}
-		if !priceFound && !bookingFound && !followUpFound {
-			return nil
-		}
 		opportunity, found, err := repository.ActiveByConversation(ctx, event.TenantID, data.ConversationID)
 		if err != nil {
 			return jobsdomain.Retryable("OPPORTUNITY_UNAVAILABLE", err)
 		}
-		if !found {
-			return nil
-		}
 		at := now().UTC()
+		if !found {
+			creator, supported := repository.(domain.SemanticCreator)
+			if !supported {
+				return nil
+			}
+			opportunityID, idErr := ids.NewID()
+			if idErr != nil {
+				return jobsdomain.Retryable("OPPORTUNITY_ID_UNAVAILABLE", idErr)
+			}
+			historyID, idErr := ids.NewID()
+			if idErr != nil {
+				return jobsdomain.Retryable("HISTORY_ID_UNAVAILABLE", idErr)
+			}
+			opportunity, found, err = creator.CreateFromAnalysis(ctx, domain.SemanticCreation{
+				TenantID: event.TenantID, ConversationID: data.ConversationID, RunID: data.RunID,
+				Revision: data.BaseConversationRevision, ThroughMessageID: data.AnalysisThroughMessageID,
+				OpportunityID: opportunityID, HistoryID: historyID, At: at,
+			})
+			if err != nil {
+				return jobsdomain.Retryable("OPPORTUNITY_CREATION_FAILED", err)
+			}
+			if !found {
+				return nil
+			}
+		}
 		// Цена обрабатывается раньше намерения записаться: PRICE_SENT стоит в
 		// машине этапов до BOOKING_INTENT, и обратный порядок потерял бы этап.
 		if priceFound {
