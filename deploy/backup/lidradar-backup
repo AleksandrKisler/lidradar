@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# Команды копий вне хоста (ADR 0051); порядок работы — docs/runbooks/offhost-backup.md.
+set -euo pipefail
+umask 077
+# shellcheck source=lib.sh
+. "$(dirname "$0")/lib.sh"
+CYCLE="${LIDRADAR_BACKUP_CYCLE:-$(dirname "$0")/lidradar-backup-cycle}"
+
+usage() {
+  cat >&2 <<'EOF'
+использование: lidradar-backup <команда>
+  run                                служба: цикл копии по расписанию
+  once                               один цикл сейчас, как по расписанию
+  check                              пробный цикл в каталог _check/: статус и мониторинг не меняются
+  status [--max-age 15m] [--json]    возраст последней подтверждённой точки; код 1, если она старше
+  list [--tier ЯРУС] [--limit N]     копии вне хоста (нужны права на перечень)
+  fetch --identity ФАЙЛ [--tier ЯРУС] [--stamp ШТАМП] [--output КАТАЛОГ]
+                                     скачать копию, сверить суммы, расшифровать
+  drill --identity ФАЙЛ [--tier ЯРУС] [--stamp ШТАМП]
+                                     fetch, восстановление в учебную базу и сверка со счётчиками манифеста
+ярусы: frequent (по умолчанию), daily, _check
+EOF
+  exit 2
+}
+
+# --- run ------------------------------------------------------------------------
+
+cmd_run() {
+  require_database
+  require_remote
+  require_recipients
+  local interval cycle_timeout cycles=0 rc delay
+  interval="$(duration_seconds "${LIDRADAR_BACKUP_INTERVAL:-10m}")" \
+    || die backup.configuration_invalid 'LIDRADAR_BACKUP_INTERVAL: ожидается число с суффиксом s, m или h (10m)'
+  [ "${interval}" -ge 60 ] || die backup.configuration_invalid 'LIDRADAR_BACKUP_INTERVAL: чаще раза в минуту копии не снимаются'
+  cycle_timeout="$(duration_seconds "${LIDRADAR_BACKUP_CYCLE_TIMEOUT:-20m}")" \
+    || die backup.configuration_invalid 'LIDRADAR_BACKUP_CYCLE_TIMEOUT: ожидается число с суффиксом s, m или h (20m)'
+  duration_seconds "${LIDRADAR_BACKUP_MAX_AGE:-15m}" >/dev/null \
+    || die backup.configuration_invalid 'LIDRADAR_BACKUP_MAX_AGE: ожидается число с суффиксом s, m или h (15m)'
+  mkdir -p "${SPOOL}"
+  chmod 700 "${SPOOL}" 2>/dev/null || true
+  # Остатки прерванного цикла: открытый текст и временные файлы на диске не оставляем.
+  rm -rf "${SPOOL}"/work-* "${SPOOL}"/.verify.* "${SPOOL}"/status.json.tmp.*
+  log INFO backup.started 'служба копий вне хоста запущена' interval_seconds="${interval}" cycle_timeout_seconds="${cycle_timeout}" remote="${REMOTE%%:*}"
+
+  CHILD=''
+  trap 'log INFO backup.stopping "получен сигнал остановки"; [ -z "${CHILD}" ] || kill "${CHILD}" 2>/dev/null; exit 0' TERM INT
+  while :; do
+    # Цикл идёт фоном, чтобы сигнал остановки обрабатывался сразу, а не после цикла.
+    timeout "${cycle_timeout}" "${CYCLE}" &
+    CHILD=$!
+    rc=0
+    wait "${CHILD}" || rc=$?
+    CHILD=''
+    case "${rc}" in
+      0 | 1) ;; # 1 — сбой, уже записанный самим циклом
+      124)
+        record_failure timeout "цикл превысил ${cycle_timeout} с и остановлен" "$(now)"
+        log ERROR backup.failed 'цикл превысил допустимое время' step=timeout
+        ping "${LIDRADAR_BACKUP_FAIL_URL:-}"
+        ;;
+      *)
+        record_failure cycle "цикл завершился с кодом ${rc}" "$(now)"
+        log ERROR backup.failed 'цикл завершился непредвиденно' step=cycle code="${rc}"
+        ping "${LIDRADAR_BACKUP_FAIL_URL:-}"
+        ;;
+    esac
+    cycles=$((cycles + 1))
+    # Скрытая настройка для тестов: остановиться после N циклов.
+    if [ -n "${LIDRADAR_BACKUP_MAX_CYCLES:-}" ] && [ "${cycles}" -ge "${LIDRADAR_BACKUP_MAX_CYCLES}" ]; then
+      break
+    fi
+    delay="$(seconds_until_next "${interval}" "$(now)")"
+    sleep "${delay}" &
+    CHILD=$!
+    wait "${CHILD}" || true
+    CHILD=''
+  done
+}
+
+# --- status ---------------------------------------------------------------------
+
+cmd_status() {
+  local max_age_text="${LIDRADAR_BACKUP_MAX_AGE:-15m}" json=0 max_age state data age ok=1
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --max-age) [ "$#" -ge 2 ] || usage; max_age_text="$2"; shift ;;
+      --json) json=1 ;;
+      *) usage ;;
+    esac
+    shift
+  done
+  max_age="$(duration_seconds "${max_age_text}")" || usage
+  state="$(status_read)"
+  data="$(jq -r '.lastDataEpoch // empty' <<<"${state}")"
+  if [ -z "${data}" ]; then
+    ok=0
+    age=''
+  else
+    age=$(($(now) - data))
+    [ "${age}" -le "${max_age}" ] || ok=0
+  fi
+  if [ "${json}" -eq 1 ]; then
+    jq -n --argjson ok "${ok}" --arg age "${age}" --argjson max "${max_age}" --argjson state "${state}" \
+      '{ok: ($ok == 1), ageSeconds: (if $age == "" then null else ($age | tonumber) end), maxAgeSeconds: $max} + $state'
+  elif [ -z "${data}" ]; then
+    echo 'подтверждённых копий вне хоста ещё нет'
+  else
+    printf 'последняя точка данных: %s, возраст %s (допустимо %s); подряд неудач: %s; наибольший разрыв между точками: %s; копия: %s\n' \
+      "$(fmt_epoch "${data}" %Y-%m-%dT%H:%M:%SZ)" "$(human_duration "${age}")" "$(human_duration "${max_age}")" \
+      "$(jq -r '.consecutiveFailures // 0' <<<"${state}")" \
+      "$(human_duration "$(jq -r '.maxGapSeconds // 0' <<<"${state}")")" "$(jq -r '.lastKey // ""' <<<"${state}")"
+    if [ "${ok}" -eq 0 ]; then
+      echo "ОШИБКА: точка старше допустимого возраста; последняя ошибка: $(jq -r '.lastError // ""' <<<"${state}")"
+    fi
+  fi
+  [ "${ok}" -eq 1 ]
+}
+
+# --- fetch, list, drill ---------------------------------------------------------
+
+# fetch_backup ЯРУС ШТАМП КАТАЛОГ ФАЙЛ_КЛЮЧА. Результат: FETCH_STAMP, FETCH_DUMP,
+# FETCH_MANIFEST, FETCH_DOWNLOAD_SECONDS, FETCH_DECRYPT_SECONDS. Пустой ШТАМП —
+# самая новая копия, у которой есть манифест (без него загрузка не завершена).
+fetch_backup() {
+  local tier="$1" stamp="$2" out="$3" identity="$4" listing name expected plain started
+  [ -r "${identity}" ] || die backup.fetch_failed "файл ключа не читается: ${identity}" 2
+  mkdir -p "${out}"
+  if [ -z "${stamp}" ]; then
+    listing="$(rclone lsf --files-only "$(remote_path "${tier}" '')" 2>"${SPOOL}/.rclone.err")" \
+      || die backup.fetch_failed "перечень копий не получен (ключу нужно право на перечень бакета, ключа записи с хоста для этого мало; либо укажите --stamp): $(tool_error "${SPOOL}/.rclone.err")" 1
+    stamp="$(printf '%s\n' "${listing}" | grep -E '^[0-9]{8}T[0-9]{6}Z\.manifest\.json$' | sort | tail -n 1 | sed 's/\.manifest\.json$//' || true)"
+    [ -n "${stamp}" ] || die backup.fetch_failed "в ярусе ${tier} нет ни одной полной копии (с манифестом)" 1
+  fi
+  [[ "${stamp}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || die backup.fetch_failed 'штамп копии должен иметь вид 20261010T080000Z' 2
+
+  started="$(now)"
+  rclone copyto "$(remote_path "${tier}" "${stamp}.manifest.json")" "${out}/${stamp}.manifest.json" 2>"${SPOOL}/.rclone.err" \
+    || die backup.fetch_failed "манифест не скачан: $(tool_error "${SPOOL}/.rclone.err")" 1
+  jq -e '.format == 1 and (.dump.name | type == "string") and (.dump.sha256 | test("^[0-9a-f]{64}$")) and (.dump.plainSha256 | test("^[0-9a-f]{64}$"))' \
+    "${out}/${stamp}.manifest.json" >/dev/null 2>&1 || die backup.fetch_failed 'манифест не распознан' 1
+  name="$(jq -r '.dump.name' "${out}/${stamp}.manifest.json")"
+  [ "${name}" = "${stamp}.dump.age" ] || die backup.fetch_failed 'имя файла в манифесте не соответствует штампу' 1
+  expected="$(jq -r '.dump.sha256' "${out}/${stamp}.manifest.json")"
+  plain="$(jq -r '.dump.plainSha256' "${out}/${stamp}.manifest.json")"
+  rclone copyto "$(remote_path "${tier}" "${name}")" "${out}/${name}" 2>"${SPOOL}/.rclone.err" \
+    || die backup.fetch_failed "файл копии не скачан: $(tool_error "${SPOOL}/.rclone.err")" 1
+  [ "$(sha256_of "${out}/${name}")" = "${expected}" ] \
+    || die backup.fetch_failed 'контрольная сумма скачанного файла не совпала с манифестом: объект повреждён или подменён' 1
+  FETCH_DOWNLOAD_SECONDS="$(($(now) - started))"
+
+  started="$(now)"
+  age -d -i "${identity}" -o "${out}/lidradar-${stamp}.dump" "${out}/${name}" 2>"${SPOOL}/.age.err" \
+    || die backup.fetch_failed "не удалось расшифровать (ключ не подходит или файл повреждён): $(tool_error "${SPOOL}/.age.err")" 1
+  [ "$(sha256_of "${out}/lidradar-${stamp}.dump")" = "${plain}" ] \
+    || die backup.fetch_failed 'расшифрованная выгрузка не совпала с суммой из манифеста' 1
+  pg_restore --list "${out}/lidradar-${stamp}.dump" >/dev/null 2>&1 \
+    || die backup.fetch_failed 'оглавление расшифрованной выгрузки не читается' 1
+  rm -f "${out}/${name}"
+  FETCH_DECRYPT_SECONDS="$(($(now) - started))"
+  FETCH_STAMP="${stamp}"
+  FETCH_DUMP="${out}/lidradar-${stamp}.dump"
+  FETCH_MANIFEST="${out}/${stamp}.manifest.json"
+}
+
+parse_fetch_options() { # заполняет TIER, STAMP, IDENTITY, OUTPUT
+  TIER=frequent STAMP='' IDENTITY='' OUTPUT=''
+  while [ "$#" -gt 0 ]; do
+    [ "$#" -ge 2 ] || usage
+    case "$1" in
+      --tier) TIER="$2" ;;
+      --stamp) STAMP="$2" ;;
+      --identity) IDENTITY="$2" ;;
+      --output) OUTPUT="$2" ;;
+      *) usage ;;
+    esac
+    shift 2
+  done
+  case "${TIER}" in frequent | daily | _check) ;; *) usage ;; esac
+  [ -n "${IDENTITY}" ] || usage
+}
+
+cmd_fetch() {
+  parse_fetch_options "$@"
+  require_remote
+  fetch_backup "${TIER}" "${STAMP}" "${OUTPUT:-${SPOOL}/fetch}" "${IDENTITY}"
+  log INFO backup.fetched 'копия скачана, сверена и расшифрована' tier="${TIER}" stamp="${FETCH_STAMP}" \
+    download_seconds="${FETCH_DOWNLOAD_SECONDS}" decrypt_seconds="${FETCH_DECRYPT_SECONDS}"
+  jq -n --arg dump "${FETCH_DUMP}" --argjson download "${FETCH_DOWNLOAD_SECONDS}" --argjson decrypt "${FETCH_DECRYPT_SECONDS}" \
+    --slurpfile manifest "${FETCH_MANIFEST}" '{dump: $dump, downloadSeconds: $download, decryptSeconds: $decrypt, manifest: $manifest[0]}'
+}
+
+cmd_list() {
+  local tier=frequent limit=20 listing stamp
+  while [ "$#" -gt 0 ]; do
+    [ "$#" -ge 2 ] || usage
+    case "$1" in
+      --tier) tier="$2" ;;
+      --limit) limit="$2" ;;
+      *) usage ;;
+    esac
+    shift 2
+  done
+  case "${tier}" in frequent | daily | _check) ;; *) usage ;; esac
+  [[ "${limit}" =~ ^[1-9][0-9]*$ ]] || usage
+  require_remote
+  listing="$(rclone lsf --files-only "$(remote_path "${tier}" '')" 2>"${SPOOL}/.rclone.err")" \
+    || die backup.list_failed "перечень копий не получен (нужен ключ чтения с правом на перечень бакета, ключа записи с хоста для этого мало): $(tool_error "${SPOOL}/.rclone.err")" 1
+  printf 'ШТАМП\tТОЧКА ДАННЫХ\tМИГРАЦИЯ\tБАЙТ\tОРГАНИЗАЦИЙ\tСООБЩЕНИЙ\tВЫПУСК\n'
+  printf '%s\n' "${listing}" | grep -E '^[0-9]{8}T[0-9]{6}Z\.manifest\.json$' | sort -r | head -n "${limit}" | while read -r file; do
+    stamp="${file%.manifest.json}"
+    rclone cat "$(remote_path "${tier}" "${file}")" 2>/dev/null \
+      | jq -r --arg stamp "${stamp}" '[$stamp, .dataAt, .migration, .dump.bytes, .counts.after.organizations, .counts.after.messages, .release] | @tsv' \
+      || printf '%s\t(манифест не читается)\n' "${stamp}"
+  done
+}
+
+cmd_drill() {
+  parse_fetch_options "$@"
+  require_remote
+  require_database
+  local scratch_url restored verdict started restore_seconds
+  # Переменные глобальные: ловушка EXIT выполняется уже после выхода из функции.
+  DRILL_WORK="${SPOOL}/drill-$(now)"
+  DRILL_SCRATCH=''
+  mkdir -p "${DRILL_WORK}"
+  trap 'rm -rf "${DRILL_WORK}"; [ -z "${DRILL_SCRATCH}" ] || sql "DROP DATABASE IF EXISTS \"${DRILL_SCRATCH}\"" >/dev/null 2>&1 || true' EXIT
+  fetch_backup "${TIER}" "${STAMP}" "${DRILL_WORK}" "${IDENTITY}"
+
+  DRILL_SCRATCH="lidradar_drill_$(printf '%s' "${FETCH_STAMP}" | tr 'A-Z' 'a-z')"
+  scratch_url="$(url_with_database "${DB_URL}" "${DRILL_SCRATCH}")"
+  sql "CREATE DATABASE \"${DRILL_SCRATCH}\"" >/dev/null
+  started="$(now)"
+  pg_restore --dbname="${scratch_url}" --no-owner --no-privileges --exit-on-error "${FETCH_DUMP}" 2>"${DRILL_WORK}/restore.err" \
+    || die backup.drill_failed "восстановление в учебную базу не удалось: $(tool_error "${DRILL_WORK}/restore.err")" 1
+  restore_seconds="$(($(now) - started))"
+  restored="$(psql -X -At -v ON_ERROR_STOP=1 "${scratch_url}" -c "${COUNTS_SQL}")"
+
+  # Выгрузка снята между двумя замерами счётчиков, поэтому счётчики таблиц, где записи
+  # только добавляются, должны лежать между ними; число таблиц и миграция совпадают точно.
+  verdict="$(jq -n --slurpfile manifest "${FETCH_MANIFEST}" --argjson restored "$(counts_json "${restored}")" '
+    $manifest[0] as $m
+    | [(if $restored.tables != $m.tables then "таблиц \($restored.tables) вместо \($m.tables)" else empty end),
+       (if $restored.migration != $m.migration then "миграция \($restored.migration) вместо \($m.migration)" else empty end),
+       (["organizations", "messages", "risk_signals", "revenue_events", "audit_log"][] as $k
+        | if ($restored[$k] < $m.counts.before[$k]) or ($restored[$k] > $m.counts.after[$k])
+          then "\($k): \($restored[$k]) вне диапазона [\($m.counts.before[$k]), \($m.counts.after[$k])]" else empty end)]')"
+  jq -n --arg stamp "${FETCH_STAMP}" --argjson problems "${verdict}" --argjson download "${FETCH_DOWNLOAD_SECONDS}" \
+    --argjson decrypt "${FETCH_DECRYPT_SECONDS}" --argjson restore "${restore_seconds}" --slurpfile manifest "${FETCH_MANIFEST}" \
+    '{ok: ($problems | length == 0), stamp: $stamp, dataAt: $manifest[0].dataAt, migration: $manifest[0].migration, problems: $problems,
+      seconds: {download: $download, decrypt: $decrypt, restore: $restore}}'
+  [ "$(jq 'length' <<<"${verdict}")" -eq 0 ] || exit 1
+}
+
+# --- разбор команды --------------------------------------------------------------
+
+[ "$#" -ge 1 ] || usage
+command -v jq >/dev/null || { echo 'в образе нет jq' >&2; exit 2; }
+COMMAND="$1"
+shift
+case "${COMMAND}" in
+  run) [ "$#" -eq 0 ] || usage; cmd_run ;;
+  once) [ "$#" -eq 0 ] || usage; rc=0; "${CYCLE}" || rc=$?; cmd_status || true; exit "${rc}" ;;
+  check) [ "$#" -eq 0 ] || usage; exec "${CYCLE}" --check ;;
+  status) cmd_status "$@" ;;
+  list) cmd_list "$@" ;;
+  fetch) cmd_fetch "$@" ;;
+  drill) cmd_drill "$@" ;;
+  *) usage ;;
+esac

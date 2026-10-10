@@ -82,7 +82,13 @@ func newAPIFixture(t *testing.T) apiFixture {
 	return newAPIFixtureForAnalysis(t, false)
 }
 
-func newAPIFixtureForAnalysis(t *testing.T, current bool) apiFixture {
+// newAPIFixtureWithRouterOptions поднимает тот же стенд, но с настройками роутера
+// (например, доверенными proxy) и без текущего AI-контракта.
+func newAPIFixtureWithRouterOptions(t *testing.T, options ...httpplatform.RouterOption) apiFixture {
+	return newAPIFixtureForAnalysis(t, false, options...)
+}
+
+func newAPIFixtureForAnalysis(t *testing.T, current bool, routerOptions ...httpplatform.RouterOption) apiFixture {
 	t.Helper()
 	pools := testsupport.PostgresRoles(t)
 	// Репозитории API и обработчиков работают под ролью с RLS; захват заданий,
@@ -227,7 +233,7 @@ func newAPIFixtureForAnalysis(t *testing.T, current bool) apiFixture {
 	).WithAuditor(auditRecorder)
 	router := httpplatform.NewRouter(
 		"lidradar-api", slog.New(slog.NewTextHandler(io.Discard, nil)),
-		platformpostgres.NewSchemaReadiness(pool),
+		platformpostgres.NewSchemaReadiness(pool), routerOptions...,
 	)
 	router.Mount("/api/v1/auth", identitytransport.NewHandler(
 		identityService, tenantService, identitytransport.CookieConfiguration{TTL: 24 * time.Hour},

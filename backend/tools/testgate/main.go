@@ -51,6 +51,7 @@ var required = []string{
 	"lidradar/backend/internal/corrective/infrastructure/TestPostgresActionCommitsBeforeWaitingClosure",
 	"lidradar/backend/platform/postgres/TestRoleBootstrapReproducesMigrationGrants",
 	"lidradar/backend/platform/postgres/TestRoleBootstrapGrantsMembershipToSeparateApplicationUser",
+	"lidradar/backend/internal/integration/TestPersistentAuthLimitsUseTheClientBehindTrustedProxy",
 }
 
 func main() {

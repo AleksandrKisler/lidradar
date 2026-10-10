@@ -1,0 +1,323 @@
+# Production-топология пилота LidRadar (ADR 0050): один хост, Docker Compose.
+#
+#   cd deploy/production && cp .env.example .env && chmod 600 .env   # затем заполнить
+#   docker compose up -d                                  # edge, web, api, worker, scheduler, postgres, backup
+#   docker compose run --rm platform-admin grant --email owner@example.com
+#
+# Снаружи открыты только порты edge (80 и 443). API, база и worker доступны
+# лишь внутри Docker-сетей. Образы неизменяемы: их собирает
+# scripts/build-images.sh, версия выпуска задаётся LIDRADAR_VERSION, `build:`
+# здесь нет. Для staging используйте отдельный хост (порты 80 и 443, сертификат и
+# подсеть edge заняты стеком production), другое имя проекта и свой .env:
+#   docker compose -p lidradar-staging --env-file /etc/lidradar/staging.env up -d
+name: lidradar-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-service: &service
+  restart: unless-stopped
+  logging: *logging
+  security_opt:
+    - no-new-privileges:true
+
+# Статические бинарники без привилегий: корневая ФС только для чтения.
+x-go-service: &go-service
+  <<: *service
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+
+# Рабочие процессы входят логином lidradar_runtime: он не владеет базой и не суперпользователь,
+# схему, триггеры и RLS менять не может (ADR 0052). Миграции идут под владельцем (сервис migrate).
+x-database-environment: &database-environment
+  LIDRADAR_ENV: ${LIDRADAR_ENV:-production}
+  # Внешнюю базу задают целиком, с sslmode=verify-full, и тогда
+  # LIDRADAR_DATABASE_ALLOW_PLAINTEXT не нужен.
+  LIDRADAR_DATABASE_URL: ${LIDRADAR_DATABASE_URL:-postgres://lidradar_runtime:${LIDRADAR_DB_RUNTIME_PASSWORD:?задайте LIDRADAR_DB_RUNTIME_PASSWORD в .env}@postgres:5432/lidradar?sslmode=disable}
+  # Открытый канал допустим только до базы во внутренней сети хоста и должен
+  # быть явным решением оператора (.env), по умолчанию запрещён.
+  LIDRADAR_DATABASE_ALLOW_PLAINTEXT: ${LIDRADAR_DATABASE_ALLOW_PLAINTEXT:-false}
+  LIDRADAR_DATABASE_MAX_CONNS: ${LIDRADAR_DATABASE_MAX_CONNS:-10}
+  LIDRADAR_DATABASE_MIN_CONNS: ${LIDRADAR_DATABASE_MIN_CONNS:-1}
+
+services:
+  edge:
+    <<: *service
+    image: caddy:2.11.7-alpine
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_started
+    ports:
+      - "${LIDRADAR_HTTP_PORT:-80}:80"
+      - "${LIDRADAR_HTTPS_PORT:-443}:443"
+    environment:
+      LIDRADAR_DOMAIN: ${LIDRADAR_DOMAIN:?задайте LIDRADAR_DOMAIN в .env}
+      LIDRADAR_ACME_EMAIL: ${LIDRADAR_ACME_EMAIL:?задайте LIDRADAR_ACME_EMAIL в .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: ${LIDRADAR_EDGE_MEMORY:-256m}
+    # Адрес закреплён: API доверяет X-Forwarded-For только от него (ADR 0049).
+    networks:
+      edge:
+        ipv4_address: ${LIDRADAR_EDGE_IP:-172.29.88.2}
+
+  web:
+    <<: *service
+    image: lidradar-web:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    mem_limit: ${LIDRADAR_WEB_MEMORY:-128m}
+    networks:
+      - edge
+
+  api:
+    <<: *go-service
+    image: lidradar-api:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *database-environment
+      LIDRADAR_HTTP_ADDRESS: ":8080"
+      LIDRADAR_PUBLIC_BASE_URL: ${LIDRADAR_PUBLIC_ORIGIN:-https://${LIDRADAR_DOMAIN:?задайте LIDRADAR_DOMAIN в .env}}
+      LIDRADAR_ALLOWED_ORIGINS: ${LIDRADAR_PUBLIC_ORIGIN:-https://${LIDRADAR_DOMAIN}}
+      LIDRADAR_TRUSTED_PROXIES: ${LIDRADAR_EDGE_IP:-172.29.88.2}/32
+      LIDRADAR_INTEGRATION_ENCRYPTION_KEY: ${LIDRADAR_INTEGRATION_ENCRYPTION_KEY:?задайте LIDRADAR_INTEGRATION_ENCRYPTION_KEY в .env}
+      LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:?задайте LIDRADAR_TELEGRAM_BOT_USERNAME в .env}
+      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-lidradar-main-v1}
+      LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE: ${LIDRADAR_HTTP_RATE_LIMIT_PER_MINUTE:-120}
+      LIDRADAR_HTTP_WEBHOOK_RATE_LIMIT_PER_MINUTE: ${LIDRADAR_HTTP_WEBHOOK_RATE_LIMIT_PER_MINUTE:-1200}
+      LIDRADAR_HTTP_AI_NODE_RATE_LIMIT_PER_MINUTE: ${LIDRADAR_HTTP_AI_NODE_RATE_LIMIT_PER_MINUTE:-600}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 30s
+    mem_limit: ${LIDRADAR_API_MEMORY:-512m}
+    # edge даёт и входящий путь, и исходящий выход (Telegram), data — база.
+    networks:
+      - edge
+      - data
+
+  worker:
+    <<: *go-service
+    image: lidradar-worker:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *database-environment
+      # Без токена уведомления копились бы без доставки: запуск без него отказан.
+      LIDRADAR_TELEGRAM_TOKEN: ${LIDRADAR_TELEGRAM_TOKEN:?задайте LIDRADAR_TELEGRAM_TOKEN в .env}
+      LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:?задайте LIDRADAR_TELEGRAM_BOT_USERNAME в .env}
+      LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION: ${LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION:-false}
+      LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION_AFTER: ${LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION_AFTER:-30m}
+      LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-lidradar-main-v1}
+    mem_limit: ${LIDRADAR_WORKER_MEMORY:-512m}
+    # Входящих соединений нет, нужен выход к Bot API и база.
+    networks:
+      - egress
+      - data
+
+  scheduler:
+    <<: *go-service
+    image: lidradar-scheduler:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *database-environment
+    mem_limit: ${LIDRADAR_SCHEDULER_MEMORY:-128m}
+    networks:
+      - data
+
+  # Копии вне хоста по расписанию (ADR 0051): выгрузка каждые 10 минут, шифрование
+  # открытым ключом age, загрузка в S3-совместимое хранилище, сверка и манифест.
+  # Приватного ключа age здесь нет: расшифровать копию может только оператор.
+  # Без хранилища и ключа получателя стек не запускается (см. .env.example).
+  backup:
+    <<: *service
+    image: lidradar-backup:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      LIDRADAR_ENV: ${LIDRADAR_ENV:-production}
+      LIDRADAR_VERSION: ${LIDRADAR_VERSION}
+      # Роль копии должна видеть все строки при RLS: рабочий логин состоит в
+      # lidradar_platform, его пропускает политика (проверяет scripts/backup.sh).
+      LIDRADAR_BACKUP_DATABASE_URL: ${LIDRADAR_BACKUP_DATABASE_URL:-${LIDRADAR_DATABASE_URL:-postgres://lidradar_runtime:${LIDRADAR_DB_RUNTIME_PASSWORD:?задайте LIDRADAR_DB_RUNTIME_PASSWORD в .env}@postgres:5432/lidradar?sslmode=disable}}
+      LIDRADAR_BACKUP_REMOTE: ${LIDRADAR_BACKUP_REMOTE:?задайте LIDRADAR_BACKUP_REMOTE в .env (docs/runbooks/offhost-backup.md)}
+      LIDRADAR_BACKUP_AGE_RECIPIENTS: ${LIDRADAR_BACKUP_AGE_RECIPIENTS:?задайте LIDRADAR_BACKUP_AGE_RECIPIENTS в .env (docs/runbooks/offhost-backup.md)}
+      LIDRADAR_BACKUP_INTERVAL: ${LIDRADAR_BACKUP_INTERVAL:-10m}
+      LIDRADAR_BACKUP_MAX_AGE: ${LIDRADAR_BACKUP_MAX_AGE:-15m}
+      LIDRADAR_BACKUP_PING_URL: ${LIDRADAR_BACKUP_PING_URL:-}
+      LIDRADAR_BACKUP_FAIL_URL: ${LIDRADAR_BACKUP_FAIL_URL:-}
+      LIDRADAR_BACKUP_S3_PROVIDER: ${LIDRADAR_BACKUP_S3_PROVIDER:-Other}
+      LIDRADAR_BACKUP_S3_ENDPOINT: ${LIDRADAR_BACKUP_S3_ENDPOINT:-}
+      LIDRADAR_BACKUP_S3_REGION: ${LIDRADAR_BACKUP_S3_REGION:-}
+      LIDRADAR_BACKUP_S3_ACCESS_KEY_ID: ${LIDRADAR_BACKUP_S3_ACCESS_KEY_ID:-}
+      LIDRADAR_BACKUP_S3_SECRET_ACCESS_KEY: ${LIDRADAR_BACKUP_S3_SECRET_ACCESS_KEY:-}
+    volumes:
+      - backup-spool:/spool
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    # Здоровье — возраст последней подтверждённой точки не выше LIDRADAR_BACKUP_MAX_AGE.
+    healthcheck:
+      test: ["CMD", "lidradar-backup", "status"]
+      interval: 60s
+      timeout: 10s
+      retries: 1
+      start_period: 5m
+    mem_limit: ${LIDRADAR_BACKUP_MEMORY:-256m}
+    # База во внутренней сети и выход к хранилищу через egress.
+    networks:
+      - data
+      - egress
+
+  # Одноразово применяет миграции; api, worker и scheduler стартуют после него.
+  # Схема меняется только вперёд (ADR 0050): откат — восстановление копии.
+  migrate:
+    <<: *go-service
+    image: lidradar-migrate:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *database-environment
+      # Миграции идут под владельцем lidradar (не суперпользователь). Для внешней базы
+      # владелец задаётся LIDRADAR_MIGRATE_DATABASE_URL, иначе берётся LIDRADAR_DATABASE_URL.
+      LIDRADAR_DATABASE_URL: ${LIDRADAR_MIGRATE_DATABASE_URL:-${LIDRADAR_DATABASE_URL:-postgres://lidradar:${LIDRADAR_DB_OWNER_PASSWORD:?задайте LIDRADAR_DB_OWNER_PASSWORD в .env}@postgres:5432/lidradar?sslmode=disable}}
+    mem_limit: ${LIDRADAR_MIGRATE_MEMORY:-256m}
+    networks:
+      - data
+
+  # Роли и вход описаны в postgres/ (ADR 0052). При первой инициализации тома образ выполняет
+  # 10-roles.sql: владелец lidradar (не суперпользователь) и рабочий логин lidradar_runtime
+  # с их паролями; pg_hba.conf закрывает вход администратора по сети.
+  postgres:
+    <<: *service
+    image: postgres:18-alpine
+    command: ["postgres", "-c", "hba_file=/etc/lidradar/pg_hba.conf"]
+    environment:
+      POSTGRES_DB: lidradar
+      # Администратор postgres: пароль нужен только образу, процессам приложения он не передаётся.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      LIDRADAR_DB_OWNER_PASSWORD: ${LIDRADAR_DB_OWNER_PASSWORD:?задайте LIDRADAR_DB_OWNER_PASSWORD в .env}
+      LIDRADAR_DB_RUNTIME_PASSWORD: ${LIDRADAR_DB_RUNTIME_PASSWORD:?задайте LIDRADAR_DB_RUNTIME_PASSWORD в .env}
+    volumes:
+      - lidradar-postgres:/var/lib/postgresql
+      - ./postgres/pg_hba.conf:/etc/lidradar/pg_hba.conf:ro
+      - ./postgres/10-roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    shm_size: 256mb
+    healthcheck:
+      # По TCP, а не по сокету: во время инициализации тома образ держит временный сервер, который
+      # слушает только сокет и принимает проверку до конца 10-roles.sql. Сервер, отвечающий по
+      # TCP, уже закончил инициализацию. Логин lidradar пропускает pg_hba.conf, и проверка не
+      # оставляет в журнале строк об отказе (у postgres по сети они были бы).
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U lidradar -d lidradar"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: ${LIDRADAR_POSTGRES_MEMORY:-1g}
+    # Только внутренняя сеть: ни публикации портов, ни выхода в интернет.
+    networks:
+      - data
+
+  # Операторские команды: docker compose run --rm <команда> <аргументы>.
+  platform-admin:
+    <<: *go-service
+    image: lidradar-platform-admin:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *database-environment
+    mem_limit: ${LIDRADAR_TOOLS_MEMORY:-128m}
+    networks:
+      - data
+
+  ai-node-register:
+    <<: *go-service
+    image: lidradar-ai-node-register:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *database-environment
+    mem_limit: ${LIDRADAR_TOOLS_MEMORY:-128m}
+    networks:
+      - data
+
+  ai-node-manage:
+    <<: *go-service
+    image: lidradar-ai-node-manage:${LIDRADAR_VERSION:?задайте LIDRADAR_VERSION в .env}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *database-environment
+    mem_limit: ${LIDRADAR_TOOLS_MEMORY:-128m}
+    networks:
+      - data
+
+networks:
+  # Закреплённая подсеть нужна, чтобы адрес edge не менялся: по нему API узнаёт
+  # доверенный proxy. Подсеть не должна пересекаться с сетями хоста. Остальным
+  # контейнерам адреса выдаются из ip_range (верхняя половина), иначе Docker мог
+  # бы отдать веб-клиенту адрес, закреплённый за edge, и edge не стартовал бы.
+  edge:
+    ipam:
+      config:
+        - subnet: ${LIDRADAR_EDGE_SUBNET:-172.29.88.0/24}
+          ip_range: ${LIDRADAR_EDGE_DYNAMIC_RANGE:-172.29.88.128/25}
+  egress: {}
+  # Внутренняя сеть без маршрута наружу: база и фоновые процессы.
+  data:
+    internal: true
+
+volumes:
+  lidradar-postgres:
+  caddy-data:
+  caddy-config:
+  # Состояние службы копий (status.json) и рабочие файлы цикла.
+  backup-spool:

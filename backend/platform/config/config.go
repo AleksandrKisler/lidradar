@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -26,6 +27,7 @@ const (
 	databasePlaintextKey    = "LIDRADAR_DATABASE_ALLOW_PLAINTEXT"
 	databaseTimeoutKey      = "LIDRADAR_DATABASE_TIMEOUT"
 	allowedOriginsKey       = "LIDRADAR_ALLOWED_ORIGINS"
+	trustedProxiesKey       = "LIDRADAR_TRUSTED_PROXIES"
 	sessionTTLKey           = "LIDRADAR_SESSION_TTL"
 	cookieSecureKey         = "LIDRADAR_COOKIE_SECURE"
 	publicBaseURLKey        = "LIDRADAR_PUBLIC_BASE_URL"
@@ -98,6 +100,9 @@ type HTTP struct {
 	Address         string
 	ShutdownTimeout time.Duration
 	AllowedOrigins  []string
+	// TrustedProxies — узлы, которые завершают TLS перед API и вправе сообщать
+	// адрес клиента в X-Forwarded-For (ADR 0049). Пусто — адрес соединения.
+	TrustedProxies []netip.Prefix
 	// RateLimitPerMinute ограничивает запросы входа и регистрации на сетевой
 	// адрес; ноль отключает ограничение (LR-BE-2404).
 	RateLimitPerMinute int32
@@ -207,6 +212,9 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 
+	if configuration.HTTP.TrustedProxies, err = trustedProxiesValue(lookup, trustedProxiesKey); err != nil {
+		return Config{}, err
+	}
 	if configuration.HTTP.ShutdownTimeout, err = durationValue(lookup, shutdownTimeoutKey, defaultShutdown); err != nil {
 		return Config{}, err
 	}
@@ -366,6 +374,8 @@ func (c Config) Validate() error {
 //     получила бы 403 ORIGIN_NOT_ALLOWED.
 //   - Без публичного адреса и ключа шифрования подключение Telegram отвечает 503
 //     CONNECTOR_UNAVAILABLE уже после успешного старта.
+//   - Без списка доверенных proxy адресом каждого клиента остаётся адрес proxy:
+//     все пользователи делят пределы входа и регистрации (H-10, ADR 0049).
 //
 // Остальные процессы браузеров и каналов не обслуживают, поэтому общая Validate
 // этих настроек не требует. Об ошибках сообщается сразу обо всех.
@@ -379,6 +389,9 @@ func (c Config) ValidateAPI() error {
 	}
 	if c.Integrations.PublicBaseURL == "" || len(c.Integrations.CredentialKey) == 0 {
 		problems = append(problems, fmt.Sprintf("%s and %s are required to connect Telegram channels", publicBaseURLKey, credentialKeyKey))
+	}
+	if len(c.HTTP.TrustedProxies) == 0 {
+		problems = append(problems, fmt.Sprintf("%s must list the proxies that terminate TLS in front of the api", trustedProxiesKey))
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("invalid API configuration for %s: %s", c.Environment, strings.Join(problems, "; "))
@@ -454,6 +467,65 @@ func stringListValue(lookup LookupEnv, key string) []string {
 		values = append(values, item)
 	}
 	return values
+}
+
+// trustedProxiesValue разбирает список узлов и сетей, разделённых запятыми:
+// «10.0.0.5», «172.16.0.0/12», «fd00::/8». Одиночный адрес становится узлом,
+// повторы схлопываются. Сеть «весь интернет» и записи с битами узла отвергаются,
+// чтобы опечатка не расширила доверие молча.
+func trustedProxiesValue(lookup LookupEnv, key string) ([]netip.Prefix, error) {
+	raw, ok := lookup(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	seen := make(map[netip.Prefix]struct{})
+	var proxies []netip.Prefix
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		prefix, err := parseTrustedProxy(item)
+		if err != nil {
+			return nil, fmt.Errorf("%s contains invalid entry %q: %w", key, item, err)
+		}
+		if _, duplicate := seen[prefix]; duplicate {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		proxies = append(proxies, prefix)
+	}
+	return proxies, nil
+}
+
+func parseTrustedProxy(item string) (netip.Prefix, error) {
+	var prefix netip.Prefix
+	if strings.Contains(item, "/") {
+		parsed, err := netip.ParsePrefix(item)
+		if err != nil {
+			return netip.Prefix{}, errors.New("expected an IP address or a CIDR network")
+		}
+		prefix = parsed
+	} else {
+		address, err := netip.ParseAddr(item)
+		if err != nil || address.Zone() != "" {
+			return netip.Prefix{}, errors.New("expected an IP address or a CIDR network")
+		}
+		prefix = netip.PrefixFrom(address, address.BitLen())
+	}
+	if prefix.Addr().Is4In6() {
+		if prefix.Bits() < 96 {
+			return netip.Prefix{}, errors.New("an IPv4-mapped network must be at least /96")
+		}
+		prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96)
+	}
+	if prefix.Bits() == 0 {
+		return netip.Prefix{}, errors.New("a /0 network trusts every address")
+	}
+	if prefix != prefix.Masked() {
+		return netip.Prefix{}, fmt.Errorf("host bits are set, write %s", prefix.Masked())
+	}
+	return prefix, nil
 }
 
 func encryptionKeyValue(lookup LookupEnv, key string) ([]byte, error) {

@@ -72,11 +72,26 @@ jobs:
           if-no-files-found: error
       - name: Documentation and recovery helper tests
         run: |
+          jq --version  # тесты копий вне хоста без jq пропускаются, а не падают
           python3 -m unittest discover -s docs/notion -p test_build.py
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
           python3 docs/notion/build.py
           python3 docs/notion/build.py --check
           git diff --exit-code -- docs/notion
+      - name: Production Caddyfile
+        run: |
+          image="$(sed -n 's/^    image: \(caddy:[^[:space:]]*\)$/\1/p' deploy/production/compose.yaml)"
+          test -n "$image"
+          docker run --rm \
+            -e LIDRADAR_DOMAIN=app.example.test -e LIDRADAR_ACME_EMAIL=ops@example.test \
+            -v "$PWD/deploy/production/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$image" caddy validate --config /etc/caddy/Caddyfile
+      - name: Off-host backup pipeline
+        run: |
+          docker build -f deploy/backup/Dockerfile --build-arg VERSION=ci --build-arg REVISION=${{ github.sha }} -t lidradar-backup:ci .
+          scripts/tests/e2e-offhost-backup.sh lidradar-backup:ci
+      - name: PostgreSQL roles of the production stack
+        run: scripts/tests/e2e-db-roles.sh
       - name: Architecture check
         run: go run ./backend/tools/archcheck -root backend
       - name: Migration smoke

@@ -209,7 +209,10 @@ PostgreSQL 18 — единственный источник истины (ADR 00
 - **Обход** только у `lidradar_platform` через предикат политики (без
   `BYPASSRLS`): захват заданий и событий, планировщик, доставки, API AI-узла,
   административные модели. Владелец схемы (`postgres.Open`) не ограничен —
-  им пользуются миграции и CLI.
+  им пользуются миграции и CLI. В production-стеке владелец и рабочий логин
+  разделены, оба без суперправ: миграции идут под владельцем `lidradar`, процессы
+  приложения и CLI под `lidradar_runtime`, который состоит в трёх ролях, но
+  объектами не владеет ([ADR 0052](../adr/0052-database-roles-owner-and-runtime.md)).
 - **Без RLS** остаются таблицы без `tenant_id`: `users`, `sessions`,
   `auth_rate_limits`, `auth_audit_log`, `ai_nodes`, `ai_node_request_nonces`,
   `platform_metadata`, `schema_migrations`. `admin_audit_log` имеет

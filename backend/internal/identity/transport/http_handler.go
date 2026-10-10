@@ -4,7 +4,6 @@ package transport
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -146,12 +145,11 @@ func sessionToken(r *http.Request) string {
 	return cookie.Value
 }
 
+// client описывает вызывающего для сеанса, журнала входа и постоянных
+// ограничителей. Адрес определяет роутер (ADR 0049): за доверенным proxy это
+// адрес клиента, иначе адрес соединения.
 func client(r *http.Request) application.Client {
-	address := strings.TrimSpace(r.RemoteAddr)
-	if host, _, err := net.SplitHostPort(address); err == nil {
-		address = host
-	}
-	return application.Client{IPAddress: address, UserAgent: r.UserAgent()}
+	return application.Client{IPAddress: httpplatform.ClientAddress(r), UserAgent: r.UserAgent()}
 }
 
 func handleError(w http.ResponseWriter, r *http.Request, err error) bool {

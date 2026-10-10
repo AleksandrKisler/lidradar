@@ -1,0 +1,54 @@
+# Edge-прокси LidRadar (ADR 0050): TLS, маршрутизация API и статики, адрес клиента.
+#
+# Caddy стоит первым на пути запроса и не получает заголовков от вышестоящего
+# proxy (trusted_proxies не задан), поэтому переписывает присланные клиентом
+# X-Forwarded-For и X-Forwarded-Proto: API видит адрес клиента как последнюю
+# запись цепочки (ADR 0049). Если перед Caddy появится CDN или балансировщик,
+# добавьте его сети в trusted_proxies и в LIDRADAR_TRUSTED_PROXIES.
+{
+	email {$LIDRADAR_ACME_EMAIL}
+	# HTTP/3 отключён: UDP-порт не публикуется.
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$LIDRADAR_DOMAIN} {
+	header {
+		-Server
+		# По умолчанию: API отдаёт свой HSTS сам, веб-клиент (nginx) нет.
+		?Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	# API, вебхуки провайдеров и API домашнего AI-узла. flush_interval -1 нужен
+	# потоку событий (SSE): без него события копились бы в буфере proxy.
+	# Сжатие здесь не включается: оно буферизует поток.
+	@api path /api/* /internal/v1/ai/*
+	handle @api {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy api:8080 {
+			flush_interval -1
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+	}
+
+	# Снаружи доступна только живость. /health/ready раскрывает ревизию сборки и
+	# версии миграций, его читают проверки контейнера и scripts/smoke-production.sh.
+	handle /health/live {
+		reverse_proxy api:8080
+	}
+	handle /health/* {
+		respond "not found" 404
+	}
+
+	# Всё остальное — статика веб-клиента (SPA с переходом на index.html).
+	handle {
+		encode zstd gzip
+		reverse_proxy web:8080
+	}
+}

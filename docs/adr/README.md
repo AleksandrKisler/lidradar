@@ -56,6 +56,10 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 
 - [0047: Сделки с неизвестной услугой и незавершённые договорённости](0047-unfinished-agreements.md) — Accepted, 2026-10-07.
 - [0048: Сохранение независимых незавершённых ожиданий](0048-retain-independent-agreements.md) — Accepted, 2026-10-09.
+- [0049: Доверенные proxy и адрес клиента](0049-trusted-proxies-client-address.md) — Accepted, 2026-10-10.
+- [0050: Production-топология пилота](0050-production-topology.md) — Accepted, 2026-10-10.
+- [0051: Резервные копии по расписанию и копия вне хоста](0051-offhost-backups.md) — Accepted, 2026-10-10.
+- [0052: Роли PostgreSQL production-стека: владелец без суперправ и рабочий логин без владения](0052-database-roles-owner-and-runtime.md) — Accepted, 2026-10-10.
 
 ## Workflow
 

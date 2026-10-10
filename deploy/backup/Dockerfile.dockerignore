@@ -1,0 +1,6 @@
+# Контекст образа копий — корень репозитория, но в образ нужны только эти файлы.
+*
+!scripts/backup.sh
+!deploy/backup
+deploy/backup/Dockerfile
+deploy/backup/Dockerfile.dockerignore

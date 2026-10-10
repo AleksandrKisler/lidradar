@@ -24,6 +24,8 @@
 | Согласие и жизненный цикл данных | [Политика и открытые решения](backend/13-data-lifecycle.md) |
 | Frontend | [Архитектура, контракты, QA и макеты](front-end/README.md) |
 | Восстановление | [Backup и полное DR](runbooks/backup-restore.md) |
+| Копии вне хоста | [Расписание, шифрование, хранилище, восстановление](runbooks/offhost-backup.md) |
+| Production-стек | [Развёртывание на одном хосте, обновление и откат](runbooks/production-deployment.md) |
 | Развёртывание за proxy | [Проверка доверительной границы](runbooks/proxy-deployment.md) |
 | Нагрузка | [Метод и ограничения](runbooks/capacity-test.md) |
 | Инженерные правила | [Работа с изменениями](engineering/CODEX_RULES.md), [готовность изменения](engineering/DEFINITION_OF_DONE.md) |

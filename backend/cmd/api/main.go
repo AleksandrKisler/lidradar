@@ -77,6 +77,13 @@ func run(ctx context.Context, configuration config.Config) error {
 	defer platformPool.Close()
 	logger := bootstrap.Logger(ctx)
 	logger.Info("PostgreSQL готов", "event", "postgres.ready")
+	if len(configuration.HTTP.TrustedProxies) > 0 {
+		trusted := make([]string, 0, len(configuration.HTTP.TrustedProxies))
+		for _, proxy := range configuration.HTTP.TrustedProxies {
+			trusted = append(trusted, proxy.String())
+		}
+		logger.Info("Адрес клиента берётся из X-Forwarded-For доверенных proxy", "event", "http.trusted_proxies", "proxies", trusted)
+	}
 
 	auditRecorder := auditinfrastructure.NewPostgresRecorder(pool, ids.Generator{})
 	identityRepository := identityinfrastructure.NewPostgresRepository(pool)
@@ -145,6 +152,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		"lidradar-api", logger, postgres.NewSchemaReadiness(pool),
 		httpplatform.WithAllowedOrigins(configuration.HTTP.AllowedOrigins),
 		httpplatform.WithStrictTransport(configuration.Auth.CookieSecure),
+		httpplatform.WithTrustedProxies(configuration.HTTP.TrustedProxies),
 		httpplatform.WithRateLimit(
 			httpplatform.RateLimit{
 				Requests: int(configuration.HTTP.RateLimitPerMinute), Window: time.Minute,

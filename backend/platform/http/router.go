@@ -3,6 +3,7 @@ package httpplatform
 import (
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,7 @@ type routerOptions struct {
 	allowedOrigins  []string
 	strictTransport bool
 	rateLimits      []RateLimit
+	trustedProxies  []netip.Prefix
 	now             func() time.Time
 }
 
@@ -40,6 +42,13 @@ func WithStrictTransport(enabled bool) RouterOption {
 // Каждое правило считается отдельно; при совпадении нескольких применяется первое.
 func WithRateLimit(limits ...RateLimit) RouterOption {
 	return func(options *routerOptions) { options.rateLimits = append(options.rateLimits, limits...) }
+}
+
+// WithTrustedProxies задаёт узлы, которые завершают TLS перед API и вправе
+// сообщать адрес клиента в X-Forwarded-For (ADR 0049). Без списка адресом
+// клиента остаётся адрес соединения, а заголовок игнорируется.
+func WithTrustedProxies(proxies []netip.Prefix) RouterOption {
+	return func(options *routerOptions) { options.trustedProxies = append([]netip.Prefix(nil), proxies...) }
 }
 
 // WithClock подменяет часы ограничителя частоты в тестах.
@@ -67,6 +76,9 @@ func NewRouter(service string, logger *slog.Logger, readiness health.Checker, op
 	// recovery стоит сразу за correlation: паника в любом следующем слое
 	// превращается в 500 с корреляцией, а не обрывает соединение.
 	router.Use(recovery(logger))
+	// Адрес клиента определяется до ограничителей и обработчиков: ими
+	// пользуются лимиты, учёт сеансов и журнал входа (ADR 0049).
+	router.Use((&clientResolver{trusted: configuration.trustedProxies, logger: logger, now: configuration.now}).middleware)
 	router.Use(securityHeaders(configuration.strictTransport))
 	router.Use(validTenantSelector)
 	router.Use(requestLogging(logger))

@@ -8,3 +8,14 @@ bin
 work
 runtime
 backups
+# Для сборки Go нужны только go.mod, go.sum и backend/: остальное не должно
+# попадать в контекст и сбрасывать кэш слоя при правке документации.
+docs
+marketing
+models
+deploy
+scripts
+contracts
+high-remediation-2026-10-05
+DONE.md
+README.md

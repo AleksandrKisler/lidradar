@@ -169,6 +169,7 @@ func TestValidateAPIRequiresBrowserAndTelegramSettingsOutsideDevelopment(t *test
 		databaseURLKey:    "postgres://example",
 		allowedOriginsKey: "https://app.example.com",
 		publicBaseURLKey:  "https://app.example.com",
+		trustedProxiesKey: "172.16.0.0/12",
 		credentialKeyKey:  base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
 	}
 	// Пустое значение удаляет ключ, остальные заменяют его.
@@ -195,12 +196,14 @@ func TestValidateAPIRequiresBrowserAndTelegramSettingsOutsideDevelopment(t *test
 		overrides map[string]string
 		mentions  []string
 	}{
-		"без origins":           {map[string]string{allowedOriginsKey: ""}, []string{allowedOriginsKey}},
-		"пустой список origins": {map[string]string{allowedOriginsKey: " , "}, []string{allowedOriginsKey}},
-		"без адреса и ключа":    {map[string]string{publicBaseURLKey: "", credentialKeyKey: ""}, []string{publicBaseURLKey, credentialKeyKey}},
+		"без origins":              {map[string]string{allowedOriginsKey: ""}, []string{allowedOriginsKey}},
+		"пустой список origins":    {map[string]string{allowedOriginsKey: " , "}, []string{allowedOriginsKey}},
+		"без адреса и ключа":       {map[string]string{publicBaseURLKey: "", credentialKeyKey: ""}, []string{publicBaseURLKey, credentialKeyKey}},
+		"без доверенных proxy":     {map[string]string{trustedProxiesKey: ""}, []string{trustedProxiesKey}},
+		"список proxy из пробелов": {map[string]string{trustedProxiesKey: " , "}, []string{trustedProxiesKey}},
 		"ничего не задано": {
-			map[string]string{allowedOriginsKey: "", publicBaseURLKey: "", credentialKeyKey: ""},
-			[]string{allowedOriginsKey, publicBaseURLKey, credentialKeyKey},
+			map[string]string{allowedOriginsKey: "", publicBaseURLKey: "", credentialKeyKey: "", trustedProxiesKey: ""},
+			[]string{allowedOriginsKey, publicBaseURLKey, credentialKeyKey, trustedProxiesKey},
 		},
 	}
 	for _, environment := range []Environment{EnvironmentStaging, EnvironmentProduction} {
@@ -219,11 +222,67 @@ func TestValidateAPIRequiresBrowserAndTelegramSettingsOutsideDevelopment(t *test
 			}
 		}
 	}
-	empty := map[string]string{allowedOriginsKey: "", publicBaseURLKey: "", credentialKeyKey: ""}
+	empty := map[string]string{allowedOriginsKey: "", publicBaseURLKey: "", credentialKeyKey: "", trustedProxiesKey: ""}
 	for _, environment := range []Environment{EnvironmentDevelopment, EnvironmentTest} {
 		if err := load(environment, empty).ValidateAPI(); err != nil {
 			t.Fatalf("%s без настроек: ValidateAPI() error = %v", environment, err)
 		}
+	}
+}
+
+// ADR 0049: список доверенных proxy — адреса и сети; одиночный адрес становится
+// узлом, IPv4 внутри IPv6 приводится к IPv4, повторы схлопываются.
+func TestLoadParsesTrustedProxies(t *testing.T) {
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey:    string(EnvironmentTest),
+		trustedProxiesKey: " 10.0.0.0/8, 192.168.1.7 ,2001:db8:f::/48, ::1, 10.0.0.0/8 , ::ffff:172.16.0.0/108,, fc00::/7 ",
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	var got []string
+	for _, prefix := range configuration.HTTP.TrustedProxies {
+		got = append(got, prefix.String())
+	}
+	want := []string{"10.0.0.0/8", "192.168.1.7/32", "2001:db8:f::/48", "::1/128", "172.16.0.0/12", "fc00::/7"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("TrustedProxies = %v, want %v", got, want)
+	}
+	empty, err := Load(mapLookup(map[string]string{environmentKey: string(EnvironmentTest), trustedProxiesKey: "  "}))
+	if err != nil || len(empty.HTTP.TrustedProxies) != 0 {
+		t.Fatalf("пустое значение: %v, %v", empty.HTTP.TrustedProxies, err)
+	}
+}
+
+// Опасные и ошибочные записи отвергаются при загрузке, а не молча расширяют
+// доверие: сеть «весь интернет», опечатка с битами узла, не адрес.
+func TestLoadRejectsUnsafeOrInvalidTrustedProxies(t *testing.T) {
+	for name, value := range map[string]string{
+		"весь IPv4":                   "0.0.0.0/0",
+		"весь IPv6":                   "::/0",
+		"весь IPv4 внутри IPv6":       "::ffff:0.0.0.0/96",
+		"биты узла в сети":            "10.0.0.1/8",
+		"длина шире адреса":           "10.0.0.0/33",
+		"не адрес":                    "proxy.example.com",
+		"имя с маской":                "internal/24",
+		"зона IPv6":                   "fe80::1%eth0",
+		"IPv4 внутри IPv6 шире /96":   "::ffff:0.0.0.0/80",
+		"плохая запись среди хороших": "10.0.0.0/8, nonsense",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(mapLookup(map[string]string{environmentKey: string(EnvironmentTest), trustedProxiesKey: value}))
+			if err == nil || !strings.Contains(err.Error(), trustedProxiesKey) {
+				t.Fatalf("Load(%q) error = %v, want error naming %s", value, err, trustedProxiesKey)
+			}
+		})
+	}
+	_, err := Load(mapLookup(map[string]string{environmentKey: string(EnvironmentTest), trustedProxiesKey: "0.0.0.0/0"}))
+	if err == nil || !strings.Contains(err.Error(), "every address") {
+		t.Fatalf("сообщение о «весь интернет»: %v", err)
+	}
+	_, err = Load(mapLookup(map[string]string{environmentKey: string(EnvironmentTest), trustedProxiesKey: "10.0.0.1/8"}))
+	if err == nil || !strings.Contains(err.Error(), "10.0.0.0/8") {
+		t.Fatalf("подсказка про корректную запись: %v", err)
 	}
 }
 

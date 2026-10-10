@@ -69,7 +69,7 @@ func TestRateLimitProtectsUnauthenticatedPrefixes(t *testing.T) {
 	if response := call("/api/v1/auth/login", "10.0.0.1:5003"); response.Code == http.StatusTooManyRequests {
 		t.Fatal("окно не сбросилось")
 	}
-	if address := clientAddress(&http.Request{RemoteAddr: "[2001:db8::1]:443"}); address != "2001:db8::1" {
+	if address := ClientAddress(&http.Request{RemoteAddr: "[2001:db8::1]:443"}); address != "2001:db8::1" {
 		t.Fatalf("адрес IPv6 = %q", address)
 	}
 }

@@ -64,5 +64,12 @@ Backend, миграции и CI присутствуют в этом репоз�
 `000022_membership_invitations`; интерфейс доступен на localhost:5173.
 Все проверки этого цикла относятся к незакоммиченным рабочим деревьям.
 
-Заполнить production manifest образов, окружения, proxy/TLS, ключевых версий
-без секретов и внешних проверок по [release gates](RELEASE_GATES.md) ещё предстоит.
+С 2026-10-10 образы выпуска воспроизводимо собирает `scripts/build-images.sh`
+(тег — git sha), а [production-стек](../runbooks/production-deployment.md) описан в
+`deploy/production` ([ADR 0050](../adr/0050-production-topology.md)) вместе со службой копий
+по расписанию и вне хоста ([ADR 0051](../adr/0051-offhost-backups.md)) и с отдельными
+логинами PostgreSQL для владельца и рабочих процессов
+([ADR 0052](../adr/0052-database-roles-owner-and-runtime.md)); на настоящем хосте, у настоящего
+поставщика хранилища и в управляемой базе он не разворачивался. Заполнить production manifest
+образов, окружения, proxy/TLS, ключевых версий без секретов и внешних проверок по
+[release gates](RELEASE_GATES.md) ещё предстоит.

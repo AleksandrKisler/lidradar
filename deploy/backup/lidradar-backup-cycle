@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# Один цикл копии вне хоста (ADR 0051): выгрузка → проверка оглавления →
+# шифрование → загрузка → сверка → манифест. Манифест пишется последним и служит
+# отметкой «копия полная»: объект без манифеста не используется при восстановлении.
+#
+#   lidradar-backup-cycle           цикл по расписанию: ярус frequent, раз в сутки ещё и daily
+#   lidradar-backup-cycle --check   пробный цикл в каталог _check/: статус и мониторинг не меняются
+set -euo pipefail
+umask 077
+# shellcheck source=lib.sh
+. "$(dirname "$0")/lib.sh"
+
+CHECK=0
+case "${1:-}" in
+  '') ;;
+  --check) CHECK=1 ;;
+  *) echo 'использование: lidradar-backup-cycle [--check]' >&2; exit 2 ;;
+esac
+TIER=frequent
+[ "${CHECK}" -eq 0 ] || TIER=_check
+
+require_database
+require_remote
+require_recipients
+
+mkdir -p "${SPOOL}"
+chmod 700 "${SPOOL}" 2>/dev/null || true
+exec 9>"${SPOOL}/.cycle.lock"
+if ! flock -n 9; then
+  # Плановый цикл молча пропускается; пробный запрос оператора должен получить ответ.
+  if [ "${CHECK}" -eq 1 ]; then die backup.busy 'идёт цикл службы, повторите проверку через минуту' 1; fi
+  log WARN backup.skipped 'предыдущий цикл ещё выполняется'
+  exit 0
+fi
+
+START="$(now)"
+STAMP="$(fmt_epoch "${START}" %Y%m%dT%H%M%SZ)"
+# Штамп — часть имён объектов. Два цикла в одну секунду (плановый и ручной) записали бы одни и
+# те же ключи, и пара «файл — манифест» могла бы оказаться из разных копий: ждём следующей секунды.
+if [ "${CHECK}" -eq 0 ]; then
+  LAST_STAMP="$(status_read | jq -r '(.lastKey // "") | split("/") | last')"
+  while [ "${STAMP}" = "${LAST_STAMP}" ]; do
+    sleep 1
+    START="$(now)"
+    STAMP="$(fmt_epoch "${START}" %Y%m%dT%H%M%SZ)"
+  done
+fi
+WORK="${SPOOL}/work-${STAMP}"
+rm -rf "${WORK}"
+mkdir -p "${WORK}/plain"
+trap 'rm -rf "${WORK}"' EXIT
+
+fail() { # fail ШАГ СООБЩЕНИЕ
+  local step="$1" message="$2" finished
+  finished="$(now)"
+  log ERROR backup.failed "${message}" step="${step}" tier="${TIER}" seconds="$((finished - START))"
+  if [ "${CHECK}" -eq 0 ]; then
+    record_failure "${step}" "${message}" "${finished}"
+    ping "${LIDRADAR_BACKUP_FAIL_URL:-}"
+  fi
+  exit 1
+}
+
+# record_success ЗАВЕРШЕНИЕ БАЙТЫ КЛЮЧ ДАТА_DAILY. Разрыв — время от начала выгрузки
+# прежней подтверждённой копии до завершения этой: именно столько данных теряется,
+# если хост пропадает за миг до того, как новая копия стала доступна вне хоста.
+record_success() {
+  status_read | jq --argjson start "${START}" --argjson finished "$1" --argjson bytes "$2" --arg key "$3" --arg daily "$4" '
+    (.lastDataEpoch // null) as $previous
+    | (if $previous == null then null else $finished - $previous end) as $gap
+    | . + {version: 1, lastAttemptEpoch: $finished, lastAttemptOk: true, lastError: "", consecutiveFailures: 0,
+           lastDataEpoch: $start, lastCompletedEpoch: $finished, lastKey: $key, lastBytes: $bytes,
+           lastSeconds: ($finished - $start), lastGapSeconds: $gap,
+           maxGapSeconds: ([(.maxGapSeconds // 0), ($gap // 0)] | max)}
+      + (if $daily != "" then {lastDailyDate: $daily} else {} end)' | status_write
+}
+
+write_manifest() { # write_manifest ЯРУС ФАЙЛ
+  local database="${DB_URL%%\?*}"
+  database="${database##*/}"
+  jq -n --arg tier "$1" --arg stamp "${STAMP}" --argjson data "${START}" --argjson completed "$(now)" \
+    --arg dataAt "$(fmt_epoch "${START}" %Y-%m-%dT%H:%M:%SZ)" --arg database "${database}" \
+    --arg server "${SERVER_VERSION}" --arg tool "${DUMP_TOOL}" --arg release "${LIDRADAR_VERSION:-}" \
+    --arg recipients "${LIDRADAR_BACKUP_AGE_RECIPIENTS// /}" \
+    --argjson before "$(counts_json "${COUNTS_BEFORE}")" --argjson after "$(counts_json "${COUNTS_AFTER}")" \
+    --arg name "${STAMP}.dump.age" --argjson bytes "${ENC_BYTES}" --arg sha "${ENC_SHA}" \
+    --argjson plainBytes "${PLAIN_BYTES}" --arg plainSha "${PLAIN_SHA}" '{
+      format: 1, tier: $tier, stamp: $stamp, dataAt: $dataAt, dataEpoch: $data, completedEpoch: $completed,
+      database: $database, server: $server, tool: $tool, release: $release,
+      migration: $before.migration, tables: $before.tables,
+      counts: {before: ($before | del(.migration, .tables)), after: ($after | del(.migration, .tables))},
+      recipients: ($recipients | split(",")),
+      dump: {name: $name, bytes: $bytes, sha256: $sha, plainBytes: $plainBytes, plainSha256: $plainSha}}' >"$2"
+}
+
+# publish ЯРУС: файл копии, затем манифест; каждый сверяется с хранилищем. Шаг и
+# причина неудачи остаются в PUBLISH_STEP и UPLOAD_ERROR, решение принимает вызывающий.
+publish() {
+  local tier="$1" object
+  PUBLISH_STEP=''
+  object="$(remote_path "${tier}" "${STAMP}.dump.age")"
+  upload_object "${ENC}" "${object}" || { PUBLISH_STEP=upload; return 1; }
+  verify_object "${ENC}" "${object}" || { PUBLISH_STEP=verify; return 1; }
+  write_manifest "${tier}" "${WORK}/${tier}.manifest.json" || { PUBLISH_STEP=manifest; UPLOAD_ERROR='манифест не собран'; return 1; }
+  object="$(remote_path "${tier}" "${STAMP}.manifest.json")"
+  upload_object "${WORK}/${tier}.manifest.json" "${object}" || { PUBLISH_STEP=upload; return 1; }
+  verify_object "${WORK}/${tier}.manifest.json" "${object}" || { PUBLISH_STEP=verify; return 1; }
+}
+
+# --- 1. выгрузка ---------------------------------------------------------------
+COUNTS_BEFORE="$(sql "${COUNTS_SQL}" 2>"${WORK}/sql.err")" \
+  || fail database "$(tool_error "${WORK}/sql.err")"
+SERVER_VERSION="$(sql 'SHOW server_version' 2>/dev/null || true)"
+DUMP_STARTED="$(now)"
+LIDRADAR_BACKUP_MODE=local LIDRADAR_DATABASE_URL="${DB_URL}" LIDRADAR_BACKUP_DIR="${WORK}/plain" LIDRADAR_BACKUP_KEEP=1 \
+  "${BACKUP_SH}" >"${WORK}/backup.out" 2>"${WORK}/backup.err" \
+  || fail dump "$(tool_error "${WORK}/backup.err")"
+DUMP="$(ls -1 "${WORK}/plain"/lidradar-*.dump 2>/dev/null | head -n 1 || true)"
+[ -n "${DUMP}" ] || fail dump 'выгрузка не создала файл'
+pg_restore --list "${DUMP}" >/dev/null 2>"${WORK}/list.err" \
+  || fail validate "оглавление выгрузки не читается: $(tool_error "${WORK}/list.err")"
+COUNTS_AFTER="$(sql "${COUNTS_SQL}" 2>/dev/null)" || fail database 'база недоступна сразу после выгрузки'
+DUMP_SECONDS="$(($(now) - DUMP_STARTED))"
+PLAIN_BYTES="$(wc -c <"${DUMP}" | tr -d ' ')"
+PLAIN_SHA="$(sha256_of "${DUMP}")"
+DUMP_TOOL="$(pg_dump --version | head -n 1)"
+
+# --- 2. шифрование --------------------------------------------------------------
+ENC="${WORK}/${STAMP}.dump.age"
+age ${AGE_ARGS[@]+"${AGE_ARGS[@]}"} -o "${ENC}" "${DUMP}" 2>"${WORK}/age.err" \
+  || fail encrypt "$(tool_error "${WORK}/age.err")"
+rm -f "${DUMP}" # открытый текст больше не нужен
+ENC_BYTES="$(wc -c <"${ENC}" | tr -d ' ')"
+ENC_SHA="$(sha256_of "${ENC}")"
+
+# --- 3. загрузка, сверка, манифест ----------------------------------------------
+UPLOAD_STARTED="$(now)"
+publish "${TIER}" || fail "${PUBLISH_STEP}" "${UPLOAD_ERROR}"
+UPLOAD_SECONDS="$(($(now) - UPLOAD_STARTED))"
+
+# Раз в сутки (по UTC) та же копия ложится ещё и в ярус daily. Сбой яруса не
+# отменяет уже подтверждённую точку: он будет повторён в следующем цикле.
+DAILY_DATE=''
+if [ "${CHECK}" -eq 0 ]; then
+  TODAY="$(fmt_epoch "${START}" %Y-%m-%d)"
+  if [ "$(status_read | jq -r '.lastDailyDate // ""')" != "${TODAY}" ]; then
+    if publish daily; then
+      DAILY_DATE="${TODAY}"
+    else
+      log WARN backup.daily_failed 'суточная копия не загружена, повтор в следующем цикле' step="${PUBLISH_STEP}"
+    fi
+  fi
+fi
+
+FINISHED="$(now)"
+GAP=''
+if [ "${CHECK}" -eq 0 ]; then
+  record_success "${FINISHED}" "${ENC_BYTES}" "${TIER}/${STAMP}" "${DAILY_DATE}"
+  GAP="$(status_read | jq -r '.lastGapSeconds // ""')"
+  ping "${LIDRADAR_BACKUP_PING_URL:-}"
+fi
+log INFO backup.succeeded 'копия создана, загружена и сверена с хранилищем' tier="${TIER}" stamp="${STAMP}" \
+  bytes="${ENC_BYTES}" plain_bytes="${PLAIN_BYTES}" dump_seconds="${DUMP_SECONDS}" upload_seconds="${UPLOAD_SECONDS}" \
+  seconds="$((FINISHED - START))" gap_seconds="${GAP}" daily="${DAILY_DATE:+yes}"

@@ -113,7 +113,7 @@ func rateLimited(limiters []*rateLimiter) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			allowed, retryAfter := limiter.allow(clientAddress(r))
+			allowed, retryAfter := limiter.allow(ClientAddress(r))
 			if !allowed {
 				w.Header().Set("Retry-After", itoa(retryAfter))
 				WriteError(w, r, http.StatusTooManyRequests, "RATE_LIMITED", "Too many requests", nil)
@@ -122,16 +122,6 @@ func rateLimited(limiters []*rateLimiter) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// clientAddress берёт адрес соединения; заголовки прокси не читаются, пока
-// доверенные прокси не заданы явно.
-func clientAddress(r *http.Request) string {
-	address := r.RemoteAddr
-	if index := strings.LastIndex(address, ":"); index > 0 && !strings.HasSuffix(address, "]") {
-		address = address[:index]
-	}
-	return strings.Trim(address, "[]")
 }
 
 func itoa(value int) string {

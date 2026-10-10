@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: f70a919adccf0d4b1cbdaa995acd1d6f6c97211dae972ef043f33ab237bbaf97 -->
+<!-- GENERATED; source-sha256: 9b1f3085d41d4703afc410738019fc265022d54b3e801063b2eba8ef9c2a7cde -->
 > Источник: [канонический документ](../adr/README.md). Правки вносятся в источник.
 
 # Architecture decision records
@@ -59,6 +59,10 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 
 - [0047: Сделки с неизвестной услугой и незавершённые договорённости](../adr/0047-unfinished-agreements.md) — Accepted, 2026-10-07.
 - [0048: Сохранение независимых незавершённых ожиданий](../adr/0048-retain-independent-agreements.md) — Accepted, 2026-10-09.
+- [0049: Доверенные proxy и адрес клиента](../adr/0049-trusted-proxies-client-address.md) — Accepted, 2026-10-10.
+- [0050: Production-топология пилота](../adr/0050-production-topology.md) — Accepted, 2026-10-10.
+- [0051: Резервные копии по расписанию и копия вне хоста](../adr/0051-offhost-backups.md) — Accepted, 2026-10-10.
+- [0052: Роли PostgreSQL production-стека: владелец без суперправ и рабочий логин без владения](../adr/0052-database-roles-owner-and-runtime.md) — Accepted, 2026-10-10.
 
 ## Workflow
 

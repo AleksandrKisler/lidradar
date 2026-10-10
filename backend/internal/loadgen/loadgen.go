@@ -1,7 +1,9 @@
 // Package loadgen создаёт синтетический нагрузочный набор ТЗ §72: организации
 // с точками, услугами, каналами, переписками, сообщениями, сделками и
-// рисками. Набор пишется напрямую владельцем схемы пакетными COPY, чтобы
-// объём в сотни тысяч сообщений появлялся за секунды (LR-BE-2501).
+// рисками. Набор пишется напрямую владельцем схемы пакетными INSERT, чтобы
+// объём в сотни тысяч сообщений появлялся за секунды (LR-BE-2501). COPY не
+// подходит: он не поддерживает таблицы с включённым RLS, а владелец схемы без
+// суперправ (ADR 0052) обходит политики только как член lidradar_platform.
 package loadgen
 
 import (
@@ -244,15 +246,51 @@ func generateOrganization(
 		{"risk_signals", []string{"id", "tenant_id", "opportunity_id", "location_id", "type", "severity", "status", "reason_code", "reason_text", "source", "risk_engine_version", "trigger_message_id", "detected_at", "due_at", "resolved_at", "created_at", "updated_at"}, risks},
 	}
 	for _, item := range copies {
-		if len(item.rows) == 0 {
-			continue
-		}
-		if _, err := tx.CopyFrom(ctx, pgx.Identifier{item.table}, item.columns, pgx.CopyFromRows(item.rows)); err != nil {
-			return Organization{}, counts, fmt.Errorf("COPY %s: %w", item.table, err)
+		if err := insertRows(ctx, tx, item.table, item.columns, item.rows); err != nil {
+			return Organization{}, counts, fmt.Errorf("INSERT %s: %w", item.table, err)
 		}
 	}
 	counts = [4]int{len(conversations), len(messages), len(opportunities), len(risks)}
 	return organization, counts, nil
+}
+
+// insertBatchRows — сколько строк уходит одним пакетом: пакет конвейеризует запросы,
+// не накапливая в памяти строки всей таблицы.
+const insertBatchRows = 1000
+
+// insertRows пишет строки пакетами INSERT в транзакции организации. COPY FROM не
+// поддерживает таблицы с включённым RLS: суперпользователь обходит политики и им
+// пользуется, а владелец схемы без суперправ под FORCE ROW LEVEL SECURITY нет.
+func insertRows(ctx context.Context, tx pgx.Tx, table string, columns []string, rows [][]any) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	names := make([]string, len(columns))
+	placeholders := make([]string, len(columns))
+	for index, column := range columns {
+		names[index] = pgx.Identifier{column}.Sanitize()
+		placeholders[index] = fmt.Sprintf("$%d", index+1)
+	}
+	statement := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		pgx.Identifier{table}.Sanitize(), strings.Join(names, ", "), strings.Join(placeholders, ", "))
+	for start := 0; start < len(rows); start += insertBatchRows {
+		chunk := rows[start:min(start+insertBatchRows, len(rows))]
+		batch := &pgx.Batch{}
+		for _, row := range chunk {
+			batch.Queue(statement, row...)
+		}
+		results := tx.SendBatch(ctx, batch)
+		for range chunk {
+			if _, err := results.Exec(); err != nil {
+				_ = results.Close()
+				return err
+			}
+		}
+		if err := results.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Summary — одна строка для журнала и отчёта.
