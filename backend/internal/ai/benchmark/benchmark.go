@@ -34,6 +34,15 @@ const (
 	SplitDev    Split = "DEV"
 )
 
+// maxConsecutiveCallFailures — сколько обращений к модели подряд могут завершиться ошибкой, прежде чем
+// прогон прерывается. Подряд идущие отказы — это недоступная модель или оборванный туннель, а не
+// качество разбора: отчёт по такому прогону (особенно по GOLDEN, который запускают один раз)
+// вводил бы в заблуждение, поэтому runner не выдаёт отчёт, а возвращает ErrModelUnavailable.
+const maxConsecutiveCallFailures = 5
+
+// ErrModelUnavailable — прогон прерван: модель не отвечает.
+var ErrModelUnavailable = errors.New("модель недоступна")
+
 // GoldenDigestMismatch — код отказа runner при подмене контрольной выборки.
 const GoldenDigestMismatch = "GOLDEN_DIGEST_MISMATCH"
 
@@ -67,6 +76,7 @@ type Thresholds struct {
 
 type Report struct {
 	PromptVersions           []string               `json:"promptVersions"`
+	SchemaVersions           []string               `json:"schemaVersions,omitempty"`
 	DatasetSHA256            string                 `json:"datasetSha256"`
 	Cases                    int                    `json:"cases"`
 	TruePositive             int                    `json:"truePositive"`
@@ -89,6 +99,8 @@ type Report struct {
 	ThroughputCasesPerSecond float64                `json:"throughputCasesPerSecond"`
 	ByFactType               map[string]FactMetrics `json:"byFactType"`
 	Failures                 []Failure              `json:"failures,omitempty"`
+	Server                   *ServerInfo            `json:"server,omitempty"`
+	Performance              *Performance           `json:"performance,omitempty"`
 	Passed                   bool                   `json:"passed"`
 }
 
@@ -104,6 +116,7 @@ type FactMetrics struct {
 type Failure struct {
 	CaseID             string                        `json:"caseId"`
 	Reason             string                        `json:"reason"`
+	Detail             string                        `json:"detail,omitempty"`
 	Expected           []domain.SemanticFact         `json:"expectedFacts,omitempty"`
 	Actual             []domain.SemanticFact         `json:"actualFacts,omitempty"`
 	ExpectedAgreements []domain.AgreementObservation `json:"expectedAgreements,omitempty"`
@@ -160,6 +173,42 @@ func VerifyGolden(datasetSHA256, expectedSHA256 string) error {
 	return nil
 }
 
+// WithVersions подменяет версии контракта и инструкции в памяти. Подмену делают
+// после проверки контрольной суммы: файл набора и сумма не меняются, а применённые
+// версии попадают в отчёт. Каждый случай проходит ту же проверку совместимости, что и
+// при загрузке, поэтому инструкцию v9 нельзя измерить на конверте v1, а историческую
+// v6 — на конверте v2.
+func WithVersions(cases []Case, schemaVersion, promptVersion string) ([]Case, error) {
+	result := make([]Case, len(cases))
+	for i, c := range cases {
+		if schemaVersion != "" {
+			c.Input.SchemaVersion = schemaVersion
+		}
+		if promptVersion != "" {
+			c.Input.PromptVersion = promptVersion
+		}
+		if err := validateCase(c); err != nil {
+			return nil, fmt.Errorf("случай %q после подмены версий: %w", c.ID, err)
+		}
+		result[i] = c
+	}
+	return result, nil
+}
+
+type caseIDKey struct{}
+
+// WithCaseID передаёт идентификатор случая через контекст вызова модели: измерения
+// обращений привязываются к случаю без участия поставщика.
+func WithCaseID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, caseIDKey{}, id)
+}
+
+// CaseID возвращает идентификатор обрабатываемого случая или пустую строку.
+func CaseID(ctx context.Context) string {
+	id, _ := ctx.Value(caseIDKey{}).(string)
+	return id
+}
+
 func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string, thresholds Thresholds) (Report, error) {
 	if provider == nil || len(cases) == 0 {
 		return Report{}, errors.New("поставщик модели и случаи обязательны")
@@ -169,6 +218,7 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	report := Report{DatasetSHA256: datasetSHA, Cases: len(cases), ByFactType: map[string]FactMetrics{}}
 	matchedFacts := 0
 	exactEvidence := 0
+	consecutiveFailures := 0
 	for _, c := range cases {
 		if c.ExpectedAgreements != nil {
 			report.AgreementCases++
@@ -176,12 +226,15 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 		if !slices.Contains(report.PromptVersions, c.Input.PromptVersion) {
 			report.PromptVersions = append(report.PromptVersions, c.Input.PromptVersion)
 		}
+		if !slices.Contains(report.SchemaVersions, c.Input.SchemaVersion) {
+			report.SchemaVersions = append(report.SchemaVersions, c.Input.SchemaVersion)
+		}
 		prompt, err := application.EncodeAnalysisRequest(c.Input)
 		if err != nil {
 			return report, err
 		}
 		begin := time.Now()
-		raw, err := provider.Infer(ctx, prompt)
+		raw, err := provider.Infer(WithCaseID(ctx, c.ID), prompt)
 		latencies = append(latencies, time.Since(begin))
 		if err != nil {
 			if ctx.Err() != nil {
@@ -190,9 +243,13 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 			report.Invalid++
 			report.FalseNegative += len(c.Expected)
 			addFalseNegatives(report.ByFactType, c.Expected)
-			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "ошибка вызова модели", Expected: c.Expected})
+			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "ошибка вызова модели", Detail: Describe(err), Expected: c.Expected})
+			if consecutiveFailures++; consecutiveFailures >= maxConsecutiveCallFailures {
+				return report, fmt.Errorf("%w: %d обращений подряд завершились ошибкой (последняя: %s), прогон прерван без отчёта", ErrModelUnavailable, consecutiveFailures, Describe(err))
+			}
 			continue
 		}
+		consecutiveFailures = 0
 		var result domain.AnalysisResultV1
 		var agreements []domain.AgreementObservation
 		if c.Input.SchemaVersion == application.AnalysisSchemaV2 {
@@ -213,7 +270,7 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 			report.Invalid++
 			report.FalseNegative += len(c.Expected)
 			addFalseNegatives(report.ByFactType, c.Expected)
-			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "ответ не прошёл производственную проверку", Expected: c.Expected})
+			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "ответ не прошёл производственную проверку", Detail: err.Error(), Expected: c.Expected})
 			continue
 		}
 		actual := application.TrustedFacts(result)

@@ -1,0 +1,94 @@
+{
+  "selectedAt": "2026-10-10T18:02:39.674616+00:00",
+  "promptVersion": "analyze-conversation.prompt.v9",
+  "schemaVersion": "analyze-conversation.v2",
+  "sha256": {
+    "backend/internal/ai/application/agreement_evidence.go": "8d9d06d3073a163bf9229682f5945ca2bd73d173c7bbc7145b5a5379f1740c44",
+    "backend/internal/ai/application/agreement_projection.go": "52ec5c141d538ff63f6a82e3e25f6765eedbc25eb3ce99161c23069e7a2077bd",
+    "backend/internal/ai/application/agreement_subject.go": "4e9130ff72d9de2f5d2a1cc4555aefe896b0fcdf1c8d163ea0a9d2390947fc74",
+    "backend/internal/ai/application/analysis.go": "40a8327ab3247e5de781084711f5ed5fc5174e6a47dec88ec80b269834cc1544",
+    "backend/internal/ai/application/background.go": "5c1b7cfe1cf56e31332edb0a267750199dc753be72a3d8af2f5aeb2f50593431",
+    "backend/internal/ai/application/price_evidence.go": "6d69733df3e65f999a0bedecf2d1580f1d4423aff2d996bd88b6592eebc1af1c",
+    "backend/internal/ai/application/service.go": "0e798c9be72fd885bef914156681dc609fa442a02ef8525886bcbafca4d8b33a",
+    "backend/internal/ai/infrastructure/agreement_generation.go": "c8b189b5cb7409724a18b1e000913f496d512f51aa96b59493eb93b01bb66a2d",
+    "backend/internal/ai/infrastructure/agreement_projection_store.go": "255b231db483dc76e72c3555ab107de341db85c6f0e0c203b50c46b218932197",
+    "backend/internal/ai/infrastructure/cloud_client.go": "a979242f87361acbb1bf882339029bdbddbf96356b154819fa52ed0acf494824",
+    "backend/internal/ai/infrastructure/commitment_fact.go": "617f8b0c4d863fb010e452a910770297dbf47e217e8908afd348bdf2393bbfe6",
+    "backend/internal/ai/infrastructure/context_window.go": "ea6a68938fcc07d5072274fb910b73e43f82fa224f99f9501322cb37a8ba90bf",
+    "backend/internal/ai/infrastructure/credentials.go": "3b5f42d16b8f13429b4ec165d9be7869c3d141d5feb8339910b393d0efd93467",
+    "backend/internal/ai/infrastructure/fact_conflicts.go": "1060085e018ef88d7b805cb39535b55a7051bdc0aa61de07ad73590df8965eab",
+    "backend/internal/ai/infrastructure/generation_schema.go": "595acb15fd877a9bd725f4abaf1e5dcd414ddbc25b4db627b97d842fbe76366e",
+    "backend/internal/ai/infrastructure/memory_store.go": "89670e1c4a0ceb3619c879ded1bf83af7bd3c802f375f6830dd59b356fa78e2d",
+    "backend/internal/ai/infrastructure/postgres_context_builder.go": "f595f85087f37ee34ab69b50eca30f05e566b2af91f3972a5615b89efefa0175",
+    "backend/internal/ai/infrastructure/postgres_store.go": "6e8fd9d4944ae6f822f7068a7c5fd34066c8fc4a68b90658b6814a7d883391fb",
+    "backend/internal/ai/infrastructure/provider.go": "bdaaa20278ea59f8508298beadf1088d37cfa085515aee296172b340cfd4847f",
+    "backend/internal/ai/infrastructure/provider_aliases.go": "7747d4b54cee38d4373d0e3be7551db1853fd163c1e52c1c91738ab89651efbb",
+    "backend/internal/ai/infrastructure/provider_examples_v8.go": "177524d5148a193212c4345ce171956263d6caf31487505df03455dfb7100c4f",
+    "backend/internal/ai/infrastructure/provider_examples_v9.go": "ae2f30235d0664e5d8e5323e638a379b633e9d39453a98dd6204a321c625913c",
+    "backend/internal/ai/domain/ai.go": "00c1cb73a5c031637e76ba171b659ceba20f8fb9c2f6a0a0b6cfb0f5b440cbc6",
+    "backend/internal/ai/benchmark/benchmark.go": "3fb2d512da5623357deb1e34bc755e4f43feb93050f68006647fd8b5aaa1a4ee",
+    "backend/internal/ai/benchmark/observe.go": "a2322e24ce5d3deffa1ba64edd5268813926719ea6a5df8ace472224e318ba01",
+    "backend/internal/ai/benchmark/serverinfo.go": "8c9348b92720a4c37776dd362240525de5f42f03a9a678b2fdf28c7876ceb051",
+    "backend/cmd/ai-benchmark/main.go": "98b84f8b1fa7086a8573a231c2b5f917dbbe3bc13692ec7a32f473f039011cf7",
+    "contracts/ai/analyze_conversation_v1.schema.json": "e39f09323b7e5b6f9b72c47688e7b13f1670a901fb69eb9001f245e72b3ae83b",
+    "contracts/ai/analyze_conversation_v2.schema.json": "64011c502b8f012cb1e23e5ef0fd2a42199489275f6dd2b204112584915f542d"
+  },
+  "treeSha256": "f8212a9ffddb8b27f0df9d56ce8cd6c7b0d5c10d85690408f196bf9d151eada6",
+  "datasets": {
+    "models/datasets/golden_v1.jsonl": {
+      "sha256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34",
+      "cases": 400
+    },
+    "models/datasets/golden_v1.sha256": {
+      "sha256": "74be41189fc468fc9e0e30634544db285046301e99d90686a06ee425f174dbfd"
+    },
+    "models/datasets/dev_v1.jsonl": {
+      "sha256": "b4b83c909c7dd814e25e068ea0be3c851575ae42a578a5335ef8f98a4e29d238",
+      "cases": 100
+    },
+    "models/datasets/intent_regression_v2.jsonl": {
+      "sha256": "c5183b949b24ddad0369da35babf2a52f9c7bc39b45f89dd128e62d89833ad22",
+      "cases": 27
+    },
+    "models/datasets/agreements_dev_v2.jsonl": {
+      "sha256": "712300ff227a40ff7e7a0869a9abcdb1cb7587329610ef7a600d0278e082717c",
+      "cases": 21
+    },
+    "models/datasets/agreements_independent_v2.jsonl": {
+      "sha256": "be4589226b2274c9cb61530ba3334ed2e2b245d53b1458b364e003b558ae4baf",
+      "cases": 6
+    },
+    "models/datasets/qa06_v1.jsonl": {
+      "sha256": "472290a386f6972a017e7b471935bfe692b2c36775c73678e868152edb3aef01",
+      "cases": 37
+    },
+    "models/datasets/context_probe_v1.jsonl": {
+      "sha256": "b46f84751aa051bdc00cbe30f9bc8737e2c0993ae63950e6dd554ced5ee6e30b",
+      "cases": 6
+    }
+  },
+  "devReports": {
+    "models/reports/lidradar-main-v1-prompt-v9-dev.json": {
+      "sha256": "6d184ff2d0f6c4726a2cbe058cfdce92be19123fe6db668ced9b71dd023ccea6",
+      "cases": 100,
+      "passed": true
+    },
+    "models/reports/lidradar-main-v1-prompt-v9-dev-intents.json": {
+      "sha256": "b5992b008f7bd2657b34d6456c207b9db45a1d99b959e15a1c161c72ea241dc6",
+      "cases": 27,
+      "passed": true
+    },
+    "models/reports/lidradar-main-v1-prompt-v9-dev-agreements.json": {
+      "sha256": "21963e3a3822aed622b68970bd258d6db16f8eb2f4c5c3a55b56e43dd94de42d",
+      "cases": 21,
+      "passed": true
+    },
+    "models/reports/lidradar-main-v1-prompt-v9-dev-independent.json": {
+      "sha256": "4d11f793ad72fb914ef8fbfeb59987f2b295d0e8a690bfd669c7106d027cb734",
+      "cases": 6,
+      "passed": true
+    }
+  },
+  "go": "go version go1.26.6 darwin/arm64",
+  "note": "Selected before opening GOLDEN; prompt and sampling frozen."
+}

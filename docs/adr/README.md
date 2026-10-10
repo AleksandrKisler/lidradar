@@ -60,6 +60,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0050: Production-топология пилота](0050-production-topology.md) — Accepted, 2026-10-10.
 - [0051: Резервные копии по расписанию и копия вне хоста](0051-offhost-backups.md) — Accepted, 2026-10-10.
 - [0052: Роли PostgreSQL production-стека: владелец без суперправ и рабочий логин без владения](0052-database-roles-owner-and-runtime.md) — Accepted, 2026-10-10.
+- [0053: Квалификация AI tuple: выбор до GOLDEN, пороги, привязка к серверу и оборудованию](0053-ai-tuple-qualification.md) — Proposed, 2026-10-10.
 
 ## Workflow
 

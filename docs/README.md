@@ -28,6 +28,7 @@
 | Production-стек | [Развёртывание на одном хосте, обновление и откат](runbooks/production-deployment.md) |
 | Развёртывание за proxy | [Проверка доверительной границы](runbooks/proxy-deployment.md) |
 | Нагрузка | [Метод и ограничения](runbooks/capacity-test.md) |
+| Квалификация AI | [Порядок прогона и фиксации tuple](runbooks/ai-qualification.md) |
 | Инженерные правила | [Работа с изменениями](engineering/CODEX_RULES.md), [готовность изменения](engineering/DEFINITION_OF_DONE.md) |
 | Внешние интеграции | [Готовность сервисов](roadmap/EXTERNAL_SERVICES.md), [живой Telegram-сценарий](roadmap/TELEGRAM_SPIKE_REPORT.md) |
 | Перенос документации | [Сборка полного комплекта и правила импорта](notion/README.md) |

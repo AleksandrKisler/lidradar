@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: 9b1f3085d41d4703afc410738019fc265022d54b3e801063b2eba8ef9c2a7cde -->
+<!-- GENERATED; source-sha256: 6d3bd42d189b99ef007e687bf8d29c473046c9e4a47788f2b1a0e94d2edd5b26 -->
 > Источник: [канонический документ](../adr/README.md). Правки вносятся в источник.
 
 # Architecture decision records
@@ -63,6 +63,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0050: Production-топология пилота](../adr/0050-production-topology.md) — Accepted, 2026-10-10.
 - [0051: Резервные копии по расписанию и копия вне хоста](../adr/0051-offhost-backups.md) — Accepted, 2026-10-10.
 - [0052: Роли PostgreSQL production-стека: владелец без суперправ и рабочий логин без владения](../adr/0052-database-roles-owner-and-runtime.md) — Accepted, 2026-10-10.
+- [0053: Квалификация AI tuple: выбор до GOLDEN, пороги, привязка к серверу и оборудованию](../adr/0053-ai-tuple-qualification.md) — Proposed, 2026-10-10.
 
 ## Workflow
 

@@ -3,10 +3,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -22,6 +24,9 @@ func main() {
 	endpoint := flag.String("endpoint", "http://127.0.0.1:8080/v1/chat/completions", "маршрут llama.cpp")
 	timeout := flag.Duration("timeout", 30*time.Minute, "предельная длительность всей проверки")
 	promptVersion := flag.String("prompt-version", "", "версия инструкции для сравнения; файл и контрольная сумма набора не меняются")
+	schemaVersion := flag.String("schema-version", "", "версия контракта результата для сравнения; подмена после проверки суммы, как у инструкции")
+	tracePath := flag.String("trace", "", "файл JSONL с измерениями каждого обращения к модели: токены, скорость, сырой ответ, причина отказа")
+	serverInfo := flag.Bool("server-info", true, "записать в отчёт сборку llama.cpp, модель и параметры последнего запроса (запросы GET)")
 	precision := flag.Float64("minimum-precision", 0, "минимальная общая точность, обязательно")
 	factRecall := flag.Float64("minimum-fact-recall", 0, "минимальная полнота каждого представленного типа факта; 0 отключает порог")
 	factPrecision := flag.Float64("minimum-fact-precision", 0, "минимальная точность каждого типа факта, обязательно")
@@ -34,6 +39,9 @@ func main() {
 	flag.Parse()
 	if *promptVersion != "" && !application.SupportedAnalysisPrompt(*promptVersion) {
 		fatal(fmt.Errorf("неподдерживаемая версия инструкции"))
+	}
+	if *schemaVersion != "" && *schemaVersion != application.AnalysisSchemaV1 && *schemaVersion != application.AnalysisSchemaV2 {
+		fatal(fmt.Errorf("неподдерживаемая версия контракта результата"))
 	}
 	if *precision <= 0 || *factPrecision <= 0 || *recall <= 0 || *f1 <= 0 || *exact <= 0 || *valid <= 0 || *evidence <= 0 || *p95 <= 0 {
 		fatal(fmt.Errorf("все пороги качества и производительности должны быть заданы явно"))
@@ -61,19 +69,62 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
-	if *promptVersion != "" {
-		for i := range cases {
-			cases[i].Input.PromptVersion = *promptVersion
-		}
+	if *promptVersion != "" || *schemaVersion != "" {
+		// Подмена идёт после проверки суммы; несовместимая пара (например, v9 на
+		// конверте v1) отклоняется, а не измеряется молча.
+		cases, err = benchmark.WithVersions(cases, *schemaVersion, *promptVersion)
+		fatal(err)
 	}
-	report, err := benchmark.Run(ctx, infrastructure.LlamaProvider{URL: *endpoint}, cases, digest, benchmark.Thresholds{
+	recorder := benchmark.NewRecorder()
+	provider := recorder.Wrap(infrastructure.LlamaProvider{URL: *endpoint, Client: &http.Client{Transport: recorder.Transport(nil)}})
+	var server *benchmark.ServerInfo
+	if *serverInfo {
+		server = benchmark.CaptureServer(ctx, http.DefaultClient, *endpoint)
+	}
+	started := time.Now()
+	report, err := benchmark.Run(ctx, provider, cases, digest, benchmark.Thresholds{
 		MinimumFactRecall: *factRecall, MinimumPrecision: *precision, MinimumFactPrecision: *factPrecision, MinimumRecall: *recall, MinimumF1: *f1, MinimumExactRate: *exact, MinimumValidRate: *valid, MinimumEvidenceExactRate: *evidence, MaximumP95MS: *p95,
 	})
 	fatal(err)
+	benchmark.ExplainFailures(report.Failures, recorder.Observations())
+	performance := benchmark.Summarize(recorder.Observations())
+	performance.StartedAt, performance.FinishedAt = started.UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339)
+	report.Performance = &performance
+	if server != nil {
+		server.ObserveSampling(ctx, http.DefaultClient, *endpoint)
+		report.Server = server
+	}
+	if *tracePath != "" {
+		fatal(writeTrace(*tracePath, recorder.Observations()))
+	}
 	fatal(json.NewEncoder(os.Stdout).Encode(report))
 	if !report.Passed {
 		os.Exit(2)
 	}
+}
+
+// writeTrace сохраняет измерения построчно. Файл содержит сырые ответы модели на
+// синтетические случаи и остаётся рабочим материалом (каталог runtime), а не
+// частью отчёта в репозитории.
+func writeTrace(path string, observations []benchmark.Observation) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	writer := bufio.NewWriter(f)
+	encoder := json.NewEncoder(writer)
+	encoder.SetEscapeHTML(false)
+	for _, observation := range observations {
+		if err := encoder.Encode(observation); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func fatal(err error) {

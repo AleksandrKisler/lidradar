@@ -1,8 +1,8 @@
 {
   "name": "lidradar-main-v1",
   "status": "FROZEN",
-  "contractVersion": "analyze-conversation.v1",
-  "promptVersion": "analyze-conversation.prompt.v6",
+  "contractVersion": "analyze-conversation.v2",
+  "promptVersion": "analyze-conversation.prompt.v9",
   "datasetVersion": "lidradar-ai-benchmark.v1",
   "dataset": {
     "cases": 500,
@@ -14,14 +14,31 @@
       "devSHA256": "b4b83c909c7dd814e25e068ea0be3c851575ae42a578a5335ef8f98a4e29d238",
       "goldenCases": 400,
       "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34"
+    },
+    "v2DevSets": {
+      "intents": {
+        "sha256": "c5183b949b24ddad0369da35babf2a52f9c7bc39b45f89dd128e62d89833ad22",
+        "cases": 27
+      },
+      "agreements": {
+        "sha256": "712300ff227a40ff7e7a0869a9abcdb1cb7587329610ef7a600d0278e082717c",
+        "cases": 21
+      },
+      "independent": {
+        "sha256": "be4589226b2274c9cb61530ba3334ed2e2b245d53b1458b364e003b558ae4baf",
+        "cases": 6
+      }
     }
   },
   "runtime": "llama.cpp",
+  "runtimeBuild": "b10666-4e97ac86e",
+  "runtimeImageId": "sha256:150b59966fb5b2cb1a8fa9d226267c56ebd22c520c7b3640331cde87f3c4fb01",
+  "driverVersion": "595.91.07",
   "targetHardware": "NVIDIA GeForce RTX 4060 8 GB",
   "hardware": {
     "gpu": "NVIDIA GeForce RTX 4060",
     "vram_gb": 8,
-    "fit": "Qwen3-8B Q4_K_M ≈ 4.9 GB весов + KV-кэш ≈ 0.5 GB при контексте 4096; наблюдаемый пик 5360 MiB; контекст 4096 и parallel 1 — потолок"
+    "fit": "Q4_K - Medium, контекст 8192, параллелизм 1; наблюдаемый пик 5844 MiB при пределе 7500 MiB (отчёт об оборудовании)"
   },
   "generation": {
     "temperature": 0.2,
@@ -31,7 +48,7 @@
     "presencePenalty": 0,
     "seed": 42,
     "thinking": false,
-    "contextSize": 4096,
+    "contextSize": 8192,
     "parallelism": 1
   },
   "qualityGate": {
@@ -41,7 +58,8 @@
     "minimumF1": 0.9,
     "minimumExactRate": 0.85,
     "minimumValidRate": 0.99,
-    "minimumEvidenceExactRate": 0.9
+    "minimumEvidenceExactRate": 0.9,
+    "minimumFactRecall": 0.85
   },
   "performanceGate": {
     "maximumP95Ms": 8000,
@@ -51,44 +69,136 @@
   },
   "modelArtifact": "Qwen3-8B-Q4_K_M.gguf",
   "modelSHA256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+  "modelServer": {
+    "modelPath": "/models/Qwen3-8B-Q4_K_M.gguf",
+    "modelFtype": "Q4_K - Medium",
+    "modelSizeBytes": 5021827072,
+    "modelParameters": 8190735360
+  },
+  "modelVerification": {
+    "report": "models/reports/lidradar-main-v1-prompt-v9-model-hash.json",
+    "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "sizeBytes": 5027783488,
+    "checkedAt": "2026-10-10T17:32:02Z"
+  },
+  "selection": "models/reports/lidradar-main-v1-prompt-v9-selection.json",
+  "selectionTreeSHA256": "f8212a9ffddb8b27f0df9d56ce8cd6c7b0d5c10d85690408f196bf9d151eada6",
   "validationResult": {
     "split": "DEV",
-    "report": "models/reports/lidradar-main-v1-prompt-v6-dev.json",
+    "report": "models/reports/lidradar-main-v1-prompt-v9-dev.json",
     "cases": 100,
-    "precision": 0.9782608695652174,
-    "recall": 0.967741935483871,
-    "f1": 0.972972972972973,
-    "exactRate": 0.96,
+    "precision": 1,
+    "recall": 1,
+    "f1": 1,
+    "exactRate": 1,
     "validRate": 1,
-    "evidenceExactRate": 0.9666666666666667,
-    "p95Ms": 4150,
-    "passed": true
+    "evidenceExactRate": 1,
+    "p95Ms": 4221,
+    "passed": true,
+    "recallByFactType": {
+      "BOOKING_INTENT": 1,
+      "BUSINESS_COMMITMENT": 1,
+      "FOLLOW_UP_CANDIDATE": 1,
+      "PRICE_MENTIONED": 1
+    }
+  },
+  "v2ValidationResults": {
+    "intents": {
+      "report": "models/reports/lidradar-main-v1-prompt-v9-dev-intents.json",
+      "cases": 27,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "exactRate": 1,
+      "validRate": 1,
+      "evidenceExactRate": 1,
+      "p95Ms": 2665,
+      "passed": true,
+      "recallByFactType": {
+        "BOOKING_INTENT": 1,
+        "PURCHASE_INTENT": 1
+      }
+    },
+    "agreements": {
+      "report": "models/reports/lidradar-main-v1-prompt-v9-dev-agreements.json",
+      "cases": 21,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "exactRate": 1,
+      "validRate": 1,
+      "evidenceExactRate": 1,
+      "p95Ms": 5307,
+      "passed": true,
+      "agreementExactRate": 1,
+      "recallByFactType": {
+        "BOOKING_INTENT": 1,
+        "BUSINESS_COMMITMENT": 1,
+        "FOLLOW_UP_CANDIDATE": 1,
+        "PRICE_MENTIONED": 1,
+        "PURCHASE_INTENT": 1
+      }
+    },
+    "independent": {
+      "report": "models/reports/lidradar-main-v1-prompt-v9-dev-independent.json",
+      "cases": 6,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "exactRate": 1,
+      "validRate": 1,
+      "evidenceExactRate": 1,
+      "p95Ms": 3672,
+      "passed": true,
+      "agreementExactRate": 1,
+      "recallByFactType": {
+        "BUSINESS_COMMITMENT": 1
+      }
+    }
   },
   "goldenResult": {
-    "report": "models/reports/lidradar-main-v1-prompt-v6-golden.json",
+    "report": "models/reports/lidradar-main-v1-prompt-v9-golden.json",
     "cases": 400,
-    "precision": 0.9539295392953929,
-    "recall": 0.9591280653950953,
-    "f1": 0.9565217391304348,
-    "exactRate": 0.9325,
+    "precision": 0.9074550128534704,
+    "recall": 0.9618528610354223,
+    "f1": 0.9338624338624338,
+    "exactRate": 0.92,
     "validRate": 1,
-    "evidenceExactRate": 0.9857954545454546,
-    "p95Ms": 4219,
-    "passed": true
+    "evidenceExactRate": 1,
+    "p95Ms": 4397,
+    "passed": true,
+    "recallByFactType": {
+      "BOOKING_INTENT": 0.9789,
+      "BUSINESS_COMMITMENT": 0.9091,
+      "FOLLOW_UP_CANDIDATE": 0.8929,
+      "PRICE_MENTIONED": 1
+    },
+    "maxPromptTokens": 2675,
+    "minTokensPerSecond": 44.942815792659886
   },
   "hardwareResult": {
-    "report": "models/reports/lidradar-main-v1-prompt-v6-hardware.json",
-    "peakObservedVRAMMiB": 5360,
+    "report": "models/reports/lidradar-main-v1-prompt-v9-hardware.json",
+    "peakObservedVRAMMiB": 5844,
     "oom": 0,
-    "minimumObservedTokensPerSecond": 47.16644505273208,
-    "passed": true
+    "restartsDuringRun": 0,
+    "minimumObservedTokensPerSecond": 42.59194795770458,
+    "maximumPromptTokens": 6417,
+    "maximumTotalTokens": 6606,
+    "passed": true,
+    "driverVersions": [
+      "595.91.07"
+    ],
+    "imageIds": [
+      "sha256:150b59966fb5b2cb1a8fa9d226267c56ebd22c520c7b3640331cde87f3c4fb01"
+    ]
   },
-  "frozenAt": "2026-10-05T00:10:46.366523+00:00",
-  "previousQualification": "models/reports/lidradar-main-v1-prompt-v5-manifest.json",
-  "candidateSelection": "models/reports/lidradar-main-v1-prompt-v6-selection.json",
+  "previousQualification": "models/reports/lidradar-main-v1-prompt-v6-manifest.json",
   "knownLimitations": [
-    "GOLDEN: 27 из 400 случаев не совпали со строгой разметкой; 15 пропущенных намерений записи.",
-    "GOLDEN: один положительный PRICE_MENTIONED на adversarial-сообщении с явной числовой суммой; числовой guard не заменяет смысловую защиту от prompt injection.",
-    "Дополнительная QA-06 выборка: 3 явных отрицательных факта вместо ожидаемого пустого списка; это несовпадения строгой разметки."
-  ]
+    "GOLDEN: 32 из 400 случаев не совпали со строгой разметкой; пропущено 14 фактов (BOOKING_INTENT 3, BUSINESS_COMMITMENT 5, FOLLOW_UP_CANDIDATE 6), лишних 36.",
+    "GOLDEN: 28 из 36 лишних фактов — явные отрицательные факты (value=false), которых строгая разметка не ждёт; продукт их не использует, все его запросы берут только value = true. Положительных ложных фактов 8 (BOOKING_INTENT 7, PRICE_MENTIONED 1 на adversarial-сообщении с числовой суммой). Точность 0,9075 при пороге 0,90: запас мал.",
+    "GOLDEN: полнота BUSINESS_COMMITMENT 0,909; факт допускается только на обещаниях, которые распознаёт словарь признаков, а словарь не расширялся (ADR 0053, п. 9).",
+    "GOLDEN и DEV v1 построены из одного пула шаблонных фраз: это регрессия разбора фактов, а не проверка обобщения. Договорённости, покупка и длинный контекст проверены малыми наборами DEV (27, 21 и 6 случаев), по которым инструкцию настраивали (ADR 0053, п. 10).",
+    "Контекст узла 8192 (решение владельца). Самый долгий запрос зонда (около 6,4 тыс. токенов в запросе) занял около 11 с; при отказе сервера из-за размера контекста поставщик повторяет запрос по более короткому окну (ADR 0053, п. 11)."
+  ],
+  "frozenAt": "2026-10-10T18:23:17.530618+00:00"
 }

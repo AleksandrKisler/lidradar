@@ -231,11 +231,22 @@ func (p LlamaProvider) Infer(ctx context.Context, prompt string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	raw, err := p.infer(ctx, aliased)
+	infer := p.infer
+	if version == application.AnalysisPromptV9 {
+		infer = p.inferWithinContext
+	}
+	raw, err := infer(ctx, aliased)
 	if err != nil {
 		return "", err
 	}
-	return aliases.restore(raw)
+	if version == application.AnalysisPromptV9 {
+		raw = resolveContradictoryFacts(raw)
+	}
+	restored, err := aliases.restore(raw)
+	if err != nil || version != application.AnalysisPromptV9 {
+		return restored, err
+	}
+	return ensureCommitmentFact(prompt, restored), nil
 }
 
 func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error) {
@@ -334,7 +345,11 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		io.Copy(io.Discard, resp.Body)
+		if exceeded, ok := parseContextExceeded(body); ok && resp.StatusCode == http.StatusBadRequest {
+			return "", exceeded
+		}
 		return "", fmt.Errorf("llama.cpp вернул состояние %d", resp.StatusCode)
 	}
 	var result struct {

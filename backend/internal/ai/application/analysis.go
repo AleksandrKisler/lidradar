@@ -264,6 +264,30 @@ func validateFacts(facts []domain.SemanticFact, allowPurchase bool) ([]domain.Se
 	return normalizedFacts, nil
 }
 
+// ConflictingFactTypes возвращает типы, для которых ответ содержит противоречащие друг другу факты
+// (то же значение, сумма и валюта у одного типа — не противоречие). Сравнение такое же, как в
+// validateFacts: сумма приводится к каноническому виду до сравнения. Серверная проверка отвергает
+// такой ответ целиком; поставщик использует эту функцию, чтобы убрать только спорные факты.
+func ConflictingFactTypes(facts []domain.SemanticFact) map[domain.FactType]bool {
+	conflicting := map[domain.FactType]bool{}
+	first := make(map[domain.FactType]domain.SemanticFact, len(facts))
+	for _, fact := range facts {
+		if fact.Type == domain.FactPriceMentioned && fact.Value && fact.Amount != nil {
+			amount := normalizeModelAmount(*fact.Amount)
+			fact.Amount = &amount
+		}
+		previous, seen := first[fact.Type]
+		if !seen {
+			first[fact.Type] = fact
+			continue
+		}
+		if previous.Value != fact.Value || previous.Currency != fact.Currency || !sameOptionalString(previous.Amount, fact.Amount) {
+			conflicting[fact.Type] = true
+		}
+	}
+	return conflicting
+}
+
 func sameOptionalString(left, right *string) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil

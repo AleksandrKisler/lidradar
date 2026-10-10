@@ -18,23 +18,40 @@
 ## Манифест модели
 
 - **Статус:** `AVAILABLE`, полнота release tuple — `REQUIRED_NOT_VERIFIED`.
-- [lidradar-main-v1](../../models/manifests/lidradar-main-v1.json) содержит
-  prompt v6, веса/hash, параметры, dataset hashes 400 GOLDEN + 100 DEV,
-  RTX 4060, quality/performance gates и статус `FROZEN` от QA-06.
-- Это фиксация выбранной конфигурации и результатов QA-06; полный runtime/driver/
-  validator provenance для общего выпуска ещё не подтверждён.
+- [lidradar-main-v1](../../models/manifests/lidradar-main-v1.json) с 2026-10-10 относится к
+  prompt v9 и контракту v2 (`FROZEN`): веса и hash (пересчитан на узле), параметры генерации и
+  контекст 8192, сборка llama.cpp, образ и драйвер, сумма выбора (29 файлов tuple), dataset hashes
+  400 GOLDEN + 100 DEV и наборов v2, результаты DEV, GOLDEN и оборудования, пороги. Числа собраны
+  `scripts/ai-manifest.py` из отчётов ([ADR 0053](../adr/0053-ai-tuple-qualification.md),
+  [runbook](../runbooks/ai-qualification.md)).
+- Манифест v6 (QA-06, 2026-10-05) сохранён как
+  [отчёт](../../models/reports/lidradar-main-v1-prompt-v6-manifest.json) и остаётся историей v6.
+- Полный release tuple для общего выпуска остаётся неподтверждённым: нет независимой выборки для
+  смыслов контракта v2, сверки tuple при запуске узла и независимого production-измерения.
 - **Владелец:** AI; [сверка provenance](../../models/reports/lidradar-main-v1-prompt-v6-provenance-review.json).
 
 <a id="model-report"></a>
 ## Отчёты контрольного прогона
 
-- **Статус:** `AVAILABLE`; реальные отчёты v6 от 2026-10-05, не новый benchmark 6 октября.
-- [GOLDEN 400](../../models/reports/lidradar-main-v1-prompt-v6-golden.json),
+- **Статус:** `AVAILABLE`; отчёты v6 от 2026-10-05 (история) и отчёты v9 от 2026-10-10.
+- v6: [GOLDEN 400](../../models/reports/lidradar-main-v1-prompt-v6-golden.json),
   [DEV 100](../../models/reports/lidradar-main-v1-prompt-v6-dev.json),
   [GPU](../../models/reports/lidradar-main-v1-prompt-v6-hardware.json),
   [выбор до открытия GOLDEN](../../models/reports/lidradar-main-v1-prompt-v6-selection.json).
-- Текущие provider/generation schema/price validator совпадают с хэшами selection.
-  Исторические отчёты v5 не используются как доказательство v6.
+  Отчёты v5 не используются как доказательство v6, отчёты v6 — как доказательство v9.
+- v9 (узел с контекстом 8192): [выбор до открытия GOLDEN](../../models/reports/lidradar-main-v1-prompt-v9-selection.json),
+  [GOLDEN 400](../../models/reports/lidradar-main-v1-prompt-v9-golden.json), DEV:
+  [100](../../models/reports/lidradar-main-v1-prompt-v9-dev.json),
+  [намерения](../../models/reports/lidradar-main-v1-prompt-v9-dev-intents.json),
+  [договорённости](../../models/reports/lidradar-main-v1-prompt-v9-dev-agreements.json),
+  [независимые обещания](../../models/reports/lidradar-main-v1-prompt-v9-dev-independent.json),
+  [зонд контекста](../../models/reports/lidradar-main-v1-prompt-v9-context-probe.json) (и
+  [на контексте 4096](../../models/reports/lidradar-main-v1-prompt-v9-context-probe-4096.json)),
+  [оборудование](../../models/reports/lidradar-main-v1-prompt-v9-hardware.json) со
+  [снимками видеопамяти](../../models/reports/lidradar-main-v1-prompt-v9-vram-samples.csv),
+  [хэш весов](../../models/reports/lidradar-main-v1-prompt-v9-model-hash.json).
+- Файлы tuple v9 совпадают с выбором v9 (`make ai-selection-verify`); с хэшами выбора v6 они больше
+  не совпадают: поставщик и валидатор изменены.
 - **Владелец:** AI/QA. Независимое production-измерение и полный release tuple остаются открытыми.
 
 <a id="repo-rules"></a>

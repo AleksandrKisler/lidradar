@@ -45,8 +45,9 @@ make ai-dataset-audit
 При доступном на `127.0.0.1:8080` сервере используются зафиксированные команды:
 
 ```sh
-make ai-benchmark-dev
-make ai-benchmark-golden
+make ai-benchmark-dev        # dev_v1: 100 случаев
+make ai-benchmark-v2-dev     # intent_regression_v2, agreements_dev_v2, agreements_independent_v2 (отчёты — runtime/ai-benchmark/*.json)
+make ai-benchmark-golden     # сначала проверяет выбор (scripts/ai-selection.py), потом открывает GOLDEN
 ```
 
 Для другого адреса его можно передать без изменения порогов:
@@ -56,13 +57,21 @@ make ai-benchmark-dev \
   AI_BENCHMARK_ENDPOINT=http://llama-server:8080/v1/chat/completions
 ```
 
-`make ai-benchmark-dev` и `make ai-benchmark-golden` проверяют инструкцию v6.
-Историческую версию можно выбрать через
-`AI_BENCHMARK_PROMPT_VERSION=analyze-conversation.prompt.v5`.
-В CLI для того же выбора используется `-prompt-version`. Подмена версии
-происходит только после проверки SHA-256 и записывается в `promptVersions`
-отчёта. Сами данные v1 и их генератор сохраняют исходную инструкцию v5;
-обновление рабочего промпта не меняет защищённый набор.
+Цели проверяют инструкцию v9 на конверте результата v2. Файлы v1 хранят конверт v1 и
+инструкцию v5, поэтому версии подменяются в памяти — флагами `-schema-version` и
+`-prompt-version` runner, — только после проверки SHA-256; применённые версии попадают в
+`schemaVersions` и `promptVersions` отчёта. Несовместимая пара (v9 на конверте v1, v6 на
+конверте v2) отклоняется, а не измеряется молча. Историческую пару выбирают переменными
+`AI_BENCHMARK_SCHEMA_VERSION=analyze-conversation.v1` и
+`AI_BENCHMARK_PROMPT_VERSION=analyze-conversation.prompt.v6`. Сами данные v1 и их генератор
+сохраняют исходную инструкцию v5; обновление рабочего промпта не меняет защищённый набор.
+
+Каждый прогон дополнительно записывает в отчёт то, чего не было у v6: `server` (сборка
+llama.cpp, файл и размер модели, контекст, число слотов и параметры последнего запроса —
+seed, температура, `top_p`, `top_k`, `min_p`, `presence_penalty`, режим рассуждений),
+`performance` (токены, скорость генерации, коды ответов, ответы, оборванные по длине, время
+начала и конца) и у несовпавших случаев `detail` — причину отказа. Сырые ответы модели и
+измерения каждого обращения runner пишет флагом `-trace` в `runtime/ai-benchmark/`.
 
 `qa06_v1.jsonl` — отдельные 37 регрессионных примеров: вопросы о цене,
 справочные суммы, явные цены, десятичная запятая и контрольные примеры остальных
@@ -77,10 +86,12 @@ make ai-benchmark-dev \
 go run ./backend/cmd/ai-benchmark \
   -dataset models/datasets/dev_v1.jsonl \
   -checksum '' \
-  -prompt-version analyze-conversation.prompt.v6 \
+  -schema-version analyze-conversation.v2 \
+  -prompt-version analyze-conversation.prompt.v9 \
   -endpoint http://127.0.0.1:8080/v1/chat/completions \
   -minimum-precision 0.90 \
   -minimum-fact-precision 0.85 \
+  -minimum-fact-recall 0.85 \
   -minimum-recall 0.90 \
   -minimum-f1 0.90 \
   -minimum-exact-rate 0.85 \
@@ -95,10 +106,12 @@ go run ./backend/cmd/ai-benchmark \
 go run ./backend/cmd/ai-benchmark \
   -dataset models/datasets/golden_v1.jsonl \
   -checksum models/datasets/golden_v1.sha256 \
-  -prompt-version analyze-conversation.prompt.v6 \
+  -schema-version analyze-conversation.v2 \
+  -prompt-version analyze-conversation.prompt.v9 \
   -endpoint http://127.0.0.1:8080/v1/chat/completions \
   -minimum-precision 0.90 \
   -minimum-fact-precision 0.85 \
+  -minimum-fact-recall 0.85 \
   -minimum-recall 0.90 \
   -minimum-f1 0.90 \
   -minimum-exact-rate 0.85 \
@@ -116,8 +129,11 @@ p99 и пропускную способность. Все пороги пере
 получить из HTTP-ответа модели: отсутствие OOM, не более 7500 МиБ занятой
 видеопамяти и не менее 20 токенов/с. Канон оборудования — RTX 4060 с 8 GB
 (LR-BE-RM-023): веса Q4_K_M ≈ 4,9 GB плюс KV-кэш ≈ 0,5 GB при контексте
-4096 помещаются с запасом около 2 GB, поэтому контекст 4096 и `parallel 1` —
-потолок, а не отправная точка.
+4096 помещаются с запасом около 2 GB, поэтому контекст 4096 и `parallel 1` были
+потолком, а не отправной точкой. Для инструкции v9 запрос без переписки занимает около
+2,6 тыс. токенов, и по решению владельца (ADR 0053) контекст узла поднят до 8192: KV-кэш
+около 1,1 GB. Измеренный пик (2026-10-10, 2148 снимков за все прогоны квалификации) —
+5844 MiB при пределе 7500 MiB (оценка была около 6,0 GB), `parallel 1` остаётся потолком.
 
 Сравнение с разметкой учитывает только доверенные факты (уверенность
 `>= 0.85`): слабый факт не открывает Risk и потому не считается обнаруженным. Значения, инструкция, параметры генерации

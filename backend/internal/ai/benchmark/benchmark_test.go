@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"lidradar/backend/internal/ai/application"
 	"lidradar/backend/internal/ai/domain"
@@ -253,5 +254,40 @@ func TestIntentRegressionDatasetLabels(t *testing.T) {
 	}
 	if _, err := AuditCases(cases); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestContextProbeDatasetStaysWithinProductLimitsAndIsValid(t *testing.T) {
+	f, err := os.Open("../../../../models/datasets/context_probe_v1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cases, _, err := Load(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AuditCases(cases); err != nil {
+		t.Fatal(err)
+	}
+	longest := 0
+	for _, c := range cases {
+		runes := utf8.RuneCountInString(c.Input.CompanyContext)
+		for _, m := range c.Input.Messages {
+			runes += utf8.RuneCountInString(m.Body)
+		}
+		if runes > application.MaxContextRunes || len(c.Input.Messages) > application.MaxContextMessages {
+			t.Fatalf("%s exceeds the product limits: %d runes, %d messages", c.ID, runes, len(c.Input.Messages))
+		}
+		if runes > longest {
+			longest = runes
+		}
+		if c.Input.SchemaVersion != application.AnalysisSchemaV2 || c.Input.PromptVersion != application.CurrentAnalysisPrompt {
+			t.Fatalf("%s must use the current contract and instruction", c.ID)
+		}
+	}
+	// Зонд обязан доходить до предела продукта, иначе он ничего не доказывает.
+	if longest < application.MaxContextRunes-application.MaxContextMessages {
+		t.Fatalf("the longest probe has %d runes of %d allowed", longest, application.MaxContextRunes)
 	}
 }
