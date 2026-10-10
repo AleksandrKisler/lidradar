@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: c2afeb4361fa4088dec36517a6d41685f9ca8ce6cc57875d307b00b9132db3a2 -->
+<!-- GENERATED; source-sha256: f70a919adccf0d4b1cbdaa995acd1d6f6c97211dae972ef043f33ab237bbaf97 -->
 > Источник: [канонический документ](../adr/README.md). Правки вносятся в источник.
 
 # Architecture decision records
@@ -56,6 +56,9 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 | [0043: Пороги правил риска в бизнес-времени без таблицы конфигурации](../adr/0043-risk-thresholds-in-code.md) | Accepted |
 | [0044: Обогащённые модели чтения Radar и переписок для интерфейса](../adr/0044-frontend-read-models.md) | Accepted |
 | [0045: Команда по одноразовым кодам, статус онбординга и безопасное подключение каналов](../adr/0045-team-onboarding-and-secure-connect.md) | Accepted |
+
+- [0047: Сделки с неизвестной услугой и незавершённые договорённости](../adr/0047-unfinished-agreements.md) — Accepted, 2026-10-07.
+- [0048: Сохранение независимых незавершённых ожиданий](../adr/0048-retain-independent-agreements.md) — Accepted, 2026-10-09.
 
 ## Workflow
 

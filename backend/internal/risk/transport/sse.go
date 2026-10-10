@@ -18,6 +18,14 @@ const ResyncEvent = "resync.required"
 // прочитать до того, как получит маркер ресинхронизации.
 const subscriberBuffer = 16
 
+// heartbeatInterval — период комментариев heartbeat: они держат соединение
+// живым за прокси и позволяют клиенту отличить тишину от обрыва.
+const heartbeatInterval = 20 * time.Second
+
+// streamWriteTimeout — предел одной записи в поток: столько ждём клиента,
+// который перестал читать, прежде чем закрыть соединение.
+const streamWriteTimeout = 30 * time.Second
+
 type subscriber struct {
 	signals chan Signal
 	resync  chan struct{}
@@ -26,14 +34,15 @@ type subscriber struct {
 // Hub distributes ephemeral invalidation signals. It intentionally stores no
 // business state; slow/disconnected clients recover through REST refetches.
 type Hub struct {
-	mu     sync.RWMutex
-	next   uint64
-	buffer int
-	subs   map[string]map[uint64]*subscriber
+	mu        sync.RWMutex
+	next      uint64
+	buffer    int
+	heartbeat time.Duration
+	subs      map[string]map[uint64]*subscriber
 }
 
 func NewHub() *Hub {
-	return &Hub{buffer: subscriberBuffer, subs: make(map[string]map[uint64]*subscriber)}
+	return &Hub{buffer: subscriberBuffer, heartbeat: heartbeatInterval, subs: make(map[string]map[uint64]*subscriber)}
 }
 
 func (h *Hub) Publish(tenantID, eventType, resourceID string) {
@@ -108,9 +117,19 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	sub, cancel := h.events.subscribe(t)
 	defer cancel()
-	_, _ = fmt.Fprint(w, ": connected\n\n")
-	flusher.Flush()
-	heartbeat := time.NewTicker(20 * time.Second)
+	controller := http.NewResponseController(w)
+	// WriteTimeout сервера отсчитывается от начала запроса и без продления
+	// оборвал бы поток вскоре после второго heartbeat. Дедлайн переносится перед
+	// каждой записью: живой клиент не прерывается, а клиент, перестав читать,
+	// отсекается через streamWriteTimeout. Писатели без поддержки дедлайнов
+	// (тестовый recorder) возвращают ошибку, которую можно не учитывать.
+	send := func(format string, args ...any) {
+		_ = controller.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
+		_, _ = fmt.Fprintf(w, format, args...)
+		flusher.Flush()
+	}
+	send(": connected\n\n")
+	heartbeat := time.NewTicker(h.events.heartbeat)
 	defer heartbeat.Stop()
 	for {
 		select {
@@ -119,14 +138,11 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request) {
 		case <-sub.resync:
 			// Накопленные сигналы избыточны после полного перечитывания.
 			drainSignals(sub.signals)
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"reason\":\"BUFFER_OVERFLOW\"}\n\n", ResyncEvent)
-			flusher.Flush()
+			send("event: %s\ndata: {\"reason\":\"BUFFER_OVERFLOW\"}\n\n", ResyncEvent)
 		case signal := <-sub.signals:
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: {\"resourceId\":%q}\n\n", signal.Type, signal.ResourceID)
-			flusher.Flush()
+			send("event: %s\ndata: {\"resourceId\":%q}\n\n", signal.Type, signal.ResourceID)
 		case <-heartbeat.C:
-			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
-			flusher.Flush()
+			send(": heartbeat\n\n")
 		}
 	}
 }

@@ -23,6 +23,7 @@ const (
 	shutdownTimeoutKey      = "LIDRADAR_SHUTDOWN_TIMEOUT"
 	databaseMaxConnsKey     = "LIDRADAR_DATABASE_MAX_CONNS"
 	databaseMinConnsKey     = "LIDRADAR_DATABASE_MIN_CONNS"
+	databasePlaintextKey    = "LIDRADAR_DATABASE_ALLOW_PLAINTEXT"
 	databaseTimeoutKey      = "LIDRADAR_DATABASE_TIMEOUT"
 	allowedOriginsKey       = "LIDRADAR_ALLOWED_ORIGINS"
 	sessionTTLKey           = "LIDRADAR_SESSION_TTL"
@@ -149,6 +150,11 @@ type Database struct {
 	MaxConnections int32
 	MinConnections int32
 	ConnectTimeout time.Duration
+	// RequireTLS включается Load для staging и production: подключение обязано
+	// быть зашифровано (sslmode=require, verify-ca или verify-full), иначе пул
+	// не открывается. Открытый канал принимается только по явному
+	// LIDRADAR_DATABASE_ALLOW_PLAINTEXT=true, например во внутренней сети хоста.
+	RequireTLS bool
 }
 
 // Load reads typed configuration from environment variables and validates all
@@ -241,6 +247,11 @@ func Load(lookup LookupEnv) (Config, error) {
 	if configuration.Auth.CookieSecure, err = boolValue(lookup, cookieSecureKey, secureDefault); err != nil {
 		return Config{}, err
 	}
+	allowPlaintext, err := boolValue(lookup, databasePlaintextKey, false)
+	if err != nil {
+		return Config{}, err
+	}
+	configuration.Database.RequireTLS = secureDefault && !allowPlaintext
 	if configuration.Notifications.OwnerEscalationEnabled, err = boolValue(lookup, ownerEscalationKey, false); err != nil {
 		return Config{}, err
 	}
@@ -344,6 +355,33 @@ func (c Config) Validate() error {
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return fmt.Errorf("%s contains invalid origin %q", allowedOriginsKey, origin)
 		}
+	}
+	return nil
+}
+
+// ValidateAPI добавляет требования, которые нужны только процессу API: в staging
+// и production без этих настроек он стартовал бы «готовым», но не работал.
+//   - За прокси, завершающим TLS, API видит запрос по http и не узнаёт собственный
+//     origin по схеме. Без явного списка каждая мутация браузера, включая вход,
+//     получила бы 403 ORIGIN_NOT_ALLOWED.
+//   - Без публичного адреса и ключа шифрования подключение Telegram отвечает 503
+//     CONNECTOR_UNAVAILABLE уже после успешного старта.
+//
+// Остальные процессы браузеров и каналов не обслуживают, поэтому общая Validate
+// этих настроек не требует. Об ошибках сообщается сразу обо всех.
+func (c Config) ValidateAPI() error {
+	if c.Environment != EnvironmentStaging && c.Environment != EnvironmentProduction {
+		return nil
+	}
+	var problems []string
+	if len(c.HTTP.AllowedOrigins) == 0 {
+		problems = append(problems, fmt.Sprintf("%s must list the public origin of the web client", allowedOriginsKey))
+	}
+	if c.Integrations.PublicBaseURL == "" || len(c.Integrations.CredentialKey) == 0 {
+		problems = append(problems, fmt.Sprintf("%s and %s are required to connect Telegram channels", publicBaseURLKey, credentialKeyKey))
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("invalid API configuration for %s: %s", c.Environment, strings.Join(problems, "; "))
 	}
 	return nil
 }

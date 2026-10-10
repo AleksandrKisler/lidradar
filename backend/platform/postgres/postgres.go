@@ -45,6 +45,10 @@ func open(ctx context.Context, configuration config.Database, role string) (*pgx
 	if err != nil {
 		return nil, fmt.Errorf("parse PostgreSQL configuration: %w", err)
 	}
+	if configuration.RequireTLS && !encryptedTransport(poolConfiguration.ConnConfig) {
+		return nil, fmt.Errorf("PostgreSQL connection must use TLS (sslmode=require, verify-ca or verify-full); " +
+			"set LIDRADAR_DATABASE_ALLOW_PLAINTEXT=true only for a trusted private network")
+	}
 	poolConfiguration.MaxConns = configuration.MaxConnections
 	poolConfiguration.MinConns = configuration.MinConnections
 	poolConfiguration.ConnConfig.ConnectTimeout = configuration.ConnectTimeout
@@ -63,6 +67,23 @@ func open(ctx context.Context, configuration config.Database, role string) (*pgx
 		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	return pool, nil
+}
+
+// encryptedTransport сообщает, что соединение возможно только по TLS: sslmode
+// require, verify-ca или verify-full. disable, allow и prefer (а значит, и строка
+// без sslmode, для которой драйвер выбирает prefer) допускают открытый канал
+// напрямую или как запасной вариант. Проверяется разобранная конфигурация
+// драйвера, поэтому учитываются и строка вида «ключ=значение», и PGSSLMODE.
+func encryptedTransport(configuration *pgx.ConnConfig) bool {
+	if configuration.TLSConfig == nil {
+		return false
+	}
+	for _, fallback := range configuration.Fallbacks {
+		if fallback.TLSConfig == nil {
+			return false
+		}
+	}
+	return true
 }
 
 type connectionContext struct {

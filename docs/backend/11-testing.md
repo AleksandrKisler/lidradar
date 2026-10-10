@@ -100,6 +100,21 @@ origin, инвалидатор — хаб в памяти вместо `pg_notif
   политик RLS, подмена суммы останавливает запуск, неизвестная версия
   отвергается.
 - `platform/postgres/rls_test.go` — fail-closed по ролям.
+- `platform/postgres/bootstrap_roles_test.go` — `scripts/sql/bootstrap-roles.sql`
+  возвращает схеме, лишённой прав (как после восстановления без привилегий),
+  ровно те права и права по умолчанию, что выдали миграции; повтор ничего не
+  меняет; `verify-roles.sql` без замечаний на свежей схеме (RLS принудителен и
+  политика есть у каждой таблицы с `tenant_id`) и замечает отсутствующие права и
+  несуществующего пользователя приложения; оба теста входят в обязательные для
+  `testgate`.
+- `platform/postgres/transport_test.go` — пул не открывается без TLS, когда он
+  обязателен: `disable`, `allow`, `prefer`, строка без `sslmode` отвергаются,
+  `require`, `verify-ca`, `verify-full` проходят проверку; ошибка не раскрывает
+  пароль.
+- `scripts/tests` (`unittest`, шаг CI «Documentation and recovery helper tests») —
+  `backup.sh`, `restore.sh` и `bootstrap-roles.sh` на подставных инструментах:
+  порядок вызовов, отказ до обращения к базе при неверных входных данных, SQL не
+  содержит отзыва прав, удаления и ослабления RLS.
 - `platform/postgres/schema_invariants_test.go` — связи между таблицами
   организации включают `tenant_id`.
 - `platform/postgres/readiness_test.go` — дрейф миграций даёт «не готов».
@@ -153,7 +168,7 @@ Workflow `Backend` (`.github/workflows/backend.yml`) на `pull_request` и
 5. `archcheck -root backend`;
 6. `go run ./backend/cmd/migrate` (smoke миграций);
 7. запуск собранного API и проверка `/health/ready` на строку
-   `"latest":"000022_membership_invitations"` — новая миграция без обновления ожидания
+   `"latest":"000023_unfinished_agreements"` — новая миграция без обновления ожидания
    ломает CI;
 8. `npx @redocly/cli@1.34.5 lint contracts/openapi/openapi.yaml`;
 9. `go build ./backend/cmd/...`;

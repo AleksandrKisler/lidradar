@@ -49,6 +49,8 @@ var required = []string{
 	"lidradar/backend/internal/jobs/infrastructure/TestWorkerProcessCanBeKilledAfterClaim",
 	"lidradar/backend/internal/corrective/infrastructure/TestPostgresActionSerializesWithRiskClosure",
 	"lidradar/backend/internal/corrective/infrastructure/TestPostgresActionCommitsBeforeWaitingClosure",
+	"lidradar/backend/platform/postgres/TestRoleBootstrapReproducesMigrationGrants",
+	"lidradar/backend/platform/postgres/TestRoleBootstrapGrantsMembershipToSeparateApplicationUser",
 }
 
 func main() {

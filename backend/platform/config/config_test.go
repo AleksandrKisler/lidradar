@@ -157,6 +157,114 @@ func TestLoadDefaultsSecureCookiesOutsideDevelopment(t *testing.T) {
 	}
 }
 
+// В staging и production API обязан получить всё, без чего веб-клиент и Telegram
+// не заработают, и иначе отказаться от запуска. За прокси, завершающим TLS, API
+// видит http и не узнаёт свой origin по схеме: каждая мутация браузера, включая
+// вход, получила бы 403. Без публичного адреса и ключа шифрования подключение
+// Telegram отвечает 503 уже после «успешного» старта. Требования относятся
+// только к API; Load их не предъявляет, потому что worker, scheduler и migrate
+// запускаются в тех же окружениях без этих настроек.
+func TestValidateAPIRequiresBrowserAndTelegramSettingsOutsideDevelopment(t *testing.T) {
+	complete := map[string]string{
+		databaseURLKey:    "postgres://example",
+		allowedOriginsKey: "https://app.example.com",
+		publicBaseURLKey:  "https://app.example.com",
+		credentialKeyKey:  base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	// Пустое значение удаляет ключ, остальные заменяют его.
+	load := func(environment Environment, overrides map[string]string) Config {
+		t.Helper()
+		values := map[string]string{environmentKey: string(environment)}
+		for key, value := range complete {
+			values[key] = value
+		}
+		for key, value := range overrides {
+			if value == "" {
+				delete(values, key)
+			} else {
+				values[key] = value
+			}
+		}
+		configuration, err := Load(mapLookup(values))
+		if err != nil {
+			t.Fatalf("Load(%s, %v) error = %v", environment, overrides, err)
+		}
+		return configuration
+	}
+	cases := map[string]struct {
+		overrides map[string]string
+		mentions  []string
+	}{
+		"без origins":           {map[string]string{allowedOriginsKey: ""}, []string{allowedOriginsKey}},
+		"пустой список origins": {map[string]string{allowedOriginsKey: " , "}, []string{allowedOriginsKey}},
+		"без адреса и ключа":    {map[string]string{publicBaseURLKey: "", credentialKeyKey: ""}, []string{publicBaseURLKey, credentialKeyKey}},
+		"ничего не задано": {
+			map[string]string{allowedOriginsKey: "", publicBaseURLKey: "", credentialKeyKey: ""},
+			[]string{allowedOriginsKey, publicBaseURLKey, credentialKeyKey},
+		},
+	}
+	for _, environment := range []Environment{EnvironmentStaging, EnvironmentProduction} {
+		if err := load(environment, nil).ValidateAPI(); err != nil {
+			t.Fatalf("%s с полным набором: ValidateAPI() error = %v", environment, err)
+		}
+		for name, c := range cases {
+			err := load(environment, c.overrides).ValidateAPI()
+			if err == nil || !strings.Contains(err.Error(), string(environment)) {
+				t.Fatalf("%s, %s: ValidateAPI() error = %v", environment, name, err)
+			}
+			for _, key := range c.mentions {
+				if !strings.Contains(err.Error(), key) {
+					t.Fatalf("%s, %s: в ошибке нет %s: %v", environment, name, key, err)
+				}
+			}
+		}
+	}
+	empty := map[string]string{allowedOriginsKey: "", publicBaseURLKey: "", credentialKeyKey: ""}
+	for _, environment := range []Environment{EnvironmentDevelopment, EnvironmentTest} {
+		if err := load(environment, empty).ValidateAPI(); err != nil {
+			t.Fatalf("%s без настроек: ValidateAPI() error = %v", environment, err)
+		}
+	}
+}
+
+// Подключение к PostgreSQL в staging и production обязано быть зашифровано;
+// открытый канал принимается только по явному LIDRADAR_DATABASE_ALLOW_PLAINTEXT.
+func TestLoadRequiresEncryptedDatabaseOutsideDevelopment(t *testing.T) {
+	load := func(environment Environment, allowPlaintext string) Config {
+		t.Helper()
+		values := map[string]string{environmentKey: string(environment), databaseURLKey: "postgres://example"}
+		if allowPlaintext != "" {
+			values[databasePlaintextKey] = allowPlaintext
+		}
+		configuration, err := Load(mapLookup(values))
+		if err != nil {
+			t.Fatalf("Load(%s, %q) error = %v", environment, allowPlaintext, err)
+		}
+		return configuration
+	}
+	for environment, want := range map[Environment]bool{
+		EnvironmentDevelopment: false, EnvironmentTest: false, EnvironmentStaging: true, EnvironmentProduction: true,
+	} {
+		if got := load(environment, "").Database.RequireTLS; got != want {
+			t.Fatalf("%s: RequireTLS = %v, want %v", environment, got, want)
+		}
+	}
+	for _, environment := range []Environment{EnvironmentStaging, EnvironmentProduction} {
+		if load(environment, "true").Database.RequireTLS {
+			t.Fatalf("%s: явное разрешение открытого канала не снимает требование", environment)
+		}
+		if !load(environment, "false").Database.RequireTLS {
+			t.Fatalf("%s: false не должен снимать требование", environment)
+		}
+	}
+	_, err := Load(mapLookup(map[string]string{
+		environmentKey: string(EnvironmentProduction), databaseURLKey: "postgres://example", databasePlaintextKey: "maybe",
+	}))
+	if err == nil || !strings.Contains(err.Error(), databasePlaintextKey) {
+		t.Fatalf("Load() error = %v, want boolean error for %s", err, databasePlaintextKey)
+	}
+}
+
 func TestLoadRejectsInvalidAllowedOrigin(t *testing.T) {
 	_, err := Load(mapLookup(map[string]string{
 		environmentKey:    string(EnvironmentTest),

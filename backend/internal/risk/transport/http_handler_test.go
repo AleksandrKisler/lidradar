@@ -153,6 +153,43 @@ func TestSSEPublishesTenantInvalidation(t *testing.T) {
 	}
 }
 
+// HTTP-сервер ограничивает запись WriteTimeout, отсчитываемым от начала запроса
+// (в бою 30 с при heartbeat раз в 20 с): без продления дедлайна поток обрывался
+// на 40-й секунде, и клиент переподключался с полным перечитыванием. Поток
+// обязан жить дольше WriteTimeout, пока клиент читает.
+func TestSSEStreamOutlivesServerWriteTimeout(t *testing.T) {
+	hub := NewHub()
+	hub.heartbeat = 20 * time.Millisecond
+	handler := NewHandler(application.NewRadar(infrastructure.NewTestMemoryRepository(), allowAll{}, hub, time.Now), testPrincipal{"user", "tenant"}, hub).Router()
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.WriteTimeout = 150 * time.Millisecond
+	server.Start()
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/events", nil)
+	response, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	started := time.Now()
+	heartbeats := 0
+	for time.Since(started) < 4*server.Config.WriteTimeout {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("поток оборван через %v после %d heartbeat: %v", time.Since(started).Round(time.Millisecond), heartbeats, err)
+		}
+		if line == ": heartbeat\n" {
+			heartbeats++
+		}
+	}
+	if heartbeats < 10 {
+		t.Fatalf("за %v получено %d heartbeat", time.Since(started).Round(time.Millisecond), heartbeats)
+	}
+}
+
 func TestRiskHTTPStatusFiltersAndActiveShortcut(t *testing.T) {
 	repository := infrastructure.NewTestMemoryRepository()
 	at := time.Date(2026, 9, 18, 10, 0, 0, 0, time.UTC)

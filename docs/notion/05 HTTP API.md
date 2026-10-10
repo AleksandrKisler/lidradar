@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: 98a6ec319f3a60c08d2d334f32ba1ba4b93c8cbe336ca01e5d7ae3c305ce29bb -->
+<!-- GENERATED; source-sha256: 6471691a393d4d98e67b857854cc08a5ba3bff5f17fd3d5d787368ea3fc56e19 -->
 > Источник: [канонический документ](../backend/04-api.md). Правки вносятся в источник.
 
 # HTTP API
@@ -136,7 +136,8 @@
 - Мутации (все методы, кроме `GET`/`HEAD`/`OPTIONS`) с заголовком `Origin`
   принимаются только с того же origin или из `LIDRADAR_ALLOWED_ORIGINS`;
   иначе `403 ORIGIN_NOT_ALLOWED`. Это защита от CSRF в дополнение к
-  `SameSite=Strict`.
+  `SameSite=Strict`. В `staging` и `production` список обязателен (TLS
+  завершается на прокси, API видит `http`).
 - Ограничение по адресу соединения (заголовки прокси не читаются):
   `/api/v1/auth/*` — 120 запросов в минуту, `/api/v1/webhooks/*` — 1200,
   `/internal/v1/ai/*` — 600; правила независимы, ответ `429` с `Retry-After`. Отдельно вход ограничивается по учётной записи

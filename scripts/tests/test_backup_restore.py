@@ -25,9 +25,10 @@ class RecoveryHelpersTests(unittest.TestCase):
                     'LIDRADAR_ADMIN_DATABASE_URL': 'postgres://test@localhost/postgres',
                     'QA_CALLS': str(self.calls)}
         self.env.pop('LIDRADAR_RESTORE_DATABASE_URL', None)
-        self.tool('pg_dump', 'head -c 2048 /dev/zero')
+        self.tool('pg_dump', 'echo "pg_dump $*" >> "$QA_CALLS"; head -c 2048 /dev/zero')
         self.tool('pg_restore', 'echo "restore $*" >> "$QA_CALLS"')
-        self.tool('psql', 'echo "psql $*" >> "$QA_CALLS"')
+        # `t` — ответ проверки «роль видит все строки»; restore.sh вывод psql не читает.
+        self.tool('psql', 'echo "psql $*" >> "$QA_CALLS"; echo t')
 
     def tool(self, name, body):
         path = self.bin / name
@@ -62,6 +63,40 @@ class RecoveryHelpersTests(unittest.TestCase):
             self.assertEqual(dump.stat().st_mode & 0o777, 0o600)
         self.assertEqual(len(list(self.backups.iterdir())), 2)
 
+    def test_dump_checks_role_first_and_enables_row_security(self):
+        result = self.run_script('backup.sh')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log().splitlines()
+        self.assertEqual(len(calls), 2, calls)
+        self.assertTrue(calls[0].startswith('psql '), calls[0])
+        self.assertIn('lidradar_platform', calls[0])
+        self.assertTrue(calls[1].startswith('pg_dump '), calls[1])
+        self.assertIn('--enable-row-security', calls[1])
+
+    def test_role_without_full_row_visibility_stops_before_any_file(self):
+        # С включённым RLS такая роль получила бы тихо неполную копию.
+        self.tool('psql', 'echo "psql $*" >> "$QA_CALLS"; echo f')
+        result = self.run_script('backup.sh')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('lidradar_platform', result.stderr)
+        self.assertNotIn('pg_dump', self.log())
+        self.assertFalse(self.backups.exists())
+
+    def test_unreachable_database_stops_before_dump_without_role_message(self):
+        self.tool('psql', 'echo "psql $*" >> "$QA_CALLS"; exit 2')
+        result = self.run_script('backup.sh')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('lidradar_platform', result.stderr)
+        self.assertNotIn('pg_dump', self.log())
+        self.assertFalse(self.backups.exists())
+
+    def test_unknown_mode_fails_before_tools_or_files(self):
+        self.env['LIDRADAR_BACKUP_MODE'] = 'tape'
+        result = self.run_script('backup.sh')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.log(), '')
+        self.assertFalse(self.backups.exists())
+
     def test_bad_keep_fails_before_tools_or_files(self):
         self.env['LIDRADAR_BACKUP_KEEP'] = '0'
         self.assertNotEqual(self.run_script('backup.sh').returncode, 0)
@@ -85,6 +120,8 @@ class RecoveryHelpersTests(unittest.TestCase):
         self.assertIn('CREATE DATABASE "qa_restore"', lines[1])
         self.assertIn('--dbname=postgres://test@localhost/qa_restore', lines[2])
         self.assertNotIn('DROP', self.log())
+        # Роли и права в dump не входят: следующий шаг назван в выводе.
+        self.assertIn('scripts/bootstrap-roles.sh qa_restore', result.stdout)
 
     def test_existing_database_is_not_overwritten(self):
         self.tool('psql', 'echo "psql $*" >> "$QA_CALLS"; exit 1')

@@ -60,7 +60,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	os.Exit(bootstrap.Run(ctx, "lidradar-api", os.Stderr, run))
+	os.Exit(bootstrap.Run(ctx, "lidradar-api", os.Stderr, run, config.Config.ValidateAPI))
 }
 
 func run(ctx context.Context, configuration config.Config) error {

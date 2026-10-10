@@ -13,10 +13,13 @@
 
 Все процессы читают переменные окружения через `platform/config` и целиком
 валидируют их при старте (даже `cmd/migrate` отвергнет неверный
-`LIDRADAR_AI_LLAMA_URL`). Единственная обязательная — `LIDRADAR_ENV`.
-Отсутствие обязательного значения или неверный формат → код выхода 1 и
-событие `runtime.configuration_invalid`; значения секретов в текст ошибки
-не попадают.
+`LIDRADAR_AI_LLAMA_URL`). Для всех обязательна `LIDRADAR_ENV`; в `staging` и
+`production` действуют дополнительные требования, помеченные в таблице: без них
+`api` не запускается, а процессы с базой не открывают пул. Отсутствие
+обязательного значения или неверный формат → код выхода 1 и событие
+`runtime.configuration_invalid` (так же отказывает `api` без своих обязательных
+настроек); отказ открыть пул без TLS приходит как `runtime.failed` с понятной
+ошибкой. Значения секретов в текст ошибки не попадают.
 
 | Ключ | По умолчанию | Валидация | Кто использует |
 |---|---|---|---|
@@ -26,15 +29,16 @@
 | `LIDRADAR_HTTP_WEBHOOK_RATE_LIMIT_PER_MINUTE` | `1200` | ≥ 0 | `api`: `/api/v1/webhooks/*` |
 | `LIDRADAR_HTTP_AI_NODE_RATE_LIMIT_PER_MINUTE` | `600` | ≥ 0 | `api`: `/internal/v1/ai/*` |
 | `LIDRADAR_SHUTDOWN_TIMEOUT` | `10s` | > 0 | `api` |
-| `LIDRADAR_DATABASE_URL` | в `development`/`test` — `postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable`, иначе пусто | проверяется при открытии пула | все с базой |
+| `LIDRADAR_DATABASE_URL` | в `development`/`test` — `postgres://lidradar:lidradar@127.0.0.1:5432/lidradar?sslmode=disable`, иначе пусто | проверяется при открытии пула; в `staging`/`production` строка обязана требовать TLS (`sslmode=require`, `verify-ca` или `verify-full`; `disable`, `allow`, `prefer` и отсутствие `sslmode` отвергаются) | все с базой |
 | `LIDRADAR_DATABASE_MAX_CONNS` | `10` | > 0, ≥ min | все с базой (на каждый пул) |
 | `LIDRADAR_DATABASE_MIN_CONNS` | `1` | ≥ 0 | то же |
 | `LIDRADAR_DATABASE_TIMEOUT` | `5s` | > 0 | подключение и `Ping` |
-| `LIDRADAR_ALLOWED_ORIGINS` | пусто | список `http(s)://host` без пути | `api` (CSRF) |
+| `LIDRADAR_DATABASE_ALLOW_PLAINTEXT` | `false` | bool; `true` разрешает в `staging`/`production` открытый канал к PostgreSQL, только для закрытой сети (например, база на том же хосте) | все с базой |
+| `LIDRADAR_ALLOWED_ORIGINS` | пусто | список `http(s)://host` без пути; **обязателен для `api` в `staging`/`production`** (иначе процесс не стартует), остальные процессы его не требуют | `api` (CSRF) |
 | `LIDRADAR_SESSION_TTL` | `720h` | > 0 | `api` |
 | `LIDRADAR_COOKIE_SECURE` | `true` в `staging`/`production`, иначе `false` | **обязан быть `true`** в `staging`/`production` | `api` (cookie и HSTS) |
-| `LIDRADAR_PUBLIC_BASE_URL` | пусто | `https://host` без пути; только вместе с ключом шифрования | `api` (webhook Telegram) |
-| `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` | пусто | base64 ровно 32 байт; только вместе с URL | `api` |
+| `LIDRADAR_PUBLIC_BASE_URL` | пусто | `https://host` без пути; только вместе с ключом шифрования; **обязателен для `api` в `staging`/`production`** | `api` (webhook Telegram) |
+| `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` | пусто | base64 ровно 32 байт; только вместе с URL; **обязателен для `api` в `staging`/`production`** | `api` |
 | `LIDRADAR_TELEGRAM_TOKEN` (прежнее имя `LIDAR_TELEGRAM_TOKEN` принимается, новое приоритетнее) | пусто | `^[0-9]{5,20}:[A-Za-z0-9_-]{20,128}$` | `worker` (уведомления), помощник подключения |
 | `LIDRADAR_TELEGRAM_BOT_USERNAME` | `LidRadarDevBot` | `^[A-Za-z0-9_]{5,32}$` | `api` (ссылка `/start`) |
 | `LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION` | `false` | bool | `worker` |
@@ -119,11 +123,13 @@ Core, файл реквизитов переносится на узел вру�
 изоляции tenant и готовности. Существующую базу восстанавливают только по
 [отдельному runbook](../runbooks/backup-restore.md), с прежними ключами.
 
-1. Задать `LIDRADAR_ENV`, `LIDRADAR_DATABASE_URL`, `LIDRADAR_COOKIE_SECURE=true`
-   (вне development), при необходимости `LIDRADAR_PUBLIC_BASE_URL` +
-   `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` (новый ключ через
-   `openssl rand -base64 32` только для пустой установки),
-   `LIDRADAR_TELEGRAM_TOKEN`, `LIDRADAR_ALLOWED_ORIGINS` для фронтенда.
+1. Задать `LIDRADAR_ENV`, `LIDRADAR_DATABASE_URL` (в `staging`/`production` с
+   `sslmode=require` или строже, либо явно `LIDRADAR_DATABASE_ALLOW_PLAINTEXT=true`
+   для закрытой сети), `LIDRADAR_COOKIE_SECURE=true` (вне development),
+   `LIDRADAR_PUBLIC_BASE_URL` + `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` (новый ключ
+   через `openssl rand -base64 32` только для пустой установки) и
+   `LIDRADAR_ALLOWED_ORIGINS` для фронтенда (в `staging`/`production` без них
+   `api` не запустится), `LIDRADAR_TELEGRAM_TOKEN`.
 2. `go run ./backend/cmd/migrate` (или сервис `migrate`).
 3. Запустить `api`, `worker`, `scheduler`; убедиться, что `/health/ready`
    возвращает ожидаемую последнюю миграцию.
@@ -222,6 +228,7 @@ deadlock. Лимиты вебхуков проверяют с корректны
 | Процедура | Как | Когда |
 |---|---|---|
 | резервная копия | `scripts/backup.sh` после проверки возможностей текущего build; контроль целостности и внешнего recovery point | частота и способ должны обеспечивать измеренный RPO ≤ 15 минут, включая длительность копирования, доставки и сбои |
+| роли и права после восстановления | `scripts/bootstrap-roles.sh <база>` ([описание](../runbooks/backup-restore.md#roles-after-restore)); `--verify-only` только проверяет | после каждого восстановления на новый кластер, до запуска `api`; проверка структурная, не заменяет межорганизационные сценарии |
 | учение восстановления | `scripts/restore-drill.sh` как smoke-проверка плюс полный [DR на новом кластере](../runbooks/backup-restore.md) | перед production и после изменения recovery set; schema/count smoke не заменяет восстановление ролей, ключей, RLS и интеграций |
 | нагрузочное испытание | `go test -tags load -run TestLoadCapacityBaseline` с переменными `LIDRADAR_LOAD_*` | перед пилотом и при росте нагрузки |
 | ротация секрета узла | `ai-node-manage rotate` и замена файла на узле | при подозрении на утечку |

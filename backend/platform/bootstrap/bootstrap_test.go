@@ -73,3 +73,42 @@ func TestRunRejectsInvalidConfigurationBeforeStartingWorkload(t *testing.T) {
 		t.Fatalf("Run() stderr = %q, want configuration error", stderr.String())
 	}
 }
+
+// Требования отдельного процесса (например, API в staging и production)
+// проверяются после загрузки конфигурации и до запуска: отказ логируется тем же
+// событием, что и неверная общая конфигурация.
+func TestRunRejectsProcessSpecificConfigurationBeforeStartingWorkload(t *testing.T) {
+	t.Setenv("LIDRADAR_ENV", "test")
+	var stderr bytes.Buffer
+	started := false
+	requirement := func(config.Config) error { return errors.New("API requirement is not met") }
+
+	code := Run(context.Background(), "test-service", &stderr, func(context.Context, config.Config) error {
+		started = true
+		return nil
+	}, requirement)
+
+	if code != 1 {
+		t.Fatalf("Run() code = %d, want 1", code)
+	}
+	if started {
+		t.Fatal("Run() started workload although a validator failed")
+	}
+	got := stderr.String()
+	if !strings.Contains(got, `"event":"runtime.configuration_invalid"`) || !strings.Contains(got, "API requirement is not met") {
+		t.Fatalf("Run() logs = %q", got)
+	}
+	if strings.Contains(got, `"event":"runtime.failed"`) {
+		t.Fatalf("отказ валидатора не должен логироваться как сбой работы: %q", got)
+	}
+}
+
+func TestRunStartsWorkloadWhenEveryValidatorAccepts(t *testing.T) {
+	t.Setenv("LIDRADAR_ENV", "test")
+	var stderr bytes.Buffer
+	accept := func(config.Config) error { return nil }
+
+	if code := Run(context.Background(), "test-service", &stderr, Complete, accept, accept); code != 0 {
+		t.Fatalf("Run() code = %d, want 0; logs = %q", code, stderr.String())
+	}
+}

@@ -54,3 +54,5 @@ case "${MODE}" in
   local) pg_restore --dbname="${RESTORE_URL}" --no-owner --no-privileges --exit-on-error "${DUMP}" ;;
 esac
 echo "restored ${DUMP} into ${TARGET_DB}"
+# Роли кластера и права на объекты в dump не входят: без следующего шага API не стартует.
+echo "next: scripts/bootstrap-roles.sh ${TARGET_DB}"

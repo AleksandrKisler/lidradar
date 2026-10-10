@@ -16,9 +16,15 @@ import (
 // Workload is the process-specific function run by a LidRadar command.
 type Workload func(context.Context, config.Config) error
 
+// Validator проверяет требования отдельного процесса сверх общей config.Validate,
+// например обязательные настройки API в staging и production.
+type Validator func(config.Config) error
+
 // Run executes a workload and translates its result into a process exit code.
-// Cancellation is a normal, graceful shutdown.
-func Run(ctx context.Context, service string, stderr io.Writer, workload Workload) int {
+// Cancellation is a normal, graceful shutdown. Валидаторы выполняются после
+// загрузки конфигурации и до запуска; отказ завершает процесс кодом 1 с тем же
+// событием runtime.configuration_invalid, что и неверная общая конфигурация.
+func Run(ctx context.Context, service string, stderr io.Writer, workload Workload, validators ...Validator) int {
 	logger := observability.NewLogger(stderr, service, "unknown")
 	configuration, err := config.Load(os.LookupEnv)
 	if err != nil {
@@ -27,6 +33,12 @@ func Run(ctx context.Context, service string, stderr io.Writer, workload Workloa
 	}
 	logger = observability.NewLogger(stderr, service, string(configuration.Environment))
 	ctx = observability.WithLogger(ctx, logger)
+	for _, validate := range validators {
+		if err := validate(configuration); err != nil {
+			logger.Error("invalid configuration", "event", "runtime.configuration_invalid", "error", err)
+			return 1
+		}
+	}
 	logger.Info("runtime starting", "event", "runtime.starting")
 
 	if err := workload(ctx, configuration); err != nil && ctx.Err() == nil {
