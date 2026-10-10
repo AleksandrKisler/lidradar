@@ -1,0 +1,94 @@
+{
+  "name": "lidradar-main-v1",
+  "status": "FROZEN",
+  "contractVersion": "analyze-conversation.v1",
+  "promptVersion": "analyze-conversation.prompt.v6",
+  "datasetVersion": "lidradar-ai-benchmark.v1",
+  "dataset": {
+    "cases": 500,
+    "goldenCases": 400,
+    "devCases": 100,
+    "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34",
+    "measuredOn": {
+      "devCases": 100,
+      "devSHA256": "b4b83c909c7dd814e25e068ea0be3c851575ae42a578a5335ef8f98a4e29d238",
+      "goldenCases": 400,
+      "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34"
+    }
+  },
+  "runtime": "llama.cpp",
+  "targetHardware": "NVIDIA GeForce RTX 4060 8 GB",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4060",
+    "vram_gb": 8,
+    "fit": "Qwen3-8B Q4_K_M ≈ 4.9 GB весов + KV-кэш ≈ 0.5 GB при контексте 4096; наблюдаемый пик 5360 MiB; контекст 4096 и parallel 1 — потолок"
+  },
+  "generation": {
+    "temperature": 0.2,
+    "topP": 0.8,
+    "topK": 20,
+    "minP": 0,
+    "presencePenalty": 0,
+    "seed": 42,
+    "thinking": false,
+    "contextSize": 4096,
+    "parallelism": 1
+  },
+  "qualityGate": {
+    "minimumPrecision": 0.9,
+    "minimumFactPrecision": 0.85,
+    "minimumRecall": 0.9,
+    "minimumF1": 0.9,
+    "minimumExactRate": 0.85,
+    "minimumValidRate": 0.99,
+    "minimumEvidenceExactRate": 0.9
+  },
+  "performanceGate": {
+    "maximumP95Ms": 8000,
+    "maximumVRAMMiB": 7500,
+    "maximumOOM": 0,
+    "minimumTokensPerSecond": 20
+  },
+  "modelArtifact": "Qwen3-8B-Q4_K_M.gguf",
+  "modelSHA256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+  "validationResult": {
+    "split": "DEV",
+    "report": "models/reports/lidradar-main-v1-prompt-v6-dev.json",
+    "cases": 100,
+    "precision": 0.9782608695652174,
+    "recall": 0.967741935483871,
+    "f1": 0.972972972972973,
+    "exactRate": 0.96,
+    "validRate": 1,
+    "evidenceExactRate": 0.9666666666666667,
+    "p95Ms": 4150,
+    "passed": true
+  },
+  "goldenResult": {
+    "report": "models/reports/lidradar-main-v1-prompt-v6-golden.json",
+    "cases": 400,
+    "precision": 0.9539295392953929,
+    "recall": 0.9591280653950953,
+    "f1": 0.9565217391304348,
+    "exactRate": 0.9325,
+    "validRate": 1,
+    "evidenceExactRate": 0.9857954545454546,
+    "p95Ms": 4219,
+    "passed": true
+  },
+  "hardwareResult": {
+    "report": "models/reports/lidradar-main-v1-prompt-v6-hardware.json",
+    "peakObservedVRAMMiB": 5360,
+    "oom": 0,
+    "minimumObservedTokensPerSecond": 47.16644505273208,
+    "passed": true
+  },
+  "frozenAt": "2026-10-05T00:10:46.366523+00:00",
+  "previousQualification": "models/reports/lidradar-main-v1-prompt-v5-manifest.json",
+  "candidateSelection": "models/reports/lidradar-main-v1-prompt-v6-selection.json",
+  "knownLimitations": [
+    "GOLDEN: 27 из 400 случаев не совпали со строгой разметкой; 15 пропущенных намерений записи.",
+    "GOLDEN: один положительный PRICE_MENTIONED на adversarial-сообщении с явной числовой суммой; числовой guard не заменяет смысловую защиту от prompt injection.",
+    "Дополнительная QA-06 выборка: 3 явных отрицательных факта вместо ожидаемого пустого списка; это несовпадения строгой разметки."
+  ]
+}
