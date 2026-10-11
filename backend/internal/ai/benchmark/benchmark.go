@@ -24,14 +24,16 @@ import (
 
 const DatasetVersion = "lidradar-ai-benchmark.v1"
 
-// Split — назначение случая (LR-BE-RM-024). Дообучения в проекте нет, поэтому
-// выборок две: GOLDEN защищена контрольной суммой и открывается только перед
-// сменой статуса манифеста; DEV служит для итераций инструкции.
+// Split — назначение случая (LR-BE-RM-024). Дообучения в проекте нет. GOLDEN защищена
+// контрольной суммой и открывается только перед сменой статуса манифеста; DEV служит для
+// итераций инструкции и словарей. HOLDOUT — слепая выборка для правки словаря (ADR 0054): её
+// пишет не тот, кто настраивает словарь, сумма записывается до первого прогона, а тексты не читают.
 type Split string
 
 const (
-	SplitGolden Split = "GOLDEN"
-	SplitDev    Split = "DEV"
+	SplitGolden  Split = "GOLDEN"
+	SplitDev     Split = "DEV"
+	SplitHoldout Split = "HOLDOUT"
 )
 
 // maxConsecutiveCallFailures — сколько обращений к модели подряд могут завершиться ошибкой, прежде чем
@@ -46,7 +48,12 @@ var ErrModelUnavailable = errors.New("модель недоступна")
 // GoldenDigestMismatch — код отказа runner при подмене контрольной выборки.
 const GoldenDigestMismatch = "GOLDEN_DIGEST_MISMATCH"
 
-func (split Split) Valid() bool { return split == SplitGolden || split == SplitDev }
+func (split Split) Valid() bool {
+	return split == SplitGolden || split == SplitDev || split == SplitHoldout
+}
+
+// Sealed — выборка защищена утверждённой контрольной суммой: без суммы runner её не запускает.
+func (split Split) Sealed() bool { return split == SplitGolden || split == SplitHoldout }
 
 type Case struct {
 	Version            string                                   `json:"version"`

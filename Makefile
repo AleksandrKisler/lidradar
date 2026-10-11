@@ -1,4 +1,4 @@
-.PHONY: ai-benchmark-context ai-benchmark-dev ai-benchmark-golden ai-benchmark-v2-dev ai-dataset ai-dataset-audit ai-selection-verify build check clean fmt test test-db vet
+.PHONY: ai-benchmark-commitments ai-benchmark-context ai-benchmark-dev ai-benchmark-golden ai-benchmark-holdout ai-benchmark-v2-dev ai-dataset ai-dataset-audit ai-lexicon-audit ai-selection-verify build check clean fmt test test-db vet
 
 BIN_DIR ?= bin
 COMMANDS := api worker scheduler ai-agent ai-node-register ai-node-manage migrate dev-data
@@ -10,7 +10,7 @@ AI_BENCHMARK_PROMPT_VERSION ?= analyze-conversation.prompt.v9
 AI_BENCHMARK_SCHEMA_VERSION ?= analyze-conversation.v2
 AI_BENCHMARK_TRACE_DIR ?= runtime/ai-benchmark
 AI_BENCHMARK_TIMEOUT ?= 2h
-AI_SELECTION ?= models/reports/lidradar-main-v1-prompt-v9-selection.json
+AI_SELECTION ?= models/reports/lidradar-main-v1-prompt-v9r2-selection.json
 AI_BENCHMARK_GATES := -minimum-precision 0.90 \
 	-minimum-fact-precision 0.85 \
 	-minimum-fact-recall 0.85 \
@@ -86,6 +86,24 @@ ai-benchmark-golden:
 	@python3 scripts/ai-selection.py verify $(AI_SELECTION) >&2
 	@mkdir -p $(AI_BENCHMARK_TRACE_DIR)
 	@$(AI_BENCHMARK) -dataset models/datasets/golden_v1.jsonl -checksum models/datasets/golden_v1.sha256 -trace $(AI_BENCHMARK_TRACE_DIR)/golden.jsonl
+
+# Набор обязательств компании (ADR 0054) измеряет один тип факта, BUSINESS_COMMITMENT. Общие пороги здесь не решают:
+# отрицательные факты других типов в строгой разметке считаются ложными, поэтому код выхода 2 допустим, а решение
+# принимает scripts/ai-manifest.py по полноте и точности именно этого типа. Отчёт — в stdout.
+ai-benchmark-commitments:
+	@mkdir -p $(AI_BENCHMARK_TRACE_DIR)
+	@$(AI_BENCHMARK) -dataset models/datasets/commitment_dev_v1.jsonl -checksum '' -trace $(AI_BENCHMARK_TRACE_DIR)/commitments.jsonl; status=$$?; [ $$status -eq 0 ] || [ $$status -eq 2 ]
+
+# Слепая выборка обязательств запускается один раз для записанного выбора, как GOLDEN: цель сначала проверяет выбор,
+# а сумма выборки утверждена в commitment_holdout_v1.sha256 до первого прогона. Тексты выборки не читают.
+ai-benchmark-holdout:
+	@python3 scripts/ai-selection.py verify $(AI_SELECTION) >&2
+	@mkdir -p $(AI_BENCHMARK_TRACE_DIR)
+	@$(AI_BENCHMARK) -dataset models/datasets/commitment_holdout_v1.jsonl -checksum models/datasets/commitment_holdout_v1.sha256 -trace $(AI_BENCHMARK_TRACE_DIR)/holdout.jsonl; status=$$?; [ $$status -eq 0 ] || [ $$status -eq 2 ]
+
+# Словарь обещаний без модели: покрытие обещаний и ложные допуски на наборе DEV. Выборки HOLDOUT так не читают.
+ai-lexicon-audit:
+	@go run ./backend/cmd/ai-lexicon-audit -dataset models/datasets/commitment_dev_v1.jsonl -summary
 
 ai-selection-verify:
 	@python3 scripts/ai-selection.py verify $(AI_SELECTION)

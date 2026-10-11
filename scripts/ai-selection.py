@@ -42,6 +42,9 @@ DATASETS = [
     "models/datasets/agreements_independent_v2.jsonl",
     "models/datasets/qa06_v1.jsonl",
     "models/datasets/context_probe_v1.jsonl",
+    "models/datasets/commitment_dev_v1.jsonl",
+    "models/datasets/commitment_holdout_v1.jsonl",
+    "models/datasets/commitment_holdout_v1.sha256",
 ]
 MARKER = "Selected before opening GOLDEN; prompt and sampling frozen."
 

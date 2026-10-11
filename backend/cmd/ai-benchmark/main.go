@@ -51,11 +51,11 @@ func main() {
 	defer f.Close()
 	cases, digest, err := benchmark.Load(f)
 	fatal(err)
-	containsGolden := false
+	sealed := false
 	for _, current := range cases {
-		containsGolden = containsGolden || current.Split == benchmark.SplitGolden
+		sealed = sealed || current.Split.Sealed()
 	}
-	if containsGolden || *digestPath != "" {
+	if sealed || *digestPath != "" {
 		if *digestPath == "" {
 			fatal(fmt.Errorf("для контрольной выборки обязательна контрольная сумма"))
 		}

@@ -164,7 +164,7 @@ func explicitAgreementTrigger(kind domain.AgreementKind, body string) bool {
 	case domain.AgreementReschedule:
 		return containsAny(b, "перенес", "перенос", "другое время", "позже", "подума", "отлож", "reschedul", "postpon", "later")
 	case domain.AgreementCommitment:
-		return containsAny(b, "обещ", "проверю", "проверим", "ответим", "отвечу", "отправлю", "отправим", "пришлю", "пришлём", "пришлем", "перезвон", "уточню", "уточним", "позвоню", "подготовлю", "подготовим", "свяжусь", "свяжемся", "передам", "передадим", "сообщу", "сообщим", "напишу", "напишем", "вышлю", "скину", "сделаю", "сделаем", "will ", "i'll ")
+		return HasCommitmentAnchor(body)
 	case domain.AgreementPurchaseBlocker:
 		return containsAny(b, "не могу", "мешает", "проблем", "блок", "нет оплаты", "не получается", "can't", "cannot", "problem", "block")
 	}
@@ -217,11 +217,8 @@ func PossibleBookingEvidence(m ContextMessage) bool {
 // PossibleBusinessCommitmentEvidence requires an outgoing future action anchor.
 // A model still decides whether this is a promise in the conversation context.
 func PossibleBusinessCommitmentEvidence(m ContextMessage) bool {
-	if m.Direction != "OUTGOING" || containsAny(strings.ToLower(m.Body), "возможно", "может быть") {
-		return false
-	}
-	future := explicitAgreementTrigger(domain.AgreementCommitment, m.Body)
-	return future
+	// «Возможно» и «может быть» смягчают только свою фразу, поэтому проверяются внутри словаря (HasCommitmentAnchor).
+	return m.Direction == "OUTGOING" && explicitAgreementTrigger(domain.AgreementCommitment, m.Body)
 }
 
 // HasExplicitPurchaseIntent identifies direct order language, excluding mere budgets.

@@ -194,3 +194,32 @@ scripts/ai-manifest.py --base models/manifests/lidradar-main-v1.json \
 | пересоздание контейнера llama падает с `open /run/nvidia-persistenced/socket: no such file or directory`; на узле `nvidia-smi` пишет `Driver/library version mismatch` | apt обновил библиотеки NVIDIA, а модуль ядра остался старым (`cat /proc/driver/nvidia/version` ≠ версия `nvidia-utils`), описание GPU для Docker (`/var/run/cdi/nvidia.yaml`) устарело, а его автообновление (`nvidia-cdi-refresh`) упало. Старый контейнер жил, пока его не перезапускали. Перезагрузить узел (`/var/run/reboot-required`), затем `sudo systemctl restart nvidia-cdi-refresh.service` и `docker compose up -d llama-server`; после обновления драйвера перезагружаться до пересоздания контейнеров |
 | `finish_reason = length` | ответ оборван по длине: то же, плюс проверить размер вывода |
 | `server.errors` в отчёте | сервер не отдал `/props`, `/v1/models` или `/slots`: привязка неполная, манифест не соберётся |
+
+## 10. Правка словаря обещаний (ADR 0054)
+
+Словарь обещаний лежит в `backend/internal/ai/application/commitment_lexicon.go` и входит в tuple: правка меняет, какие сообщения
+модели разрешено считать обещанием, поэтому прежний выбор и манифест перестают подтверждать дерево. Порядок:
+
+1. Настройка только по `models/datasets/commitment_dev_v1.jsonl` (DEV, написан автором настройки):
+   `make ai-lexicon-audit` (покрытие обещаний и ложные допуски без модели, `-texts` печатает тексты, только для DEV) и
+   `make ai-benchmark-commitments` (модель; общие пороги здесь не решают, смотрят `byFactType.BUSINESS_COMMITMENT`).
+   Наборы DEV прежних ревизий (`ai-benchmark-dev`, `ai-benchmark-v2-dev`) остаются зелёными.
+2. Слепая выборка `commitment_holdout_v1.jsonl` ([задание автору](ai-commitment-holdout.md)) пишется кем-то другим, сумма
+   записывается в `commitment_holdout_v1.sha256` до первого прогона, тексты не читают (формат проверяет
+   `go run ./backend/cmd/ai-dataset-audit -file …`, он ничего не сообщает о словаре). Её файл и сумму добавляют в `DATASETS`
+   скрипта `scripts/ai-selection.py`.
+3. Выбор: `scripts/ai-selection.py write` (в нём сумма слепой выборки, файлы tuple и отчёты DEV). Дальше файлы tuple и словарь не менять.
+4. Один прогон `make ai-benchmark-holdout > …-holdout.json`. Затем один прогон предыдущей ревизии tuple (рабочая копия коммита до
+   правки: `git worktree add --detach <каталог> <коммит>`) на той же выборке: `-dataset` и `-checksum` указывают на файлы выборки.
+   Прежний исполнитель не знает выборки `HOLDOUT`, поэтому в копию переносят из рабочего дерева только исполнитель
+   (`backend/internal/ai/benchmark/*.go` без тестов и `backend/cmd/ai-benchmark/main.go`); словарь, грамматика, проверка и
+   поставщик остаются прежними. Что именно заменено, записывает `--holdout-baseline-revision`.
+   Базовую линию снимают только после выбора, чтобы по её промахам нельзя было настраивать словарь.
+5. GOLDEN прочитан при прежней ревизии: его прогон регрессионный (`make ai-benchmark-golden`, выбор должен совпадать с деревом),
+   в манифесте он помечается `--golden-regression` и `blind: false`. Оборудование снимают заново (§ 6).
+6. Манифест: `scripts/ai-manifest.py` с `--commitment-dev`, `--holdout`, `--holdout-baseline` и `--golden-regression`; границы
+   слепой выборки (точность `BUSINESS_COMMITMENT` не ниже 0,95, полнота не ниже 0,85 и не ниже базовой) зашиты в скрипт и ADR.
+   Провал — новый словарь и новая выборка: эта перестаёт быть слепой. Чтобы сохранить результаты непройденной ревизии, манифест собирают
+   с `--candidate-on-unmet`: статус `CANDIDATE`, непройденные границы в `unmetBars` и `pending`; противоречия данных (чужая сумма выборки,
+   другая версия инструкции, не те параметры сервера) блокируют запись и в этом режиме. Прежний манифест при этом сохраняют как отчёт.
+   Итог первой итерации (ревизия 2, 2026-10-11): полнота `BUSINESS_COMMITMENT` на слепой выборке 0,578 при границе 0,85 — ADR 0054.

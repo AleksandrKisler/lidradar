@@ -21,6 +21,21 @@ BASE = {
 }
 
 
+def commitment_report(cases, letter, precision=0.97, recall=0.91, **overrides):
+    positives = 80
+    true_positive = round(positives * recall)
+    false_positive = round(true_positive * (1 - precision) / precision)
+    report = run_report(cases, datasetSha256=letter * 64, passed=False, precision=0.7, recall=0.9, exactRate=0.8,
+                        byFactType={'BUSINESS_COMMITMENT': {'truePositive': true_positive, 'falsePositive': false_positive, 'falseNegative': positives - true_positive,
+                                                           'precision': true_positive / (true_positive + false_positive), 'recall': recall},
+                                    'BOOKING_INTENT': {'truePositive': 0, 'falsePositive': 9, 'falseNegative': 0, 'precision': 0.0, 'recall': 1.0}})
+    build = overrides.pop('build', None)
+    if build:
+        report['server'] = {**report['server'], 'buildInfo': build}
+    report.update(overrides)
+    return report
+
+
 def run_report(cases, **overrides):
     report = {
         'promptVersions': [PROMPT], 'schemaVersions': [SCHEMA], 'datasetSha256': CHECKSUM, 'cases': cases, 'precision': 0.96, 'recall': 0.97, 'f1': 0.965,
@@ -47,13 +62,16 @@ class ManifestTests(unittest.TestCase):
         for name, letter in (('intents', 'i'), ('agreements', 'a'), ('independent', 'a')):
             self.write(f'{name}.json', run_report(27, datasetSha256=letter * 64))
         self.write('previous.json', {'name': 'previous manifest'})
+        self.write('commitments.json', commitment_report(282, 'c'))
+        self.write('holdout.json', commitment_report(160, 'h'))
+        self.write('baseline.json', commitment_report(160, 'h', recall=0.62, promptVersions=[PROMPT], build='older'))
         self.write('model-hash.json', {'sha256': BASE['modelSHA256'], 'sizeBytes': 5027783488, 'checkedAt': '2026-10-10T17:00:00Z'})
         self.write('hardware.json', {'passed': True, 'failures': [], 'peakObservedVRAMMiB': 5360, 'oom': 0, 'restartsDuringRun': 0,
                                       'minimumObservedTokensPerSecond': 45.2, 'maximumPromptTokens': 3048, 'maximumTotalTokens': 3300,
                                       'driverVersions': ['595.91.07'], 'imageIds': ['sha256:aaaa']})
         self.write('selection.json', {
             'promptVersion': PROMPT, 'schemaVersion': SCHEMA, 'treeSha256': 'a' * 64,
-            'datasets': {f'models/datasets/{name}.jsonl': {'sha256': sha * 64, 'cases': 10} for name, sha in (('dev_v1', 'd'), ('intent_regression_v2', 'i'), ('agreements_dev_v2', 'a'), ('agreements_independent_v2', 'a'))},
+            'datasets': {f'models/datasets/{name}.jsonl': {'sha256': sha * 64, 'cases': 10} for name, sha in (('dev_v1', 'd'), ('intent_regression_v2', 'i'), ('agreements_dev_v2', 'a'), ('agreements_independent_v2', 'a'), ('commitment_dev_v1', 'c'), ('commitment_holdout_v1', 'h'))},
             'devReports': {str(self.dir / 'dev.json'): {'passed': True}},
         })
 
@@ -64,7 +82,8 @@ class ManifestTests(unittest.TestCase):
         values = dict(base=str(self.dir / 'base.json'), previous_report=str(self.dir / 'previous.json'), selection=str(self.dir / 'selection.json'),
                       dev=str(self.dir / 'dev.json'), golden=str(self.dir / 'golden.json'), golden_checksum=str(self.dir / 'golden.sha256'),
                       v2_dev=[f'{n}={self.dir / (n + ".json")}' for n in ('intents', 'agreements', 'independent')], hardware=str(self.dir / 'hardware.json'),
-                      minimum_fact_recall=0.85, model_hash_report=str(self.dir / 'model-hash.json'), context_size=None, limitation=['известное ограничение'])
+                      minimum_fact_recall=0.85, model_hash_report=str(self.dir / 'model-hash.json'), context_size=None, limitation=['известное ограничение'],
+                      commitment_dev=None, holdout=None, holdout_baseline=None, golden_regression=False)
         values.update(overrides)
         return argparse.Namespace(**values)
 
@@ -166,6 +185,77 @@ class ManifestTests(unittest.TestCase):
         self.mismatch('GOLDEN: p95 9100 мс выше порога 8000 мс', golden=run_report(400, p95Ms=9100))
         self.mismatch('DEV: p95 8500 мс выше порога 8000 мс', dev=run_report(100, datasetSha256='d' * 64, p95Ms=8500))
         self.mismatch('DEV v2 independent: p95 8001 мс выше порога 8000 мс', independent=run_report(27, datasetSha256='a' * 64, p95Ms=8001))
+
+    def commitment_overrides(self, **overrides):
+        values = dict(commitment_dev=str(self.dir / 'commitments.json'), holdout=str(self.dir / 'holdout.json'),
+                      holdout_baseline=str(self.dir / 'baseline.json'), golden_regression=True)
+        values.update(overrides)
+        return values
+
+    def commitment_arguments(self, **overrides):
+        return self.arguments(**self.commitment_overrides(**overrides))
+
+    def test_the_commitment_sets_are_judged_by_their_own_fact_type_and_not_by_the_overall_gates(self):
+        result = manifest.build(self.commitment_arguments())
+        self.assertEqual(result['status'], 'FROZEN')
+        self.assertEqual(result['qualityGate']['commitmentHoldout'], {'minimumPrecision': 0.95, 'minimumRecall': 0.85})
+        self.assertEqual((result['holdoutResult']['report'], result['holdoutResult']['recall']), (str(self.dir / 'holdout.json'), 0.91))
+        self.assertEqual(result['holdoutBaseline']['recall'], 0.62)  # базовая ревизия записана рядом, чтобы выигрыш был виден
+        self.assertNotIn('revision', result['holdoutBaseline'])
+        described = manifest.build(self.commitment_arguments(holdout_baseline_revision='3dd2807 с исполнителем слепой выборки'))
+        self.assertEqual(described['holdoutBaseline']['revision'], '3dd2807 с исполнителем слепой выборки')
+        self.assertEqual(result['commitmentValidation']['cases'], 282)
+        self.assertEqual(result['dataset']['holdout'], {'sha256': 'h' * 64, 'cases': 10})
+        self.assertIs(result['goldenResult']['blind'], False)  # регрессионный прогон не выдаётся за слепой
+        self.assertIn('Регрессионный', result['goldenResult']['note'])
+        plain = manifest.build(self.arguments())
+        self.assertNotIn('holdoutResult', plain)
+        self.assertNotIn('blind', plain['goldenResult'])
+
+    def test_a_blind_result_below_the_preregistered_bars_blocks_the_manifest(self):
+        self.write('base.json', {**BASE, 'qualityGate': {**BASE['qualityGate'], 'minimumValidRate': 0.99}})
+        self.mismatch('Слепая выборка обязательств: точность BUSINESS_COMMITMENT', holdout=commitment_report(160, 'h', precision=0.90), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: полнота BUSINESS_COMMITMENT', holdout=commitment_report(160, 'h', recall=0.80), arguments=self.commitment_overrides())
+        self.mismatch('Набор обязательств (DEV): полнота BUSINESS_COMMITMENT', commitments=commitment_report(282, 'c', recall=0.70), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: доля валидных ответов', holdout=commitment_report(160, 'h', validRate=0.95), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: p95 9000 мс', holdout=commitment_report(160, 'h', p95Ms=9000), arguments=self.commitment_overrides())
+        self.mismatch('в наборе нет обещаний', holdout=commitment_report(160, 'h', byFactType={}), arguments=self.commitment_overrides())
+
+    def test_unmet_bars_leave_a_candidate_when_asked_but_inconsistent_data_still_blocks(self):
+        self.write('base.json', {**BASE, 'qualityGate': {**BASE['qualityGate'], 'minimumValidRate': 0.99}})
+        self.write('holdout.json', commitment_report(160, 'h', recall=0.60, validRate=0.989))
+        self.write('golden.json', run_report(400, precision=0.80, passed=False))
+        with self.assertRaises(SystemExit):  # без разрешения непройденные границы блокируют запись
+            manifest.build(self.commitment_arguments())
+        result = manifest.build(self.commitment_arguments(candidate_on_unmet=True))
+        self.assertEqual(result['status'], 'CANDIDATE')
+        self.assertNotIn('frozenAt', result)
+        joined = '\n'.join(result['unmetBars'])
+        for fragment in ('Слепая выборка обязательств: полнота BUSINESS_COMMITMENT', 'доля валидных ответов', 'GOLDEN: пороги не пройдены', 'GOLDEN: precision'):
+            self.assertIn(fragment, joined)
+        self.assertTrue(all(f'граница не пройдена: {item}' in result['pending'] for item in result['unmetBars']))
+        self.assertEqual(result['holdoutResult']['recall'], 0.6)  # результат записан, а не скрыт
+        # противоречие данных (чужая выборка) блокирует запись и в режиме кандидата
+        self.write('holdout.json', commitment_report(160, '0', recall=0.60))
+        with self.assertRaises(SystemExit) as raised:
+            manifest.build(self.commitment_arguments(candidate_on_unmet=True))
+        self.assertIn('отчёт снят не на models/datasets/commitment_holdout_v1.jsonl', str(raised.exception))
+        # а когда всё пройдено, флаг ничего не меняет
+        self.write('golden.json', run_report(400))
+        self.write('holdout.json', commitment_report(160, 'h'))
+        clean = manifest.build(self.commitment_arguments(candidate_on_unmet=True))
+        self.assertEqual(clean['status'], 'FROZEN')
+        self.assertNotIn('unmetBars', clean)
+
+    def test_the_blind_set_must_be_the_sealed_one_and_the_baseline_must_use_the_same_file(self):
+        self.mismatch('Слепая выборка обязательств: отчёт снят не на models/datasets/commitment_holdout_v1.jsonl', holdout=commitment_report(160, '0'), arguments=self.commitment_overrides())
+        self.mismatch('базовая ревизия снята не на той слепой выборке', baseline=commitment_report(160, 'z'), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: версии инструкции', holdout=commitment_report(160, 'h', promptVersions=['analyze-conversation.prompt.v6']), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: параметр temperature', holdout=commitment_report(160, 'h', server={**run_report(1)['server'], 'observedSampling': {**run_report(1)['server']['observedSampling'], 'temperature': 0.9}}), arguments=self.commitment_overrides())
+
+    def test_a_change_must_not_lower_the_recall_the_previous_revision_had_on_the_same_blind_set(self):
+        self.write('baseline.json', commitment_report(160, 'h', recall=0.97, build='older'))
+        self.mismatch('полнота BUSINESS_COMMITMENT на слепой выборке упала', arguments=self.commitment_overrides())
 
     def test_a_report_taken_on_a_converted_copy_of_a_dataset_is_refused(self):
         self.mismatch('DEV: отчёт снят не на models/datasets/dev_v1.jsonl', dev=run_report(100, datasetSha256='0' * 64))

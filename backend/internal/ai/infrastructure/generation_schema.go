@@ -58,8 +58,7 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 					types = append(types, "PURCHASE_INTENT")
 				}
 			}
-			b := strings.ToLower(m.Body)
-			if application.PossibleBusinessCommitmentEvidence(m) && !strings.Contains(b, "обычно") {
+			if application.PossibleBusinessCommitmentEvidence(m) {
 				possiblePromise = true
 			}
 		}

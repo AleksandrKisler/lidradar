@@ -24,10 +24,14 @@
   400 GOLDEN + 100 DEV и наборов v2, результаты DEV, GOLDEN и оборудования, пороги. Числа собраны
   `scripts/ai-manifest.py` из отчётов ([ADR 0053](../adr/0053-ai-tuple-qualification.md),
   [runbook](../runbooks/ai-qualification.md)).
+- Манифест относится к ревизии 2 tuple v9 (словарь обещаний, ADR 0054) и имеет статус `CANDIDATE`: слепая выборка обязательств не пройдена
+  (полнота `BUSINESS_COMMITMENT` 0,578 при границе 0,85). Манифест ревизии 1 (`FROZEN`, коммит `3dd2807`) сохранён как
+  [отчёт](../../models/reports/lidradar-main-v1-prompt-v9-manifest.json). Отчёты ревизии 2: выбор, DEV, набор обязательств, слепая выборка и её базовая
+  линия, регрессионный GOLDEN, оборудование и снимки видеопамяти лежат в `models/reports/lidradar-main-v1-prompt-v9r2-*`.
 - Манифест v6 (QA-06, 2026-10-05) сохранён как
   [отчёт](../../models/reports/lidradar-main-v1-prompt-v6-manifest.json) и остаётся историей v6.
-- Полный release tuple для общего выпуска остаётся неподтверждённым: нет независимой выборки для
-  смыслов контракта v2, сверки tuple при запуске узла и независимого production-измерения.
+- Полный release tuple для общего выпуска остаётся неподтверждённым: независимая слепая выборка есть только для
+  обязательств компании, для остальных смыслов контракта v2 её нет, сверки tuple при запуске узла и независимого production-измерения.
 - **Владелец:** AI; [сверка provenance](../../models/reports/lidradar-main-v1-prompt-v6-provenance-review.json).
 
 <a id="model-report"></a>

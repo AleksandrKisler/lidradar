@@ -12,10 +12,26 @@ import (
 )
 
 func main() {
+	filePath := flag.String("file", "", "проверить только формат одного набора (HOLDOUT, DEV или GOLDEN) и вывести счётчики; о словарях и о моделях ничего не сообщает")
 	goldenPath := flag.String("golden", "models/datasets/golden_v1.jsonl", "контрольная выборка")
 	devPath := flag.String("dev", "models/datasets/dev_v1.jsonl", "выборка для настройки инструкции")
 	checksumPath := flag.String("golden-checksum", "models/datasets/golden_v1.sha256", "контрольная сумма контрольной выборки")
 	flag.Parse()
+
+	if *filePath != "" {
+		file, err := os.Open(*filePath)
+		fatal(err)
+		cases, digest, err := benchmark.Load(file)
+		_ = file.Close()
+		fatal(err)
+		report, err := benchmark.AuditCases(cases)
+		fatal(err)
+		fatal(json.NewEncoder(os.Stdout).Encode(struct {
+			benchmark.Audit
+			SHA256 string `json:"sha256"`
+		}{report, digest}))
+		return
+	}
 
 	var all []benchmark.Case
 	for _, item := range []struct {

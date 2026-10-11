@@ -291,3 +291,63 @@ func TestContextProbeDatasetStaysWithinProductLimitsAndIsValid(t *testing.T) {
 		t.Fatalf("the longest probe has %d runes of %d allowed", longest, application.MaxContextRunes)
 	}
 }
+
+func TestHoldoutIsASealedSplitThatNeedsItsOwnChecksum(t *testing.T) {
+	for split, want := range map[Split]struct{ valid, sealed bool }{
+		SplitDev: {true, false}, SplitGolden: {true, true}, SplitHoldout: {true, true}, Split("TRAIN"): {false, false}, Split(""): {false, false},
+	} {
+		if split.Valid() != want.valid || split.Sealed() != want.sealed {
+			t.Fatalf("split %q: valid %v sealed %v, want %+v", split, split.Valid(), split.Sealed(), want)
+		}
+	}
+	line := `{"version":"` + DatasetVersion + `","id":"holdout-1","split":"HOLDOUT","input":{"task":"ANALYZE_CONVERSATION","schemaVersion":"analyze-conversation.v2","promptVersion":"analyze-conversation.prompt.v9","conversationId":"c","baseConversationRevision":1,"analysisThroughMessageId":"m1","messages":[{"id":"m1","direction":"OUTGOING","body":"Отвечу завтра."}]},"expectedFacts":[{"type":"BUSINESS_COMMITMENT","value":true,"confidence":1,"evidenceMessageIds":["m1"]}]}`
+	cases, digest, err := Load(strings.NewReader(line))
+	if err != nil || len(cases) != 1 || cases[0].Split != SplitHoldout {
+		t.Fatalf("a HOLDOUT case must load: %v %v", cases, err)
+	}
+	if err := VerifyGolden(digest, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("a sealed set must be refused when its checksum does not match")
+	}
+}
+
+func TestCommitmentDevDatasetIsValidAndLabelsTheCompanyPromiseAsEvidence(t *testing.T) {
+	f, err := os.Open("../../../../models/datasets/commitment_dev_v1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cases, _, err := Load(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AuditCases(cases); err != nil {
+		t.Fatal(err)
+	}
+	positives, negatives := 0, 0
+	for _, c := range cases {
+		if c.Split != SplitDev || c.Input.SchemaVersion != application.AnalysisSchemaV2 || c.Input.PromptVersion != application.CurrentAnalysisPrompt {
+			t.Fatalf("%s must be a DEV case on the current contract and instruction", c.ID)
+		}
+		if len(c.Expected) > 1 || (len(c.Expected) == 1 && c.Expected[0].Type != domain.FactBusinessCommitment) {
+			t.Fatalf("%s: the set measures business commitments only: %+v", c.ID, c.Expected)
+		}
+		if len(c.Expected) == 0 {
+			negatives++
+			continue
+		}
+		positives++
+		evidence := c.Expected[0].EvidenceMessageIDs
+		last := ""
+		for _, m := range c.Input.Messages {
+			if m.Direction == "OUTGOING" {
+				last = m.ID
+			}
+		}
+		if len(evidence) != 1 || evidence[0] != last {
+			t.Fatalf("%s: the evidence must be the last company message", c.ID)
+		}
+	}
+	if positives < 100 || negatives < 100 {
+		t.Fatalf("the set needs both classes: %d promises, %d non-promises", positives, negatives)
+	}
+}
