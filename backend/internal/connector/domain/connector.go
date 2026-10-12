@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -164,7 +165,7 @@ func NewChannelConnection(
 
 func (connection ChannelConnection) Validate() error {
 	if connection.ID == "" || connection.TenantID == "" || !connection.Provider.Valid() ||
-		connection.Name == "" || len(connection.Name) > 200 || connection.Name != strings.Join(strings.Fields(connection.Name), " ") ||
+		connection.Name == "" || utf8.RuneCountInString(connection.Name) > 200 || connection.Name != strings.Join(strings.Fields(connection.Name), " ") ||
 		!connection.Status.Valid() || !sha256Pattern.MatchString(connection.VerificationSecretHash) ||
 		connection.CreatedAt.IsZero() || connection.UpdatedAt.IsZero() || validateCapabilities(connection.Capabilities) != nil {
 		return ErrInvalid

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -58,7 +59,7 @@ func NewOrganization(id, name, timezone, currency string, at time.Time) (Organiz
 }
 
 func (organization Organization) Validate() error {
-	if organization.ID == "" || organization.Name == "" || len(organization.Name) > 200 ||
+	if organization.ID == "" || organization.Name == "" || utf8.RuneCountInString(organization.Name) > 200 ||
 		!validTimezone(organization.DefaultTimezone) || len(organization.DefaultCurrency) != 3 ||
 		organization.Status != OrganizationActive && organization.Status != OrganizationSuspended && organization.Status != OrganizationArchived {
 		return ErrInvalid
@@ -145,7 +146,7 @@ func NewLocation(id, tenantID, name, timezone string, responseThresholdMinutes i
 }
 
 func (location Location) Validate() error {
-	if location.ID == "" || location.TenantID == "" || location.Name == "" || len(location.Name) > 200 ||
+	if location.ID == "" || location.TenantID == "" || location.Name == "" || utf8.RuneCountInString(location.Name) > 200 ||
 		!validTimezone(location.Timezone) || location.ResponseThresholdMinutes < 1 || location.ResponseThresholdMinutes > 1440 ||
 		location.AgreementThresholdMinutes < 1 || location.AgreementThresholdMinutes > 1440 {
 		return ErrInvalid

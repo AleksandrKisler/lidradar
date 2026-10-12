@@ -207,50 +207,27 @@ func run(ctx context.Context, configuration config.Config) error {
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)
-	nextDiagnostics := time.Time{}
 	// In-app доставка всегда локальна; Telegram подключается только с токеном.
 	deliveryChannels := []notificationdomain.Channel{notificationdomain.ChannelInApp}
 	if telegramEnabled {
 		deliveryChannels = append(deliveryChannels, notificationdomain.ChannelTelegram)
 	}
 
-	for {
-		now := time.Now().UTC()
-		if !now.Before(nextDiagnostics) {
+	// Каждая очередь живёт в своей цепочке (loops.go): медленный Telegram не задерживает разбор сообщений и вычисление рисков.
+	runLoops(ctx, logger, workerPacing,
+		loop{event: "outbox.failed", message: "Ошибка исходящего журнала", step: dispatcher.RunOne},
+		loop{event: "job.failed", message: "Ошибка фонового задания", step: worker.RunOne},
+		loop{event: "notification.delivery_failed", message: "Ошибка доставки уведомления", step: func(ctx context.Context) (bool, error) {
+			return deliveryService.DispatchOne(ctx, ownerID+":notifications", notificationapplication.DefaultDeliveryLease, deliveryChannels...)
+		}},
+		loop{event: "diagnostics.failed", message: "Ошибка диагностики очередей", every: diagnosticInterval, step: func(ctx context.Context) (bool, error) {
+			now := time.Now().UTC()
 			logQueueStats(ctx, logger, claimStore, now)
 			logNotificationStats(ctx, logger, deliveryRepository, now)
-			nextDiagnostics = now.Add(diagnosticInterval)
-		}
-		dispatched, dispatchErr := dispatcher.RunOne(ctx)
-		if dispatchErr != nil && ctx.Err() == nil {
-			logger.Error("Ошибка исходящего журнала", "event", "outbox.failed", "error", dispatchErr)
-		}
-		processed, processErr := worker.RunOne(ctx)
-		if processErr != nil && ctx.Err() == nil {
-			logger.Error("Ошибка фонового задания", "event", "job.failed", "error", processErr)
-		}
-		delivered, deliveryErr := deliveryService.DispatchOne(
-			ctx, ownerID+":notifications", notificationapplication.DefaultDeliveryLease, deliveryChannels...,
-		)
-		if deliveryErr != nil && ctx.Err() == nil {
-			logger.Error("Ошибка доставки уведомления", "event", "notification.delivery_failed", "error", deliveryErr)
-		}
-		if ctx.Err() != nil {
-			return nil
-		}
-		if dispatchErr != nil || processErr != nil || deliveryErr != nil {
-			if !wait(ctx, errorInterval) {
-				return nil
-			}
-			continue
-		}
-		if dispatched || processed || delivered {
-			continue
-		}
-		if !wait(ctx, idleInterval) {
-			return nil
-		}
-	}
+			return false, nil
+		}},
+	)
+	return nil
 }
 
 func logNotificationStats(

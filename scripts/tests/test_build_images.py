@@ -149,5 +149,17 @@ class BuildImagesTests(unittest.TestCase):
         self.assertNotIn('LIDRADAR_VERSION=', result.stdout)
 
 
+class ToolchainPinTests(unittest.TestCase):
+    """Версия Go в go.mod и в Dockerfile одна: расхождение уже давало CI на 1.26.0 и образ на 1.26.9 (govulncheck: 9 достижимых CVE stdlib)."""
+
+    def test_go_directive_matches_the_pinned_image_toolchain(self):
+        root = Path(__file__).resolve().parents[2]
+        module = next(line.split()[1] for line in (root / 'go.mod').read_text().splitlines() if line.startswith('go '))
+        dockerfile = (root / 'Dockerfile').read_text()
+        pinned = next(line.split('=', 1)[1].strip() for line in dockerfile.splitlines() if line.startswith('ARG GO_VERSION='))
+        self.assertEqual(module, pinned, 'go.mod и Dockerfile должны закреплять один патч-релиз Go')
+        self.assertEqual(module.count('.'), 2, 'версия должна быть с патчем: «go 1.26.9», а не «1.26»')
+
+
 if __name__ == '__main__':
     unittest.main()

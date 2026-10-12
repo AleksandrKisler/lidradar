@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,4 +91,22 @@ func contains(value, fragment string) bool {
 		}
 	}
 	return false
+}
+
+func TestConnectionNameIsLimitedByCharactersAndNotByBytes(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		length int
+		valid  bool
+	}{{200, true}, {201, false}} {
+		_, err := NewChannelConnection(
+			"connection", "tenant", nil, ProviderGenericWebhook, strings.Repeat("ё", tc.length),
+			[]Capability{CapabilityIdentifyContact, CapabilityReceiveMessages},
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			ConnectionHealth{Status: ConnectionActive, CheckedAt: now}, now,
+		)
+		if (err == nil) != tc.valid {
+			t.Errorf("a connection name of %d characters: error = %v, want valid=%v", tc.length, err, tc.valid)
+		}
+	}
 }

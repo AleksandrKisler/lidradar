@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"lidradar/backend/internal/ai/domain"
 )
@@ -147,7 +148,7 @@ func (s Service) RegisterNode(ctx context.Context, tenantID, name, secret string
 func (s Service) RegisterNodeWithID(ctx context.Context, id, tenantID, name, secret string) (domain.Node, error) {
 	name = strings.TrimSpace(name)
 	tenantID = strings.TrimSpace(tenantID)
-	if s.store == nil || s.now == nil || id == "" || tenantID == "" || name == "" || len(name) > 100 || len(secret) < 32 || len(secret) > 200 {
+	if s.store == nil || s.now == nil || id == "" || tenantID == "" || name == "" || utf8.RuneCountInString(name) > 100 || len(secret) < 32 || len(secret) > 200 {
 		return domain.Node{}, ErrInvalid
 	}
 	now := s.now().UTC()

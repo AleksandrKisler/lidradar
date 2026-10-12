@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -35,7 +36,7 @@ type User struct {
 func NewUser(id, email, passwordHash, displayName string, at time.Time) (User, error) {
 	normalizedEmail, err := NormalizeEmail(email)
 	displayName = strings.TrimSpace(displayName)
-	if err != nil || id == "" || passwordHash == "" || displayName == "" || len(displayName) > 200 || at.IsZero() {
+	if err != nil || id == "" || passwordHash == "" || displayName == "" || utf8.RuneCountInString(displayName) > 200 || at.IsZero() {
 		return User{}, ErrInvalid
 	}
 	at = at.UTC()
