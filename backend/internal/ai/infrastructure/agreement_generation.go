@@ -14,6 +14,11 @@ import (
 // authoritative. Price statements, greetings and isolated refusals cannot be
 // invented into promises or completed agreements.
 func agreementGenerationCandidates(messages []application.ContextMessage) []any {
+	return agreementCandidates(messages, nil)
+}
+
+// agreementCandidates — то же, но обещанием может быть и сообщение, которое допустил проход по обещаниям (scanned).
+func agreementCandidates(messages []application.ContextMessage, scanned scanEligibility) []any {
 	candidates := []any{}
 	priorBooking := false
 	for i, m := range messages {
@@ -30,8 +35,8 @@ func agreementGenerationCandidates(messages []application.ContextMessage) []any 
 		deferred := has("подума", "позже", "отлож", "вернусь с решением", "решим завтра", "окончательно отвечу")
 		booking := !negative && !deferred && has("запис", "брон", "запланир", "постав", "предлага", "свободн", "окно", "подход", "удобн", "слот", "book", "appoint", "slot")
 		// Допуск к обещанию — общий словарь с серверной проверкой (application.HasCommitmentAnchor): грамматика не может разрешить
-		// модели то, что проверка отвергнет. Сообщение, где действие уже выполнено, новым ожиданием не становится.
-		promise := application.PossibleBusinessCommitmentEvidence(m) && !has("проверил", "отправил", "передал", "подготовил", "уже ")
+		// модели то, что проверка отвергнет. Выполненное действие без слова обещания допуска не получает: проход называет его done.
+		promise := scanned.allows(m)
 		add := func(kind, actor string) {
 			allowedIDs := make([]string, 0, len(messages)-i)
 			for _, message := range messages[i:] {
@@ -54,7 +59,7 @@ func agreementGenerationCandidates(messages []application.ContextMessage) []any 
 			}
 			// Eliminate states the application would reject (e.g. an old offer
 			// after a deferral). This narrows generation, never grants trust.
-			request := application.AnalyzeConversationRequestV1{SchemaVersion: application.AnalysisSchemaV2, AnalysisThroughMessageID: messages[len(messages)-1].ID, Messages: messages}
+			request := application.AnalyzeConversationRequestV1{SchemaVersion: application.AnalysisSchemaV2, PromptVersion: application.AnalysisPromptV9, AnalysisThroughMessageID: messages[len(messages)-1].ID, Messages: messages}
 			contextJSON, _ := application.EncodeAnalysisRequest(request)
 			validStatuses := statuses[:0]
 			for _, status := range statuses {

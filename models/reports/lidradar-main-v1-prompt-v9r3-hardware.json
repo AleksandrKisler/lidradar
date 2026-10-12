@@ -1,0 +1,47 @@
+{
+  "gpu": "NVIDIA GeForce RTX 4060",
+  "samples": 4768,
+  "sampledFrom": "2026-10-11T13:43:53+00:00",
+  "sampledTo": "2026-10-11T15:10:02+00:00",
+  "totalVRAMMiB": 8188,
+  "peakObservedVRAMMiB": 5844,
+  "oom": 0,
+  "restartsDuringRun": 0,
+  "minimumObservedTokensPerSecond": 41.348227883866606,
+  "responsesWithTimings": 2221,
+  "requests": 2221,
+  "maximumPromptTokens": 6417,
+  "maximumTotalTokens": 8192,
+  "contextSize": 8192,
+  "llamaCppBuilds": [
+    "b10666-4e97ac86e"
+  ],
+  "driverVersions": [
+    "595.91.07"
+  ],
+  "imageIds": [
+    "sha256:150b59966fb5b2cb1a8fa9d226267c56ebd22c520c7b3640331cde87f3c4fb01"
+  ],
+  "benchmarkReports": [
+    "models/reports/lidradar-main-v1-prompt-v9r3-dev.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-dev-intents.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-dev-agreements.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-dev-independent.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-dev-commitments.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-dev-commitments-independent.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-context-probe.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-holdout.json",
+    "models/reports/lidradar-main-v1-prompt-v9r3-golden.json"
+  ],
+  "limits": {
+    "maximumVRAMMiB": 7500,
+    "minimumTokensPerSecond": 20
+  },
+  "failures": [
+    "ответов, оборванных по длине: 1"
+  ],
+  "passed": false,
+  "note": "VRAM sampled inside the model container during the benchmark runs listed above; speed, token counts and statuses come from the llama.cpp responses.",
+  "samplesFile": "lidradar-main-v1-prompt-v9r3-vram-samples.csv",
+  "samplesSha256": "9b8dbdba8debe3998626875393efae8664254b629adc3712572298ea47016af1"
+}

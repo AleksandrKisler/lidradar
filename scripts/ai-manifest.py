@@ -25,10 +25,12 @@ RESULT_FIELDS = ("cases", "precision", "recall", "f1", "exactRate", "validRate",
 RATE_GATES = {"minimumPrecision": "precision", "minimumRecall": "recall", "minimumF1": "f1", "minimumExactRate": "exactRate",
               "minimumValidRate": "validRate", "minimumEvidenceExactRate": "evidenceExactRate"}
 FACT_TYPES = ("BOOKING_INTENT", "BUSINESS_COMMITMENT", "PRICE_MENTIONED", "FOLLOW_UP_CANDIDATE", "PURCHASE_INTENT")
-# ADR 0054: границы для наборов обязательств компании заданы до слепого прогона и в манифесте не меняются.
-COMMITMENT_BARS = {"minimumPrecision": 0.95, "minimumRecall": 0.85}
+# ADR 0054/0055: границы для наборов обязательств компании заданы до слепого прогона и в манифесте не меняются. Полнота 0,80 — решение
+# владельца от 2026-10-11 для ревизии 3 (в ADR 0054 для ревизии 2 было 0,85; результат ревизии 3 сообщается и относительно 0,85).
+# Границы применяются дважды: к факту BUSINESS_COMMITMENT и к договорённости COMMITMENT, которую в режиме v2 читает риск.
+COMMITMENT_BARS = {"minimumPrecision": 0.95, "minimumRecall": 0.80}
 COMMITMENT_DEV = "models/datasets/commitment_dev_v1.jsonl"
-COMMITMENT_HOLDOUT = "models/datasets/commitment_holdout_v1.jsonl"
+COMMITMENT_HOLDOUT = "models/datasets/commitment_holdout_v2.jsonl"
 
 
 def load(path):
@@ -88,9 +90,18 @@ def commitment_counts(report):
             "falseNegative": metrics.get("falseNegative", 0), "precision": metrics.get("precision", 1), "recall": metrics.get("recall", 1)}
 
 
+def commitment_agreement_counts(report):
+    metrics = report.get("commitmentAgreements")
+    if not metrics:
+        return None
+    return {"truePositive": metrics.get("truePositive", 0), "falsePositive": metrics.get("falsePositive", 0),
+            "falseNegative": metrics.get("falseNegative", 0), "precision": metrics.get("precision", 1), "recall": metrics.get("recall", 1)}
+
+
 def check_commitment_report(name, report, prompt_version, schema_version, selection, dataset, gates, performance_gate, problems, unmet=None):
-    """Набор обязательств измеряет один тип факта, поэтому общие пороги здесь не применяются: отрицательные факты других типов
-    считаются в нём ложными и скрыли бы результат. Решают полнота и точность BUSINESS_COMMITMENT, доля валидных ответов и p95."""
+    """Набор обязательств измеряет одно обещание компании, поэтому общие пороги здесь не применяются: отрицательные факты других типов
+    считаются в нём ложными и скрыли бы результат. Решают полнота и точность факта BUSINESS_COMMITMENT и договорённости COMMITMENT
+    (её читает риск в режиме v2), доля валидных ответов и p95."""
     if report.get("promptVersions") != [prompt_version]:
         problems.append(f"{name}: версии инструкции {report.get('promptVersions')}, ожидалась {prompt_version}")
     if report.get("schemaVersions") != [schema_version]:
@@ -106,13 +117,23 @@ def check_commitment_report(name, report, prompt_version, schema_version, select
         bars.append(f"{name}: точность BUSINESS_COMMITMENT {counts['precision']:.4f} ниже границы {COMMITMENT_BARS['minimumPrecision']}")
     if counts["recall"] < COMMITMENT_BARS["minimumRecall"]:
         bars.append(f"{name}: полнота BUSINESS_COMMITMENT {counts['recall']:.4f} ниже границы {COMMITMENT_BARS['minimumRecall']}")
+    agreements = commitment_agreement_counts(report)
+    if agreements is None:
+        problems.append(f"{name}: в отчёте нет метрики договорённостей COMMITMENT (commitmentAgreements); отчёт снят прежним запуском")
+    else:
+        if agreements["truePositive"] + agreements["falseNegative"] == 0:
+            problems.append(f"{name}: в наборе нет обещаний, полноту договорённостей оценить нельзя")
+        if agreements["precision"] < COMMITMENT_BARS["minimumPrecision"]:
+            bars.append(f"{name}: точность договорённости COMMITMENT {agreements['precision']:.4f} ниже границы {COMMITMENT_BARS['minimumPrecision']}")
+        if agreements["recall"] < COMMITMENT_BARS["minimumRecall"]:
+            bars.append(f"{name}: полнота договорённости COMMITMENT {agreements['recall']:.4f} ниже границы {COMMITMENT_BARS['minimumRecall']}")
     if "minimumValidRate" in gates and report.get("validRate", 0) < gates["minimumValidRate"]:
         bars.append(f"{name}: доля валидных ответов {report.get('validRate')} ниже порога {gates['minimumValidRate']}")
     maximum = performance_gate.get("maximumP95Ms")
     if maximum and report.get("p95Ms", 0) > maximum:
         bars.append(f"{name}: p95 {report['p95Ms']} мс выше порога {maximum} мс")
-    return {"report": None, "cases": report.get("cases"), **counts, "validRate": report.get("validRate"), "p95Ms": report.get("p95Ms"),
-            "build": (report.get("server") or {}).get("buildInfo")}
+    return {"report": None, "cases": report.get("cases"), **counts, "commitmentAgreements": agreements, "validRate": report.get("validRate"),
+            "p95Ms": report.get("p95Ms"), "build": (report.get("server") or {}).get("buildInfo")}
 
 
 def check_dataset(name, report, selection, dataset, problems):
@@ -178,8 +199,9 @@ def build(args, now=None):
         commitment_dev["report"] = args.commitment_dev
     if getattr(args, "holdout", None):
         holdout_report = load(args.holdout)
+        holdout_dataset = getattr(args, "holdout_dataset", None) or COMMITMENT_HOLDOUT
         holdout = check_commitment_report("Слепая выборка обязательств", holdout_report, prompt_version, schema_version, selection,
-                                          COMMITMENT_HOLDOUT, gates, base["performanceGate"], problems, unmet)
+                                          holdout_dataset, gates, base["performanceGate"], problems, unmet)
         holdout["report"] = args.holdout
         check_generation("Слепая выборка обязательств", holdout_report, generation, problems)
         if getattr(args, "holdout_baseline", None):
@@ -193,13 +215,19 @@ def build(args, now=None):
                 holdout_baseline["revision"] = args.holdout_baseline_revision
             if holdout["recall"] < baseline["recall"]:
                 (problems if unmet is None else unmet).append(f"полнота BUSINESS_COMMITMENT на слепой выборке упала: {baseline['recall']:.4f} → {holdout['recall']:.4f}")
+            baseline_agreements = commitment_agreement_counts(baseline_report)
+            holdout_baseline["commitmentAgreements"] = baseline_agreements
+            if baseline_agreements and holdout.get("commitmentAgreements") and holdout["commitmentAgreements"]["recall"] < baseline_agreements["recall"]:
+                (problems if unmet is None else unmet).append(
+                    f"полнота договорённости COMMITMENT на слепой выборке упала: {baseline_agreements['recall']:.4f} → {holdout['commitmentAgreements']['recall']:.4f}")
 
     pending = []
     hardware_result = None
     if args.hardware:
         hardware = load(args.hardware)
         if not hardware.get("passed"):
-            problems.append("отчёт об оборудовании не пройден: " + "; ".join(hardware.get("failures", [])))
+            # Непройденная граница оборудования — результат, а не противоречие данных: в режиме кандидата она записывается в unmetBars.
+            (problems if unmet is None else unmet).append("отчёт об оборудовании не пройден: " + "; ".join(hardware.get("failures", [])))
         hardware_result = {"report": args.hardware, "peakObservedVRAMMiB": hardware["peakObservedVRAMMiB"], "oom": hardware["oom"],
                            "restartsDuringRun": hardware["restartsDuringRun"], "minimumObservedTokensPerSecond": hardware["minimumObservedTokensPerSecond"],
                            "maximumPromptTokens": hardware["maximumPromptTokens"], "maximumTotalTokens": hardware["maximumTotalTokens"], "passed": hardware["passed"],
@@ -268,7 +296,7 @@ def build(args, now=None):
     if holdout:
         manifest["qualityGate"] = {**manifest["qualityGate"], "commitmentHoldout": COMMITMENT_BARS}
         manifest["holdoutResult"] = holdout
-        manifest["dataset"]["holdout"] = selection["datasets"][COMMITMENT_HOLDOUT]
+        manifest["dataset"]["holdout"] = selection["datasets"][holdout_dataset]
         if holdout_baseline:
             manifest["holdoutBaseline"] = holdout_baseline
     if unmet:
@@ -296,7 +324,8 @@ def main(argv=None):
     parser.add_argument("--context-size", type=int, help="контекст узла, если он отличается от прежнего манифеста (решение владельца 2026-10-10: 8192)")
     parser.add_argument("--model-hash-report", help="отчёт scripts/ai-model-hash.py: SHA-256 файла весов, пересчитанный на узле")
     parser.add_argument("--commitment-dev", help="отчёт набора обязательств DEV (models/datasets/commitment_dev_v1.jsonl)")
-    parser.add_argument("--holdout", help="отчёт слепой выборки обязательств (models/datasets/commitment_holdout_v1.jsonl)")
+    parser.add_argument("--holdout", help="отчёт слепой выборки обязательств (по умолчанию models/datasets/commitment_holdout_v2.jsonl)")
+    parser.add_argument("--holdout-dataset", help="файл слепой выборки, на которой снят отчёт --holdout (по умолчанию commitment_holdout_v2.jsonl)")
     parser.add_argument("--holdout-baseline", help="отчёт предыдущей ревизии tuple на той же слепой выборке")
     parser.add_argument("--holdout-baseline-revision", help="какой ревизии tuple принадлежит базовая линия (коммит и что в нём заменено), текстом")
     parser.add_argument("--candidate-on-unmet", action="store_true", help="непройденные границы качества не блокируют запись: манифест получает статус CANDIDATE и список unmetBars; противоречия данных по-прежнему блокируют")

@@ -45,6 +45,10 @@ DATASETS = [
     "models/datasets/commitment_dev_v1.jsonl",
     "models/datasets/commitment_holdout_v1.jsonl",
     "models/datasets/commitment_holdout_v1.sha256",
+    "models/datasets/commitment_holdout_v2.jsonl",
+    "models/datasets/commitment_holdout_v2.sha256",
+    "models/datasets/commitment_holdout_v3.jsonl",
+    "models/datasets/commitment_holdout_v3.sha256",
 ]
 MARKER = "Selected before opening GOLDEN; prompt and sampling frozen."
 

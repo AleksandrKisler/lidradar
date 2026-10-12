@@ -21,7 +21,14 @@ BASE = {
 }
 
 
-def commitment_report(cases, letter, precision=0.97, recall=0.91, **overrides):
+def agreement_metrics(precision, recall, positives=80):
+    true_positive = round(positives * recall)
+    false_positive = round(true_positive * (1 - precision) / precision)
+    return {'truePositive': true_positive, 'falsePositive': false_positive, 'falseNegative': positives - true_positive,
+            'precision': precision, 'recall': recall, 'f1': 0.9}
+
+
+def commitment_report(cases, letter, precision=0.97, recall=0.91, agreement_precision=None, agreement_recall=None, **overrides):
     positives = 80
     true_positive = round(positives * recall)
     false_positive = round(true_positive * (1 - precision) / precision)
@@ -29,6 +36,8 @@ def commitment_report(cases, letter, precision=0.97, recall=0.91, **overrides):
                         byFactType={'BUSINESS_COMMITMENT': {'truePositive': true_positive, 'falsePositive': false_positive, 'falseNegative': positives - true_positive,
                                                            'precision': true_positive / (true_positive + false_positive), 'recall': recall},
                                     'BOOKING_INTENT': {'truePositive': 0, 'falsePositive': 9, 'falseNegative': 0, 'precision': 0.0, 'recall': 1.0}})
+    report['commitmentAgreements'] = agreement_metrics(precision if agreement_precision is None else agreement_precision,
+                                                       recall if agreement_recall is None else agreement_recall)
     build = overrides.pop('build', None)
     if build:
         report['server'] = {**report['server'], 'buildInfo': build}
@@ -71,7 +80,7 @@ class ManifestTests(unittest.TestCase):
                                       'driverVersions': ['595.91.07'], 'imageIds': ['sha256:aaaa']})
         self.write('selection.json', {
             'promptVersion': PROMPT, 'schemaVersion': SCHEMA, 'treeSha256': 'a' * 64,
-            'datasets': {f'models/datasets/{name}.jsonl': {'sha256': sha * 64, 'cases': 10} for name, sha in (('dev_v1', 'd'), ('intent_regression_v2', 'i'), ('agreements_dev_v2', 'a'), ('agreements_independent_v2', 'a'), ('commitment_dev_v1', 'c'), ('commitment_holdout_v1', 'h'))},
+            'datasets': {f'models/datasets/{name}.jsonl': {'sha256': sha * 64, 'cases': 10} for name, sha in (('dev_v1', 'd'), ('intent_regression_v2', 'i'), ('agreements_dev_v2', 'a'), ('agreements_independent_v2', 'a'), ('commitment_dev_v1', 'c'), ('commitment_holdout_v2', 'h'))},
             'devReports': {str(self.dir / 'dev.json'): {'passed': True}},
         })
 
@@ -198,7 +207,7 @@ class ManifestTests(unittest.TestCase):
     def test_the_commitment_sets_are_judged_by_their_own_fact_type_and_not_by_the_overall_gates(self):
         result = manifest.build(self.commitment_arguments())
         self.assertEqual(result['status'], 'FROZEN')
-        self.assertEqual(result['qualityGate']['commitmentHoldout'], {'minimumPrecision': 0.95, 'minimumRecall': 0.85})
+        self.assertEqual(result['qualityGate']['commitmentHoldout'], {'minimumPrecision': 0.95, 'minimumRecall': 0.80})
         self.assertEqual((result['holdoutResult']['report'], result['holdoutResult']['recall']), (str(self.dir / 'holdout.json'), 0.91))
         self.assertEqual(result['holdoutBaseline']['recall'], 0.62)  # базовая ревизия записана рядом, чтобы выигрыш был виден
         self.assertNotIn('revision', result['holdoutBaseline'])
@@ -215,7 +224,7 @@ class ManifestTests(unittest.TestCase):
     def test_a_blind_result_below_the_preregistered_bars_blocks_the_manifest(self):
         self.write('base.json', {**BASE, 'qualityGate': {**BASE['qualityGate'], 'minimumValidRate': 0.99}})
         self.mismatch('Слепая выборка обязательств: точность BUSINESS_COMMITMENT', holdout=commitment_report(160, 'h', precision=0.90), arguments=self.commitment_overrides())
-        self.mismatch('Слепая выборка обязательств: полнота BUSINESS_COMMITMENT', holdout=commitment_report(160, 'h', recall=0.80), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: полнота BUSINESS_COMMITMENT', holdout=commitment_report(160, 'h', recall=0.79), arguments=self.commitment_overrides())
         self.mismatch('Набор обязательств (DEV): полнота BUSINESS_COMMITMENT', commitments=commitment_report(282, 'c', recall=0.70), arguments=self.commitment_overrides())
         self.mismatch('Слепая выборка обязательств: доля валидных ответов', holdout=commitment_report(160, 'h', validRate=0.95), arguments=self.commitment_overrides())
         self.mismatch('Слепая выборка обязательств: p95 9000 мс', holdout=commitment_report(160, 'h', p95Ms=9000), arguments=self.commitment_overrides())
@@ -239,7 +248,7 @@ class ManifestTests(unittest.TestCase):
         self.write('holdout.json', commitment_report(160, '0', recall=0.60))
         with self.assertRaises(SystemExit) as raised:
             manifest.build(self.commitment_arguments(candidate_on_unmet=True))
-        self.assertIn('отчёт снят не на models/datasets/commitment_holdout_v1.jsonl', str(raised.exception))
+        self.assertIn('отчёт снят не на models/datasets/commitment_holdout_v2.jsonl', str(raised.exception))
         # а когда всё пройдено, флаг ничего не меняет
         self.write('golden.json', run_report(400))
         self.write('holdout.json', commitment_report(160, 'h'))
@@ -247,8 +256,21 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(clean['status'], 'FROZEN')
         self.assertNotIn('unmetBars', clean)
 
+    def test_a_failed_hardware_report_is_an_unmet_bar_in_candidate_mode_and_a_blocker_otherwise(self):
+        failed = {'passed': False, 'failures': ['ответов, оборванных по длине: 1'], 'peakObservedVRAMMiB': 5844, 'oom': 0, 'restartsDuringRun': 0,
+                  'minimumObservedTokensPerSecond': 41.3, 'maximumPromptTokens': 6417, 'maximumTotalTokens': 8192, 'driverVersions': ['595.91.07'], 'imageIds': ['sha256:aaaa']}
+        self.write('hardware.json', failed)
+        with self.assertRaises(SystemExit) as raised:
+            manifest.build(self.arguments())
+        self.assertIn('отчёт об оборудовании не пройден', str(raised.exception))
+        result = manifest.build(self.arguments(candidate_on_unmet=True))
+        self.assertEqual(result['status'], 'CANDIDATE')
+        self.assertTrue(any('ответов, оборванных по длине: 1' in item for item in result['unmetBars']))
+        self.assertIs(result['hardwareResult']['passed'], False)  # результат записан, а не скрыт
+        self.assertEqual(result['hardwareResult']['peakObservedVRAMMiB'], 5844)
+
     def test_the_blind_set_must_be_the_sealed_one_and_the_baseline_must_use_the_same_file(self):
-        self.mismatch('Слепая выборка обязательств: отчёт снят не на models/datasets/commitment_holdout_v1.jsonl', holdout=commitment_report(160, '0'), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: отчёт снят не на models/datasets/commitment_holdout_v2.jsonl', holdout=commitment_report(160, '0'), arguments=self.commitment_overrides())
         self.mismatch('базовая ревизия снята не на той слепой выборке', baseline=commitment_report(160, 'z'), arguments=self.commitment_overrides())
         self.mismatch('Слепая выборка обязательств: версии инструкции', holdout=commitment_report(160, 'h', promptVersions=['analyze-conversation.prompt.v6']), arguments=self.commitment_overrides())
         self.mismatch('Слепая выборка обязательств: параметр temperature', holdout=commitment_report(160, 'h', server={**run_report(1)['server'], 'observedSampling': {**run_report(1)['server']['observedSampling'], 'temperature': 0.9}}), arguments=self.commitment_overrides())
@@ -279,6 +301,49 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised:
             manifest.build(self.arguments())
         self.assertIn('не входит в выбор', str(raised.exception))
+
+    def test_the_commitment_agreement_is_judged_by_the_same_bars_as_the_fact(self):
+        self.write('base.json', {**BASE, 'qualityGate': {**BASE['qualityGate'], 'minimumValidRate': 0.99}})
+        self.mismatch('Слепая выборка обязательств: точность договорённости COMMITMENT', holdout=commitment_report(160, 'h', agreement_precision=0.90), arguments=self.commitment_overrides())
+        self.mismatch('Слепая выборка обязательств: полнота договорённости COMMITMENT', holdout=commitment_report(160, 'h', agreement_recall=0.79), arguments=self.commitment_overrides())
+        self.mismatch('Набор обязательств (DEV): полнота договорённости COMMITMENT', commitments=commitment_report(282, 'c', agreement_recall=0.7), arguments=self.commitment_overrides())
+        result = manifest.build(self.commitment_arguments())
+        self.assertEqual(result['holdoutResult']['commitmentAgreements']['recall'], 0.91)  # договорённость записана рядом с фактом
+        self.assertEqual(result['commitmentValidation']['commitmentAgreements']['precision'], 0.97)
+
+    def test_the_owner_bars_are_inclusive_and_eighty_percent_recall_is_enough(self):
+        self.write('base.json', {**BASE, 'qualityGate': {**BASE['qualityGate'], 'minimumValidRate': 0.99}})
+        self.write('holdout.json', commitment_report(160, 'h', precision=0.95, recall=0.80, agreement_precision=0.95, agreement_recall=0.80))
+        self.write('baseline.json', commitment_report(160, 'h', recall=0.62, build='older'))
+        result = manifest.build(self.commitment_arguments())
+        self.assertEqual(result['status'], 'FROZEN')  # ровно на границе: пройдено, ниже — нет (проверено соседними тестами)
+        self.write('holdout.json', commitment_report(160, 'h', recall=0.82, agreement_recall=0.82))
+        self.assertEqual(manifest.build(self.commitment_arguments())['status'], 'FROZEN')  # прежние 0,85 здесь не требуются
+
+    def test_a_report_without_the_agreement_metric_is_refused(self):
+        stale = commitment_report(160, 'h')
+        del stale['commitmentAgreements']
+        self.mismatch('в отчёте нет метрики договорённостей COMMITMENT', holdout=stale, arguments=self.commitment_overrides())
+        empty = commitment_report(160, 'h', commitmentAgreements={'truePositive': 0, 'falsePositive': 0, 'falseNegative': 0, 'precision': 1, 'recall': 1})
+        self.mismatch('в наборе нет обещаний, полноту договорённостей оценить нельзя', holdout=empty, arguments=self.commitment_overrides())
+
+    def test_the_agreement_recall_must_not_fall_below_the_previous_revision_either(self):
+        self.write('baseline.json', commitment_report(160, 'h', recall=0.62, agreement_recall=0.95, build='older'))
+        self.mismatch('полнота договорённости COMMITMENT на слепой выборке упала', arguments=self.commitment_overrides())
+        # базовая линия, снятая без метрики договорённостей, сравнением по ней не блокирует
+        old = commitment_report(160, 'h', recall=0.62, build='older')
+        del old['commitmentAgreements']
+        self.write('baseline.json', old)
+        result = manifest.build(self.commitment_arguments())
+        self.assertIsNone(result['holdoutBaseline']['commitmentAgreements'])
+
+    def test_the_holdout_dataset_can_be_named_explicitly(self):
+        self.write('selection.json', {**json.loads((self.dir / 'selection.json').read_text()), 'datasets': {
+            **json.loads((self.dir / 'selection.json').read_text())['datasets'], 'models/datasets/commitment_holdout_v3.jsonl': {'sha256': 'x' * 64, 'cases': 10}}})
+        self.write('holdout.json', commitment_report(160, 'x'))
+        self.write('baseline.json', commitment_report(160, 'x', recall=0.62, build='older'))
+        result = manifest.build(self.commitment_arguments(holdout_dataset='models/datasets/commitment_holdout_v3.jsonl'))
+        self.assertEqual(result['dataset']['holdout']['sha256'], 'x' * 64)
 
     def test_the_command_writes_the_manifest_only_when_everything_agrees(self):
         out = self.dir / 'manifest.json'

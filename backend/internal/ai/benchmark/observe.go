@@ -39,6 +39,9 @@ type Observation struct {
 	ProviderError string `json:"providerError,omitempty"`
 	// Output — ответ модели до восстановления псевдонимов сообщений.
 	Output string `json:"output,omitempty"`
+	// Final — ответ поставщика после всей обработки (восстановленные идентификаторы, проход по обещаниям, спасение, починки). Он
+	// записывается в последнее обращение случая, чтобы по следу можно было разобрать, откуда взялась каждая запись.
+	Final string `json:"final,omitempty"`
 }
 
 // Recorder собирает измерения обращений к модели. Он не меняет ни запросы, ни
@@ -80,8 +83,21 @@ func (p recordingProvider) Infer(ctx context.Context, prompt string) (string, er
 	output, err := p.inner.Infer(ctx, prompt)
 	if err != nil {
 		p.recorder.annotateLast(CaseID(ctx), Describe(err))
+		return output, err
 	}
-	return output, err
+	p.recorder.annotateFinal(CaseID(ctx), output)
+	return output, nil
+}
+
+func (r *Recorder) annotateFinal(caseID, final string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := len(r.observations) - 1; i >= 0; i-- {
+		if r.observations[i].CaseID == caseID {
+			r.observations[i].Final = final
+			return
+		}
+	}
 }
 
 func (r *Recorder) annotateLast(caseID, providerError string) {

@@ -105,10 +105,14 @@ type Report struct {
 	P99MS                    int64                  `json:"p99Ms"`
 	ThroughputCasesPerSecond float64                `json:"throughputCasesPerSecond"`
 	ByFactType               map[string]FactMetrics `json:"byFactType"`
-	Failures                 []Failure              `json:"failures,omitempty"`
-	Server                   *ServerInfo            `json:"server,omitempty"`
-	Performance              *Performance           `json:"performance,omitempty"`
-	Passed                   bool                   `json:"passed"`
+	// CommitmentAgreements — договорённость COMMITMENT по обещанию компании: то, что в режиме v2 читает риск PROMISE_NOT_FULFILLED.
+	// Ожидаемое обещание — сообщение, на которое ссылается факт BUSINESS_COMMITMENT разметки; верной считается сильная договорённость
+	// от компании с основанием в нём (любой статус), лишней — любая другая. Метрика осмысленна на наборах, где обещание одно в переписке.
+	CommitmentAgreements *FactMetrics `json:"commitmentAgreements,omitempty"`
+	Failures             []Failure    `json:"failures,omitempty"`
+	Server               *ServerInfo  `json:"server,omitempty"`
+	Performance          *Performance `json:"performance,omitempty"`
+	Passed               bool         `json:"passed"`
 }
 
 type FactMetrics struct {
@@ -226,6 +230,29 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	matchedFacts := 0
 	exactEvidence := 0
 	consecutiveFailures := 0
+	var tracking FactMetrics
+	tracked := false
+	track := func(c Case, agreements []domain.AgreementObservation) {
+		if c.Input.SchemaVersion != application.AnalysisSchemaV2 {
+			return
+		}
+		promised, strong := promisedMessages(c.Expected), strongCommitmentTriggers(agreements)
+		if len(promised) > 0 || len(strong) > 0 {
+			tracked = true
+		}
+		for id := range promised {
+			if strong[id] {
+				tracking.TruePositive++
+			} else {
+				tracking.FalseNegative++
+			}
+		}
+		for id := range strong {
+			if !promised[id] {
+				tracking.FalsePositive++
+			}
+		}
+	}
 	for _, c := range cases {
 		if c.ExpectedAgreements != nil {
 			report.AgreementCases++
@@ -250,6 +277,7 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 			report.Invalid++
 			report.FalseNegative += len(c.Expected)
 			addFalseNegatives(report.ByFactType, c.Expected)
+			track(c, nil)
 			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "ошибка вызова модели", Detail: Describe(err), Expected: c.Expected})
 			if consecutiveFailures++; consecutiveFailures >= maxConsecutiveCallFailures {
 				return report, fmt.Errorf("%w: %d обращений подряд завершились ошибкой (последняя: %s), прогон прерван без отчёта", ErrModelUnavailable, consecutiveFailures, Describe(err))
@@ -277,10 +305,12 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 			report.Invalid++
 			report.FalseNegative += len(c.Expected)
 			addFalseNegatives(report.ByFactType, c.Expected)
+			track(c, nil)
 			report.Failures = append(report.Failures, Failure{CaseID: c.ID, Reason: "ответ не прошёл производственную проверку", Detail: err.Error(), Expected: c.Expected})
 			continue
 		}
 		actual := application.TrustedFacts(result)
+		track(c, agreements)
 		agreementsMatch := c.ExpectedAgreements == nil || sameAgreementStates(agreements, c.ExpectedAgreements)
 		if c.ExpectedAgreements != nil && agreementsMatch {
 			report.AgreementExact++
@@ -309,6 +339,12 @@ func Run(ctx context.Context, provider Provider, cases []Case, datasetSHA string
 	report.EvidenceExactRate = ratio(exactEvidence, matchedFacts)
 	if report.AgreementCases > 0 {
 		report.AgreementExactRate = ratio(report.AgreementExact, report.AgreementCases)
+	}
+	if tracked {
+		tracking.Precision = ratio(tracking.TruePositive, tracking.TruePositive+tracking.FalsePositive)
+		tracking.Recall = ratio(tracking.TruePositive, tracking.TruePositive+tracking.FalseNegative)
+		tracking.F1 = ratio(2*tracking.TruePositive, 2*tracking.TruePositive+tracking.FalsePositive+tracking.FalseNegative)
+		report.CommitmentAgreements = &tracking
 	}
 	for factType, counts := range report.ByFactType {
 		counts.Precision = ratio(counts.TruePositive, counts.TruePositive+counts.FalsePositive)
@@ -466,6 +502,30 @@ func validateCase(c Case) error {
 		}
 	}
 	return nil
+}
+
+// promisedMessages — сообщения, на которые ссылаются ожидаемые факты BUSINESS_COMMITMENT: так размечено обещание компании.
+func promisedMessages(expected []domain.SemanticFact) map[string]bool {
+	promised := map[string]bool{}
+	for _, fact := range expected {
+		if fact.Type == domain.FactBusinessCommitment && fact.Value {
+			for _, id := range fact.EvidenceMessageIDs {
+				promised[id] = true
+			}
+		}
+	}
+	return promised
+}
+
+// strongCommitmentTriggers — основания сильных договорённостей COMMITMENT, где действовать должна компания.
+func strongCommitmentTriggers(agreements []domain.AgreementObservation) map[string]bool {
+	triggers := map[string]bool{}
+	for _, a := range agreements {
+		if a.Kind == domain.AgreementCommitment && a.WaitingFor == domain.AgreementBusiness && a.Confidence >= .85 {
+			triggers[a.TriggerMessageID] = true
+		}
+	}
+	return triggers
 }
 
 func sameAgreementStates(actual, expected []domain.AgreementObservation) bool {

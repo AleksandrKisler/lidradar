@@ -19,18 +19,28 @@ import (
 //     сотрудник компании обещает ответ клиенту. Глаголы услуги («мастер сделает», «врач подберёт»)
 //     описывают визит, а не обещание в переписке, и в третьем лице не допускаются;
 //   - безличная форма «будет отправлен», «будет дан ответ», «заказ будет готов»;
-//   - устойчивые обороты («дам знать», «возьму в работу») и корень «обещ»;
+//   - устойчивые обороты («дам знать», «возьму в работу») и глагол «обещать» в первом лице («обещаю», «обещаем»);
 //   - английские «I'll», «we'll», «will».
 //
 // Совпадение идёт по целым словам, а не по подстрокам: «скинула», «перезвонила», «отправлюсь» и инфинитивы
 // («перезвонить») обещаниями не считаются. Слово перестаёт быть допуском, если:
-//   - оно стоит сразу после отрицания («не пришлю», «ничего не обещаю»);
+//   - оно стоит сразу после отрицания в том же предложении («не пришлю», «ничего не обещаю»; «Нет. Ответим завтра.» — обещание);
 //   - перед ним в пределах трёх слов той же фразы предложение или условие («хотите, пришлю», «если нужно, отправим»);
-//   - в той же фразе есть «возможно» или «может быть»: смягчение относится к своей фразе, а не ко всему сообщению;
+//   - в том же предложении до слова включительно есть слово смягчения — «возможно», «наверное», «вероятно», «пожалуй», «обычно»,
+//     «может быть», «как правило»: смягчение относится к своему предложению, а не ко всему сообщению, и действует вперёд — слово
+//     смягчения в следующей фразе («Деньги вернём сегодня, обычно банк зачисляет за три дня») относится к ней, если только эта
+//     фраза не состоит из одного смягчения («Ответим завтра, возможно»);
 //   - обещание зависит от будущего обращения клиента («если появятся вопросы, ответим», «обращайтесь, отвечу»).
 //
+// Второй набор функций (ADR 0055) работает с предложениями и словом обещания не требует: CommitmentRuledOut сообщает, что обещания в
+// сообщении быть не может (вопрос, предложение услуги «могу уточнить», смягчённая фраза, исключённое слово обещания; признак
+// закрывает предложение, только если стоит в его ведущей фразе, а предложение услуги от первого лица закрывает его целиком),
+// CommitmentSupport относит сообщение к допущенным словарём, открытым и исключённым, CommitmentStated требует слово обещания в
+// повествовательном предложении, CommitmentOpenText оставляет в сообщении только предложения, где обещание возможно. Они задают границу, за
+// которую не выходит смысловое решение проверочного прохода по обещаниям, и не заменяют его.
+//
 // Любое изменение словаря — изменение tuple: оно требует нового выбора до контрольной выборки и нового
-// прогона на независимой выборке обязательств (ADR 0054).
+// прогона на независимой выборке обязательств (ADR 0054, ADR 0055).
 
 // commitmentFirstPerson — формы первого лица будущего времени, единственное и множественное число.
 var commitmentFirstPerson = []string{
@@ -68,6 +78,10 @@ var commitmentFirstPerson = []string{
 // Намеренно нет «посмотрим» и «решим» (множественное число): без другого слова обещания они почти всегда уклончивы —
 // «посмотрим, что можно сделать», «решим по ситуации». «Посмотрим расписание и ответим» допускается словом «ответим».
 
+// commitmentPromiseVerbs — глагол «обещать» в первом лице: «обещаю», «обещаем». Слова с тем же корнем в другой роли обещанием не бывают:
+// «Других обещаний не было» (существительное), «Поставщик обещал на этой неделе» (чужое прошедшее обещание).
+var commitmentPromiseVerbs = wordSet("обещаю", "обещаем", "пообещаю", "пообещаем", "обещаемся")
+
 // commitmentThirdPerson — формы третьего лица будущего времени для глаголов связи и проверки: «менеджер
 // перезвонит», «вам ответят». Глаголы услуги сюда не входят.
 var commitmentThirdPerson = []string{
@@ -95,6 +109,17 @@ var commitmentParticiples = []string{
 	"рассмотрен", "согласован", "подтвержден", "проверен", "дан", "предоставлен", "составлен", "сформирован",
 	"исправлен", "организован", "доставлен", "возвращен", "пересчитан", "обработан", "переслан", "готов",
 }
+
+// commitmentHedgeWords — слова смягчения в предложении без слова обещания: «Возможно, получится отправить сегодня».
+var commitmentHedgeWords = wordSet("возможно", "наверное", "вероятно", "пожалуй", "обычно")
+
+// commitmentModalOffers — безличное «можно» с инфинитивом: «забрать можно с 12:00», «этот можно не возвращать». Оно описывает возможность
+// и закрывает только свою фразу.
+var commitmentModalOffers = wordSet("можно")
+
+// commitmentSpeakerOffers — предложение услуги от лица компании («могу уточнить», «готовы отправить», «юрист сможет изучить»): такое слово
+// делает предложением всё предложение, а не только свою фразу.
+var commitmentSpeakerOffers = wordSet("могу", "можем", "сможем", "смогу", "сможет", "смогут", "готов", "готова", "готовы", "рад", "рада", "рады")
 
 // commitmentNegators — слово перед глаголом, после которого это уже не обещание: «не пришлю», «ничего не обещаю».
 var commitmentNegators = wordSet("не", "нет", "ни", "ничего", "никогда", "нельзя")
@@ -155,6 +180,8 @@ func participleSet() map[string]struct{} {
 type lexiconToken struct {
 	word     string
 	sentence int
+	// clause — номер фразы внутри текста: растёт на каждой запятой, двоеточии, тире и на границе предложения.
+	clause int
 }
 
 // lexiconTokens приводит текст к виду для сопоставления: нижний регистр, «ё» как «е», единый апостроф;
@@ -163,11 +190,11 @@ func lexiconTokens(body string) []lexiconToken {
 	body = strings.NewReplacer("ё", "е", "Ё", "е", "’", "'", "`", "'").Replace(strings.ToLower(body))
 	var tokens []lexiconToken
 	var word []rune
-	sentence := 0
+	sentence, clause := 0, 0
 	flush := func() {
 		// Тире, окружённое пробелами, — не слово: иначе оно сдвигало бы окно отрицания и предложения.
 		if len(word) > 0 && strings.Trim(string(word), "-'") != "" {
-			tokens = append(tokens, lexiconToken{word: string(word), sentence: sentence})
+			tokens = append(tokens, lexiconToken{word: string(word), sentence: sentence, clause: clause})
 		}
 		word = word[:0]
 	}
@@ -179,6 +206,9 @@ func lexiconTokens(body string) []lexiconToken {
 			flush()
 			if strings.ContainsRune(".!?;…\n", r) {
 				sentence++
+				clause++
+			} else if strings.ContainsRune(",:—–", r) {
+				clause++
 			}
 		}
 	}
@@ -200,15 +230,20 @@ func HasCommitmentAnchor(body string) bool {
 	return false
 }
 
-// commitmentHedgedAt: в той же фразе, что и слово, есть «возможно», «может быть» или оборот о привычной практике
-// («обычно», «как правило»). Смягчение относится к своей фразе: «Возможно, есть скидка. Проверю и напишу» оставляет второе
-// предложение обещанием, а «Возможно, ответим завтра» и «Обычно перезваниваем в тот же день» — нет.
+// commitmentHedgedAt: в том же предложении, что и слово, до его собственной фразы включительно есть «возможно», «может быть» или
+// оборот о привычной практике («обычно», «как правило»). Смягчение действует вперёд: «Возможно, есть скидка. Проверю и напишу»
+// оставляет второе предложение обещанием, «Возможно, ответим завтра» и «Обычно перезваниваем в тот же день» — нет. Слово смягчения
+// в следующей фразе («Деньги вернём сегодня, обычно банк зачисляет за три дня») относится к ней, а не к слову перед ним, если только
+// эта фраза не состоит из одного смягчения: «Ответим завтра, возможно» — вводное слово ко всему предложению.
 func commitmentHedgedAt(tokens []lexiconToken, i int) bool {
 	for j, token := range tokens {
 		if token.sentence != tokens[i].sentence {
 			continue
 		}
-		if token.word == "возможно" || token.word == "обычно" {
+		if token.clause > tokens[i].clause && !parentheticalClause(tokens, j) {
+			continue
+		}
+		if _, hedge := commitmentHedgeWords[token.word]; hedge {
 			return true
 		}
 		if j+1 < len(tokens) && tokens[j+1].sentence == token.sentence {
@@ -218,6 +253,22 @@ func commitmentHedgedAt(tokens []lexiconToken, i int) bool {
 		}
 	}
 	return false
+}
+
+// commitmentParentheticalWords — слова вводной фразы смягчения: «возможно», «может быть», «как правило» и связки перед ними.
+var commitmentParentheticalWords = wordSet("возможно", "наверное", "вероятно", "пожалуй", "обычно", "может", "быть", "как", "правило", "а", "но", "и")
+
+// parentheticalClause: фраза, в которой стоит токен j, состоит только из слов смягчения и связок.
+func parentheticalClause(tokens []lexiconToken, j int) bool {
+	for _, other := range tokens {
+		if other.sentence != tokens[j].sentence || other.clause != tokens[j].clause {
+			continue
+		}
+		if _, ok := commitmentParentheticalWords[other.word]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // commitmentStandingAt: перед глаголом в той же фразе стоит условие или приглашение, от которого зависит ответ компании.
@@ -250,7 +301,7 @@ func commitmentStandingAt(tokens []lexiconToken, i int) bool {
 
 // commitmentNegatedAt: слово стоит сразу после отрицания.
 func commitmentNegatedAt(tokens []lexiconToken, i int) bool {
-	if i == 0 {
+	if i == 0 || tokens[i-1].sentence != tokens[i].sentence {
 		return false
 	}
 	_, negated := commitmentNegators[tokens[i-1].word]
@@ -272,12 +323,310 @@ func commitmentOfferedAt(tokens []lexiconToken, i int) bool {
 	return false
 }
 
+// LexicalSupport — насколько словарь поддерживает обещание в исходящем сообщении. Проход по обещаниям (ADR 0055) опирается на
+// него как на подсказку: порог уверенности модели выше там, где слов обещания нет вовсе.
+type LexicalSupport int
+
+const (
+	// LexicalOpen: слов обещания нет, а структура не исключает его (модель одна решает, есть ли обещание).
+	LexicalOpen LexicalSupport = iota
+	// LexicalAdmitted: есть слово обещания, не исключённое структурой (HasCommitmentAnchor).
+	LexicalAdmitted
+	// LexicalRuledOut: обещания заведомо нет (CommitmentRuledOut).
+	LexicalRuledOut
+)
+
+// CommitmentSupport относит тело исходящего сообщения к одному из трёх случаев; допуск слова сильнее исключения.
+func CommitmentSupport(body string) LexicalSupport {
+	switch {
+	case HasCommitmentAnchor(body):
+		return LexicalAdmitted
+	case CommitmentRuledOut(body):
+		return LexicalRuledOut
+	}
+	return LexicalOpen
+}
+
+// CommitmentRuledOut сообщает, что в сообщении заведомо нет обещания компании. Это отсекающая проверка, а не допуск: «нет» не
+// означает, что обещание есть. Сообщение исключено, если оно пустое либо каждое его предложение закрыто, а приветствия и благодарности
+// ничего не меняют. Предложение закрыто, если
+//   - в нём есть слова обещания, но каждое стоит под отрицанием, в предложении, в смягчении или в стоящем предложении
+//     («Хотите, пришлю?», «Если нужно, отправим», «Возможно, ответим завтра», «Обращайтесь, отвечу»);
+//   - слов обещания нет, а предложение — вопрос, предложение услуги («Могу уточнить у мастера», «Готовы отправить»), предложение
+//     или условие («Хотите подборку?») либо смягчённая фраза («Возможно, получится отправить сегодня»).
+//
+// Слово обещания, не исключённое структурой, и повествовательное предложение без признаков («Будет сделано», «Подготовили документы»)
+// оставляют сообщение открытым: исключение отсекает только то, что обещанием быть не может, остальное решает модель.
+func CommitmentRuledOut(body string) bool {
+	sentences := lexiconSentences(body)
+	if len(sentences) == 0 {
+		return true
+	}
+	closed := 0
+	for _, sentence := range sentences {
+		switch sentenceState(sentence) {
+		case sentenceOpen:
+			return false
+		case sentenceClosed:
+			closed++
+		}
+	}
+	return closed > 0
+}
+
+type sentenceStateKind int
+
+const (
+	sentenceOpen    sentenceStateKind = iota // обещание возможно
+	sentenceClosed                           // обещания в предложении быть не может
+	sentenceTrivial                          // приветствие или благодарность
+)
+
+func sentenceState(sentence lexiconSentence) sentenceStateKind {
+	admitted, anchored := sentenceAnchors(sentence)
+	switch {
+	case admitted:
+		return sentenceOpen
+	case anchored || sentence.question || closedByWords(sentence):
+		return sentenceClosed
+	}
+	if _, polite := commitmentPoliteWords[sentence.words[0]]; polite && len(sentence.words) <= 3 {
+		return sentenceTrivial
+	}
+	return sentenceOpen
+}
+
+// sentenceAnchors сообщает, есть ли в предложении слово обещания, не исключённое структурой (admitted), и есть ли слова обещания
+// вообще (anchored).
+func sentenceAnchors(sentence lexiconSentence) (admitted, anchored bool) {
+	tokens := make([]lexiconToken, len(sentence.words))
+	clause, next := 0, 0
+	for i, word := range sentence.words {
+		for next < len(sentence.breaks) && sentence.breaks[next] <= i {
+			clause++
+			next++
+		}
+		tokens[i] = lexiconToken{word: word, clause: clause}
+	}
+	for i := range tokens {
+		if !commitmentAnchorAt(tokens, i) {
+			continue
+		}
+		anchored = true
+		if !commitmentNegatedAt(tokens, i) && !commitmentOfferedAt(tokens, i) && !commitmentHedgedAt(tokens, i) && !commitmentStandingAt(tokens, i) {
+			return true, true
+		}
+	}
+	return false, anchored
+}
+
+// CommitmentStated: слово обещания стоит в повествовательном предложении. Слово в вопросе («Будет ли удобно, если тренер перезвонит?»)
+// предлагает, а не обещает.
+func CommitmentStated(body string) bool {
+	for _, sentence := range lexiconSentences(body) {
+		if admitted, _ := sentenceAnchors(sentence); admitted && !sentence.question {
+			return true
+		}
+	}
+	return false
+}
+
+// CommitmentOpenText оставляет в сообщении только предложения, в которых обещание возможно: закрытые предложения (вопросы, предложения
+// услуги, смягчения, исключённые слова обещания) и приветствия убираются. Проход по обещаниям видит именно этот текст, чтобы вопрос
+// «Прислать вам фото?» рядом с обычным ответом не принимался за обещание. Если оставлять нечего, возвращается исходный текст.
+func CommitmentOpenText(body string) string {
+	var kept []string
+	for _, sentence := range lexiconSentences(body) {
+		if sentenceState(sentence) == sentenceOpen {
+			kept = append(kept, sentence.text)
+		}
+	}
+	if len(kept) == 0 {
+		return body
+	}
+	return strings.Join(kept, " ")
+}
+
+// closedByWords: предложение без слов обещания закрыто словами-признаками — смягчением, предложением услуги, предложением или условием.
+// Предложение услуги от первого лица («могу уточнить», «готовы отправить») закрывает предложение целиком, где бы ни стояло. Остальные признаки
+// закрывают предложение, только если стоят в его ведущей фразе (до первой запятой, двоеточия или тире, не считая вежливых слов и
+// подтверждений вроде «спасибо», «конечно»): «Возможно, ответим завтра», «Хотите, подберём?». Признак в следующей фразе относится к ней, а
+// не к обещанию перед ним: «Деньги вернём сегодня, обычно банк зачисляет за три дня», «В субботу сборщик отрегулирует петли, а если
+// понадобится, поставит новые», «Курьер доставит букет, этот можно не возвращать».
+func closedByWords(sentence lexiconSentence) bool {
+	words := sentence.words
+	lead := sentence.leadEnd()
+	for i, word := range words {
+		if _, speaker := commitmentSpeakerOffers[word]; speaker && hasInfinitiveAfter(words, i, 3) {
+			return true
+		}
+		if i >= lead {
+			continue
+		}
+		if _, hedge := commitmentHedgeWords[word]; hedge {
+			return true
+		}
+		if _, offer := commitmentOfferWords[word]; offer {
+			return true
+		}
+		if i+1 < len(words) {
+			next := words[i+1]
+			if _, offer := commitmentOfferPairs[[2]string{word, next}]; offer {
+				return true
+			}
+			if (word == "может" && next == "быть") || (word == "как" && next == "правило") {
+				return true
+			}
+		}
+		if _, modal := commitmentModalOffers[word]; modal && hasInfinitiveAfter(words, i, 3) {
+			return true
+		}
+	}
+	return false
+}
+
+// leadEnd — конец ведущей фразы предложения: первая фраза, в которой есть что-то кроме вежливых слов и подтверждений. Если такой нет,
+// ведущей считается всё предложение.
+func (s lexiconSentence) leadEnd() int {
+	start := 0
+	for _, end := range append(append([]int{}, s.breaks...), len(s.words)) {
+		if end <= start {
+			continue
+		}
+		if !onlyLeadWords(s.words[start:end]) {
+			return end
+		}
+		start = end
+	}
+	return len(s.words)
+}
+
+// onlyLeadWords: во фразе одни вежливые слова и подтверждения («Спасибо», «Да, конечно», «Добрый день»).
+func onlyLeadWords(words []string) bool {
+	for _, word := range words {
+		_, polite := commitmentPoliteWords[word]
+		_, confirmed := commitmentConfirmWords[word]
+		if !polite && !confirmed {
+			return false
+		}
+	}
+	return true
+}
+
+// commitmentConfirmWords — подтверждения, которыми начинается ответ: за ними идёт содержательная фраза.
+var commitmentConfirmWords = wordSet("да", "конечно", "хорошо", "понятно", "ясно", "отлично", "поняли", "понял", "поняла", "разумеется", "безусловно",
+	"ок", "окей", "ладно", "верно", "согласны", "согласен", "согласна")
+
+// hasInfinitiveAfter: в пределах n слов после позиции i есть инфинитив («могу уточнить», «готовы отправить»).
+func hasInfinitiveAfter(words []string, i, n int) bool {
+	for j := i + 1; j < len(words) && j <= i+n; j++ {
+		if isInfinitive(words[j]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isInfinitive узнаёт русский инфинитив: слово на «-ть» или «-чь» не короче пяти букв либо одно из немногих распространённых слов на «-ти».
+// Существительные на «-сти» («новости», «области», «части») инфинитивами не считаются.
+func isInfinitive(word string) bool {
+	if _, known := commitmentInfinitivesOnTi[word]; known {
+		return true
+	}
+	if len([]rune(word)) < 5 {
+		return false // «есть», «мать», «пять», «дать»: слишком коротки, чтобы отличить инфинитив по окончанию
+	}
+	if _, other := commitmentNotInfinitives[word]; other {
+		return false
+	}
+	return strings.HasSuffix(word, "ть") || strings.HasSuffix(word, "чь")
+}
+
+// commitmentNotInfinitives — слова на «-ть», которые инфинитивами не являются.
+var commitmentNotInfinitives = wordSet("честь", "весть", "шесть", "девять", "десять", "кровать", "стоимость", "возможность", "необходимость",
+	"готовность", "ответственность", "радость", "новость", "сложность", "точность", "срочность", "безопасность", "активность")
+
+// commitmentInfinitivesOnTi — инфинитивы на «-ти», которые встречаются в предложении услуги («могу привезти», «можем найти»).
+var commitmentInfinitivesOnTi = wordSet("привезти", "довезти", "отвезти", "завезти", "увезти", "принести", "отнести", "донести", "перевести", "провести",
+	"привести", "отвести", "найти", "зайти", "пройти", "дойти", "подойти", "прийти", "выйти")
+
+// commitmentPoliteWords — слова, которыми начинается приветствие или благодарность; такая короткая реплика обещанием не бывает.
+var commitmentPoliteWords = wordSet("здравствуйте", "здравствуй", "привет", "приветствую", "добрый", "доброе", "спасибо", "благодарю",
+	"пожалуйста", "извините", "простите")
+
+// lexiconSentence — предложение как список слов; question — оно закончено знаком вопроса; text — исходная запись предложения
+// (с регистром и знаками) без пробелов по краям.
+type lexiconSentence struct {
+	words    []string
+	question bool
+	text     string
+	// breaks — индексы слов, с которых начинается каждая следующая фраза предложения (после запятой, двоеточия или тире).
+	breaks []int
+}
+
+// lexiconSentences разбирает текст теми же правилами, что lexiconTokens, но сохраняет, какие предложения были вопросами, и
+// исходную запись каждого предложения.
+func lexiconSentences(body string) []lexiconSentence {
+	var sentences []lexiconSentence
+	var current lexiconSentence
+	var word []rune
+	var original strings.Builder
+	flushWord := func() {
+		if len(word) > 0 && strings.Trim(string(word), "-'") != "" {
+			current.words = append(current.words, string(word))
+		}
+		word = word[:0]
+	}
+	closeSentence := func() {
+		flushWord()
+		if len(current.words) > 0 {
+			current.text = strings.TrimSpace(original.String())
+			sentences = append(sentences, current)
+		}
+		current = lexiconSentence{}
+		original.Reset()
+	}
+	for _, r := range body {
+		normalized := unicode.ToLower(r)
+		switch normalized {
+		case 'ё':
+			normalized = 'е'
+		case '’', '`':
+			normalized = '\''
+		}
+		switch {
+		case unicode.IsLetter(normalized) || unicode.IsDigit(normalized) || normalized == '\'' || normalized == '-':
+			word = append(word, normalized)
+			original.WriteRune(r)
+		case normalized == '?':
+			flushWord()
+			current.question = true
+			original.WriteRune(r)
+			closeSentence()
+		case strings.ContainsRune(".!;…\n", normalized):
+			original.WriteRune(r)
+			closeSentence()
+		case strings.ContainsRune(",:—–", normalized):
+			flushWord()
+			if n := len(current.words); n > 0 && (len(current.breaks) == 0 || current.breaks[len(current.breaks)-1] != n) {
+				current.breaks = append(current.breaks, n)
+			}
+			original.WriteRune(r)
+		default:
+			flushWord()
+			original.WriteRune(r)
+		}
+	}
+	closeSentence()
+	return sentences
+}
+
 func commitmentAnchorAt(tokens []lexiconToken, i int) bool {
 	token := tokens[i].word
 	if _, ok := commitmentWords[token]; ok {
 		return true
 	}
-	if strings.Contains(token, "обещ") {
+	if _, promises := commitmentPromiseVerbs[token]; promises {
 		return true
 	}
 	switch token {

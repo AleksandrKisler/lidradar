@@ -21,13 +21,19 @@ import (
 //     value=false, не переопределяется);
 //   - только по соглашению COMMITMENT от компании с доверенной уверенностью (>= 0,85);
 //   - только если сообщение-основание — исходящее обещание, которое принимает серверная проверка
-//     факта (PossibleBusinessCommitmentEvidence), и в нём нет отрицания («не обещаю…»);
+//     факта (слово словаря либо допуск прохода по обещаниям), и в нём нет отрицания («не обещаю…»);
 //   - доказательство — основание самого позднего такого соглашения: факт ссылается на
 //     последнее обещание, как в примерах инструкции;
 //   - дополненный ответ обязан пройти ту же серверную проверку, иначе возвращается исходный.
 //
 // Решение остаётся за приложением: оно, как и прежде, проверяет доказательства и уверенность.
 func ensureCommitmentFact(prompt, answer string) string {
+	return completeCommitmentFact(prompt, answer, nil)
+}
+
+// completeCommitmentFact — то же с допуском прохода по обещаниям: основанием может быть и сообщение без слов словаря, которое
+// проход допустил (scanned, ключи — идентификаторы сообщений запроса).
+func completeCommitmentFact(prompt, answer string, scanned scanEligibility) string {
 	var request application.AnalyzeConversationRequestV1
 	if json.Unmarshal([]byte(prompt), &request) != nil {
 		return answer
@@ -55,7 +61,7 @@ func ensureCommitmentFact(prompt, answer string) string {
 			continue
 		}
 		message := request.Messages[i]
-		if !application.PossibleBusinessCommitmentEvidence(message) || negatesPromise(message.Body) {
+		if !scanned.allows(message) || refusesPromise(message, scanned) {
 			continue
 		}
 		if i > latest {
@@ -78,6 +84,17 @@ func ensureCommitmentFact(prompt, answer string) string {
 		return answer
 	}
 	return string(encoded)
+}
+
+// refusesPromise: сообщение отказывает в обещании, а не обещает. «На сайте 44-го нет, но сейчас позвоню и уточню» и «Результаты ещё не
+// пришли. Как придут, врач посмотрит их и наберёт вас» обещания не отменяют: отрицание в другой части сообщения к обещанию не относится.
+// Общий поиск отрицания применяется, только если слова обещания в повествовательном предложении нет и проход по обещаниям это
+// сообщение не допускал (допущенное сообщение, не исключённое структурой, прошло и проход, и решение модели).
+func refusesPromise(message application.ContextMessage, scanned scanEligibility) bool {
+	if !negatesPromise(message.Body) || application.CommitmentStated(message.Body) {
+		return false
+	}
+	return !(scanned[message.ID] && !application.CommitmentRuledOut(message.Body))
 }
 
 // negatesPromise отсекает «не обещаю», «не могу пообещать», «ничего отправлять не планируем»:

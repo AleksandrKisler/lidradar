@@ -1,0 +1,264 @@
+{
+  "name": "lidradar-main-v1",
+  "status": "CANDIDATE",
+  "contractVersion": "analyze-conversation.v2",
+  "promptVersion": "analyze-conversation.prompt.v9",
+  "datasetVersion": "lidradar-ai-benchmark.v1",
+  "dataset": {
+    "cases": 500,
+    "goldenCases": 400,
+    "devCases": 100,
+    "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34",
+    "measuredOn": {
+      "devCases": 100,
+      "devSHA256": "b4b83c909c7dd814e25e068ea0be3c851575ae42a578a5335ef8f98a4e29d238",
+      "goldenCases": 400,
+      "goldenSHA256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34"
+    },
+    "v2DevSets": {
+      "intents": {
+        "sha256": "c5183b949b24ddad0369da35babf2a52f9c7bc39b45f89dd128e62d89833ad22",
+        "cases": 27
+      },
+      "agreements": {
+        "sha256": "712300ff227a40ff7e7a0869a9abcdb1cb7587329610ef7a600d0278e082717c",
+        "cases": 21
+      },
+      "independent": {
+        "sha256": "be4589226b2274c9cb61530ba3334ed2e2b245d53b1458b364e003b558ae4baf",
+        "cases": 6
+      }
+    },
+    "holdout": {
+      "sha256": "1ee80017af86e7faaf57ca484cf3d73ef89ee5d81939684216ea151941ec9d21",
+      "cases": 188
+    }
+  },
+  "runtime": "llama.cpp",
+  "runtimeBuild": "b10666-4e97ac86e",
+  "runtimeImageId": "sha256:150b59966fb5b2cb1a8fa9d226267c56ebd22c520c7b3640331cde87f3c4fb01",
+  "driverVersion": "595.91.07",
+  "targetHardware": "NVIDIA GeForce RTX 4060 8 GB",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4060",
+    "vram_gb": 8,
+    "fit": "Q4_K - Medium, контекст 8192, параллелизм 1; наблюдаемый пик 5844 MiB при пределе 7500 MiB (отчёт об оборудовании)"
+  },
+  "generation": {
+    "temperature": 0.2,
+    "topP": 0.8,
+    "topK": 20,
+    "minP": 0,
+    "presencePenalty": 0,
+    "seed": 42,
+    "thinking": false,
+    "contextSize": 8192,
+    "parallelism": 1
+  },
+  "qualityGate": {
+    "minimumPrecision": 0.9,
+    "minimumFactPrecision": 0.85,
+    "minimumRecall": 0.9,
+    "minimumF1": 0.9,
+    "minimumExactRate": 0.85,
+    "minimumValidRate": 0.99,
+    "minimumEvidenceExactRate": 0.9,
+    "minimumFactRecall": 0.85,
+    "commitmentHoldout": {
+      "minimumPrecision": 0.95,
+      "minimumRecall": 0.85
+    }
+  },
+  "performanceGate": {
+    "maximumP95Ms": 8000,
+    "maximumVRAMMiB": 7500,
+    "maximumOOM": 0,
+    "minimumTokensPerSecond": 20
+  },
+  "modelArtifact": "Qwen3-8B-Q4_K_M.gguf",
+  "modelSHA256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+  "modelServer": {
+    "modelPath": "/models/Qwen3-8B-Q4_K_M.gguf",
+    "modelFtype": "Q4_K - Medium",
+    "modelSizeBytes": 5021827072,
+    "modelParameters": 8190735360
+  },
+  "modelVerification": {
+    "report": "models/reports/lidradar-main-v1-prompt-v9-model-hash.json",
+    "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "sizeBytes": 5027783488,
+    "checkedAt": "2026-10-10T17:32:02Z"
+  },
+  "selection": "models/reports/lidradar-main-v1-prompt-v9r2-selection.json",
+  "selectionTreeSHA256": "72adf9f45dcbe4784bd65c5169deb6ff58e99b04de6c8faa4d82562d8e03f490",
+  "validationResult": {
+    "split": "DEV",
+    "report": "models/reports/lidradar-main-v1-prompt-v9r2-dev.json",
+    "cases": 100,
+    "precision": 0.9393939393939394,
+    "recall": 1,
+    "f1": 0.96875,
+    "exactRate": 0.97,
+    "validRate": 1,
+    "evidenceExactRate": 1,
+    "p95Ms": 4256,
+    "passed": true,
+    "recallByFactType": {
+      "BOOKING_INTENT": 1,
+      "BUSINESS_COMMITMENT": 1,
+      "FOLLOW_UP_CANDIDATE": 1,
+      "PRICE_MENTIONED": 1
+    }
+  },
+  "v2ValidationResults": {
+    "intents": {
+      "report": "models/reports/lidradar-main-v1-prompt-v9r2-dev-intents.json",
+      "cases": 27,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "exactRate": 1,
+      "validRate": 1,
+      "evidenceExactRate": 1,
+      "p95Ms": 2599,
+      "passed": true,
+      "recallByFactType": {
+        "BOOKING_INTENT": 1,
+        "PURCHASE_INTENT": 1
+      }
+    },
+    "agreements": {
+      "report": "models/reports/lidradar-main-v1-prompt-v9r2-dev-agreements.json",
+      "cases": 21,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "exactRate": 1,
+      "validRate": 1,
+      "evidenceExactRate": 1,
+      "p95Ms": 5397,
+      "passed": true,
+      "agreementExactRate": 1,
+      "recallByFactType": {
+        "BOOKING_INTENT": 1,
+        "BUSINESS_COMMITMENT": 1,
+        "FOLLOW_UP_CANDIDATE": 1,
+        "PRICE_MENTIONED": 1,
+        "PURCHASE_INTENT": 1
+      }
+    },
+    "independent": {
+      "report": "models/reports/lidradar-main-v1-prompt-v9r2-dev-independent.json",
+      "cases": 6,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "exactRate": 1,
+      "validRate": 1,
+      "evidenceExactRate": 1,
+      "p95Ms": 3302,
+      "passed": true,
+      "agreementExactRate": 1,
+      "recallByFactType": {
+        "BUSINESS_COMMITMENT": 1
+      }
+    }
+  },
+  "goldenResult": {
+    "report": "models/reports/lidradar-main-v1-prompt-v9r2-golden.json",
+    "cases": 400,
+    "precision": 0.8972431077694235,
+    "recall": 0.9754768392370572,
+    "f1": 0.9347258485639687,
+    "exactRate": 0.93,
+    "validRate": 1,
+    "evidenceExactRate": 1,
+    "p95Ms": 4337,
+    "passed": false,
+    "recallByFactType": {
+      "BOOKING_INTENT": 0.9789,
+      "BUSINESS_COMMITMENT": 1,
+      "FOLLOW_UP_CANDIDATE": 0.8929,
+      "PRICE_MENTIONED": 1
+    },
+    "maxPromptTokens": 2675,
+    "minTokensPerSecond": 45.00244193578373,
+    "blind": false,
+    "note": "Регрессионный прогон: отчёт GOLDEN предыдущей ревизии был прочитан, выборка больше не слепая. Слепой результат ревизии даёт выборка обязательств."
+  },
+  "hardwareResult": {
+    "report": "models/reports/lidradar-main-v1-prompt-v9r2-hardware.json",
+    "peakObservedVRAMMiB": 5844,
+    "oom": 0,
+    "restartsDuringRun": 0,
+    "minimumObservedTokensPerSecond": 42.58896720143062,
+    "maximumPromptTokens": 6417,
+    "maximumTotalTokens": 6606,
+    "passed": true,
+    "driverVersions": [
+      "595.91.07"
+    ],
+    "imageIds": [
+      "sha256:150b59966fb5b2cb1a8fa9d226267c56ebd22c520c7b3640331cde87f3c4fb01"
+    ]
+  },
+  "previousQualification": "models/reports/lidradar-main-v1-prompt-v9-manifest.json",
+  "knownLimitations": [
+    "Слепая выборка обязательств (188 переписок, 90 с обещанием, автор — отдельный агент, тексты не читались): полнота BUSINESS_COMMITMENT 0,578 при границе 0,85, точность 1,0. Ревизия 1 на той же выборке: полнота 0,289, точность 0,897. Словарь допускает 62 из 90 обещаний, из допущенных модель отмечает 52.",
+    "Доля валидных ответов на слепой выборке 0,9894 при пороге 0,99: два ответа отклонила серверная проверка (цена, которой нет в сообщении; противоречивые договорённости). Ревизия 1 на той же выборке — тоже два.",
+    "Регрессионный GOLDEN (не слепой, отчёт предыдущей ревизии прочитан): precision 0,8972 при пороге 0,90 (ревизия 1: 0,9075); лишние факты — прежние отрицательные факты и цена типов BOOKING_INTENT и PRICE_MENTIONED, BUSINESS_COMMITMENT 55 из 55 без ложных.",
+    "Квалификация ревизии 1 по GOLDEN завышает полноту BUSINESS_COMMITMENT: на независимой выборке она 0,289 при 0,909 на GOLDEN. GOLDEN и DEV v1 построены из одного пула шаблонных фраз.",
+    "Слепая выборка написана языковой моделью, а не взята из живых переписок: распределение формулировок в продукте может отличаться.",
+    "Договорённость COMMITMENT для новых глаголов не закрывается автоматически словом выполнения: словарь выполнения не менялся (ADR 0054, п. 9)."
+  ],
+  "commitmentValidation": {
+    "report": "models/reports/lidradar-main-v1-prompt-v9r2-dev-commitments.json",
+    "cases": 305,
+    "truePositive": 141,
+    "falsePositive": 0,
+    "falseNegative": 24,
+    "precision": 1,
+    "recall": 0.8545454545454545,
+    "validRate": 1,
+    "p95Ms": 4229,
+    "build": "b10666-4e97ac86e"
+  },
+  "holdoutResult": {
+    "report": "models/reports/lidradar-main-v1-prompt-v9r2-holdout.json",
+    "cases": 188,
+    "truePositive": 52,
+    "falsePositive": 0,
+    "falseNegative": 38,
+    "precision": 1,
+    "recall": 0.5777777777777777,
+    "validRate": 0.9893617021276596,
+    "p95Ms": 5919,
+    "build": "b10666-4e97ac86e"
+  },
+  "holdoutBaseline": {
+    "report": "models/reports/lidradar-main-v1-prompt-v9r2-holdout-baseline.json",
+    "promptVersions": [
+      "analyze-conversation.prompt.v9"
+    ],
+    "build": "b10666-4e97ac86e",
+    "cases": 188,
+    "truePositive": 26,
+    "falsePositive": 3,
+    "falseNegative": 64,
+    "precision": 0.896551724137931,
+    "recall": 0.28888888888888886,
+    "revision": "коммит 3dd2807 (ревизия 1: словарь, грамматика, проверка и поставщик прежние) с исполнителем текущего дерева, который знает выборку HOLDOUT"
+  },
+  "unmetBars": [
+    "GOLDEN: пороги не пройдены",
+    "GOLDEN: precision 0.8972431077694235 ниже порога minimumPrecision 0.9",
+    "Слепая выборка обязательств: полнота BUSINESS_COMMITMENT 0.5778 ниже границы 0.85",
+    "Слепая выборка обязательств: доля валидных ответов 0.9893617021276596 ниже порога 0.99"
+  ],
+  "pending": [
+    "граница не пройдена: GOLDEN: пороги не пройдены",
+    "граница не пройдена: GOLDEN: precision 0.8972431077694235 ниже порога minimumPrecision 0.9",
+    "граница не пройдена: Слепая выборка обязательств: полнота BUSINESS_COMMITMENT 0.5778 ниже границы 0.85",
+    "граница не пройдена: Слепая выборка обязательств: доля валидных ответов 0.9893617021276596 ниже порога 0.99"
+  ]
+}

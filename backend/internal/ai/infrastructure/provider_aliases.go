@@ -81,3 +81,17 @@ func (aliases analysisAliases) restore(raw string) (string, error) {
 	encoded, err := json.Marshal(result)
 	return string(encoded), err
 }
+
+// canonicalProbabilities переводит вероятности из псевдонимов основного вызова в идентификаторы сообщений запроса.
+func (aliases analysisAliases) canonicalProbabilities(byAlias map[string]float64) map[string]float64 {
+	if len(byAlias) == 0 {
+		return nil
+	}
+	result := make(map[string]float64, len(byAlias))
+	for alias, probability := range byAlias {
+		if id, ok := aliases.canonical[alias]; ok {
+			result[id] = probability
+		}
+	}
+	return result
+}

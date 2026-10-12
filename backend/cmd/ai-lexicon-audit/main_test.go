@@ -103,3 +103,19 @@ func TestCommitmentDevSetKeepsItsCoverageAndItsFalseAcceptRate(t *testing.T) {
 		}
 	}
 }
+
+func TestSupportByMessageNamesTheLexiconStateOfEveryOutgoingMessageAndSkipsTheCustomer(t *testing.T) {
+	cases := []benchmark.Case{
+		testCase("s-01", true, message("a1", "INCOMING", "Когда ответите?"), message("a2", "OUTGOING", "Проверю и отвечу вам."), message("a3", "OUTGOING", "Хотите, пришлю прайс?"), message("a4", "OUTGOING", "Будет сделано.")),
+	}
+	got := supportByMessage(cases)
+	want := map[string]string{"a2": "ADMITTED", "a3": "RULED_OUT", "a4": "OPEN"}
+	if len(got) != len(want) {
+		t.Fatalf("only outgoing messages are listed: %v", got)
+	}
+	for id, state := range want {
+		if got[id] != state {
+			t.Errorf("%s: got %q, want %q", id, got[id], state)
+		}
+	}
+}

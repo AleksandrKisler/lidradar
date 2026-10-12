@@ -1,4 +1,4 @@
-.PHONY: ai-benchmark-commitments ai-benchmark-context ai-benchmark-dev ai-benchmark-golden ai-benchmark-holdout ai-benchmark-v2-dev ai-dataset ai-dataset-audit ai-lexicon-audit ai-selection-verify build check clean fmt test test-db vet
+.PHONY: ai-benchmark-commitments ai-benchmark-commitments-independent ai-benchmark-commitments-independent-v2 ai-benchmark-context ai-benchmark-dev ai-benchmark-golden ai-benchmark-holdout ai-benchmark-v2-dev ai-dataset ai-dataset-audit ai-lexicon-audit ai-scan-probe ai-selection-verify build check clean fmt test test-db vet
 
 BIN_DIR ?= bin
 COMMANDS := api worker scheduler ai-agent ai-node-register ai-node-manage migrate dev-data
@@ -10,7 +10,7 @@ AI_BENCHMARK_PROMPT_VERSION ?= analyze-conversation.prompt.v9
 AI_BENCHMARK_SCHEMA_VERSION ?= analyze-conversation.v2
 AI_BENCHMARK_TRACE_DIR ?= runtime/ai-benchmark
 AI_BENCHMARK_TIMEOUT ?= 2h
-AI_SELECTION ?= models/reports/lidradar-main-v1-prompt-v9r2-selection.json
+AI_SELECTION ?= models/reports/lidradar-main-v1-prompt-v9r4-selection.json
 AI_BENCHMARK_GATES := -minimum-precision 0.90 \
 	-minimum-fact-precision 0.85 \
 	-minimum-fact-recall 0.85 \
@@ -95,11 +95,30 @@ ai-benchmark-commitments:
 	@$(AI_BENCHMARK) -dataset models/datasets/commitment_dev_v1.jsonl -checksum '' -trace $(AI_BENCHMARK_TRACE_DIR)/commitments.jsonl; status=$$?; [ $$status -eq 0 ] || [ $$status -eq 2 ]
 
 # Слепая выборка обязательств запускается один раз для записанного выбора, как GOLDEN: цель сначала проверяет выбор,
-# а сумма выборки утверждена в commitment_holdout_v1.sha256 до первого прогона. Тексты выборки не читают.
+# а сумма выборки утверждена в commitment_holdout_v3.sha256 до первого прогона. Тексты выборки не читают.
+# Ревизии 4 (ADR 0055) принадлежит commitment_holdout_v3; commitment_holdout_v1 (ревизия 2) и commitment_holdout_v2 (ревизия 3) прочитаны и теперь наборы настройки.
+AI_HOLDOUT ?= commitment_holdout_v3
 ai-benchmark-holdout:
 	@python3 scripts/ai-selection.py verify $(AI_SELECTION) >&2
 	@mkdir -p $(AI_BENCHMARK_TRACE_DIR)
-	@$(AI_BENCHMARK) -dataset models/datasets/commitment_holdout_v1.jsonl -checksum models/datasets/commitment_holdout_v1.sha256 -trace $(AI_BENCHMARK_TRACE_DIR)/holdout.jsonl; status=$$?; [ $$status -eq 0 ] || [ $$status -eq 2 ]
+	@$(AI_BENCHMARK) -dataset models/datasets/$(AI_HOLDOUT).jsonl -checksum models/datasets/$(AI_HOLDOUT).sha256 -trace $(AI_BENCHMARK_TRACE_DIR)/holdout.jsonl; status=$$?; [ $$status -eq 0 ] || [ $$status -eq 2 ]
+
+# Бывшая слепая выборка v1 (188 переписок): после слепой проверки ревизии 2 она прочитана и служит независимым набором настройки.
+# Отчёт — в stdout; результаты по ней не доказывают обобщение: настройка шла и по её текстам.
+ai-benchmark-commitments-independent:
+	@mkdir -p $(AI_BENCHMARK_TRACE_DIR)
+	@$(AI_BENCHMARK) -dataset models/datasets/commitment_holdout_v1.jsonl -checksum models/datasets/commitment_holdout_v1.sha256 -trace $(AI_BENCHMARK_TRACE_DIR)/commitments-independent.jsonl; status=$$?; [ $$status -eq 0 ] || [ $$status -eq 2 ]
+
+# Слепая выборка v2 ревизии 3 (248 переписок): единственный прогон ревизии 3 сделан 2026-10-11, для ревизии 4 выборка прочитана и служит набором настройки.
+ai-benchmark-commitments-independent-v2:
+	@mkdir -p $(AI_BENCHMARK_TRACE_DIR)
+	@$(AI_BENCHMARK) -dataset models/datasets/commitment_holdout_v2.jsonl -checksum models/datasets/commitment_holdout_v2.sha256 -trace $(AI_BENCHMARK_TRACE_DIR)/commitments-independent-v2.jsonl; status=$$?; [ $$status -eq 0 ] || [ $$status -eq 2 ]
+
+# Только проход по обещаниям (ADR 0055): вероятность «обещание» по каждому исходящему сообщению набора и состояние словаря, без текстов.
+# Нужен для настройки; качество ревизии измеряет ai-benchmark. Пример: make ai-scan-probe AI_SCAN_DATASET=models/datasets/commitment_dev_v1.jsonl
+AI_SCAN_DATASET ?= models/datasets/commitment_dev_v1.jsonl
+ai-scan-probe:
+	@go run ./backend/cmd/ai-scan-probe -dataset $(AI_SCAN_DATASET) -endpoint $(AI_BENCHMARK_ENDPOINT)
 
 # Словарь обещаний без модели: покрытие обещаний и ложные допуски на наборе DEV. Выборки HOLDOUT так не читают.
 ai-lexicon-audit:

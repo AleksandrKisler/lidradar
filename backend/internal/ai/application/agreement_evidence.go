@@ -36,7 +36,9 @@ func ValidateAgreementEvidence(result domain.AnalysisResultV2, prompt string) er
 						return fmt.Errorf("%w: booking intent lacks incoming evidence", ErrInvalidAIOutput)
 					}
 				case domain.FactBusinessCommitment:
-					if !PossibleBusinessCommitmentEvidence(m) {
+					// Инструкция v9 дополняется проходом по обещаниям (ADR 0055): его основание — исходящее сообщение без
+					// структурных признаков «обещания нет», слов обещания в нём может и не быть. Прежние версии проверяются как раньше.
+					if !PossibleBusinessCommitmentEvidence(m) && !(request.PromptVersion == AnalysisPromptV9 && ScannedCommitmentEvidence(m)) {
 						return fmt.Errorf("%w: business commitment lacks outgoing promise", ErrInvalidAIOutput)
 					}
 				case domain.FactFollowUpCandidate:
@@ -57,7 +59,10 @@ func ValidateAgreementEvidence(result domain.AnalysisResultV2, prompt string) er
 			return fmt.Errorf("%w: agreement trigger outside context", ErrInvalidAIOutput)
 		}
 		trigger := request.Messages[triggerIndex]
-		if !validAgreementActor(a, trigger) || (!explicitAgreementTrigger(a.Kind, trigger.Body) && !agreementFactSupportsTrigger(a, result.Facts)) {
+		// Инструкция v9: основанием договорённости COMMITMENT может быть и исходящее сообщение без слов словаря, которое не исключено
+		// структурой (ADR 0055); модели его разрешает только грамматика допущенных сообщений.
+		scannedCommitment := request.PromptVersion == AnalysisPromptV9 && a.Kind == domain.AgreementCommitment && ScannedCommitmentEvidence(trigger)
+		if !validAgreementActor(a, trigger) || (!explicitAgreementTrigger(a.Kind, trigger.Body) && !scannedCommitment && !agreementFactSupportsTrigger(a, result.Facts)) {
 			return fmt.Errorf("%w: agreement actor or trigger unsupported", ErrInvalidAIOutput)
 		}
 		if a.Kind == domain.AgreementBookingConfirmation && isDeferral(trigger.Body) {
@@ -219,6 +224,13 @@ func PossibleBookingEvidence(m ContextMessage) bool {
 func PossibleBusinessCommitmentEvidence(m ContextMessage) bool {
 	// «Возможно» и «может быть» смягчают только свою фразу, поэтому проверяются внутри словаря (HasCommitmentAnchor).
 	return m.Direction == "OUTGOING" && explicitAgreementTrigger(domain.AgreementCommitment, m.Body)
+}
+
+// ScannedCommitmentEvidence — основание факта BUSINESS_COMMITMENT, добавленного проходом по обещаниям (ADR 0055): исходящее
+// сообщение, про которое структура текста не говорит «обещания нет» (CommitmentRuledOut). Слов обещания в нём может не быть:
+// считать ли сообщение обещанием, решает модель, а это только граница, за которую решение не выходит.
+func ScannedCommitmentEvidence(m ContextMessage) bool {
+	return m.Direction == "OUTGOING" && !CommitmentRuledOut(m.Body)
 }
 
 // HasExplicitPurchaseIntent identifies direct order language, excluding mere budgets.

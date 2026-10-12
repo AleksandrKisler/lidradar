@@ -196,7 +196,7 @@ func TestADashBetweenSpacesIsNotAWordAndDoesNotMoveTheNegationWindow(t *testing.
 
 func TestLexiconTokensKeepTrackOfSentences(t *testing.T) {
 	tokens := lexiconTokens("Хотите? Да\nПришлю; Отвечу… Ок")
-	want := []lexiconToken{{"хотите", 0}, {"да", 1}, {"пришлю", 2}, {"отвечу", 3}, {"ок", 4}}
+	want := []lexiconToken{{"хотите", 0, 0}, {"да", 1, 1}, {"пришлю", 2, 2}, {"отвечу", 3, 3}, {"ок", 4, 4}}
 	if len(tokens) != len(want) {
 		t.Fatalf("tokens = %+v, want %+v", tokens, want)
 	}
@@ -208,7 +208,7 @@ func TestLexiconTokensKeepTrackOfSentences(t *testing.T) {
 }
 
 func TestOfferPairsDoNotReachAcrossASentenceBoundary(t *testing.T) {
-	tokens := []lexiconToken{{"если", 0}, {"нужно", 1}, {"проверю", 1}}
+	tokens := []lexiconToken{{"если", 0, 0}, {"нужно", 1, 1}, {"проверю", 1, 1}}
 	if commitmentOfferedAt(tokens, 2) {
 		t.Fatal("a pair split by a sentence boundary is not an offer marker")
 	}
@@ -239,7 +239,7 @@ func TestAHedgeSoftensOnlyItsOwnSentence(t *testing.T) {
 }
 
 func TestTheWordsOfAHedgeMustStandInOneSentence(t *testing.T) {
-	split := []lexiconToken{{"отвечу", 0}, {"может", 0}, {"быть", 1}}
+	split := []lexiconToken{{"отвечу", 0, 0}, {"может", 0, 0}, {"быть", 1, 1}}
 	if commitmentHedgedAt(split, 0) {
 		t.Fatal("«может» and «быть» in different sentences are not a hedge")
 	}
@@ -290,4 +290,339 @@ func TestAHabitualPhraseSoftensOnlyItsOwnSentence(t *testing.T) {
 			t.Errorf("HasCommitmentAnchor(%q) = %v, want %v", body, got, want)
 		}
 	}
+}
+
+func TestCommitmentRuledOutRecognisesOffersConditionsHedgesAndQuestions(t *testing.T) {
+	for _, body := range []string{
+		// слова обещания есть, но каждое исключено структурой
+		"Хотите, пришлю прайс?", "Если хотите, перезвоню вам вечером.", "Если нужно, отправим расчёт.", "Давайте я перезвоню вам завтра.",
+		"Возможно, ответим завтра.", "Обычно перезваниваем в тот же день, позвоню.", "Обращайтесь, если будут вопросы, отвечу.",
+		"Если по результатам возникнут вопросы, позвоним вам.", "Не пришлю.", "Не отвечу и не пришлю.", "Хотите, пришлю? Или позвонить?",
+		// слов обещания нет, а текст состоит из вопросов
+		"Прислать вам прайс на почту?", "Отправить вам фото результата?", "Можно?", "На какой номер вам перезвонить?",
+		"Здравствуйте! Позвонить вам?", "Добрый день, Анна! Подготовить для вас расчёт?", "Спасибо. Прислать вам прайс?",
+		// пустое сообщение
+		"", "   ", "\n",
+	} {
+		if !CommitmentRuledOut(body) {
+			t.Errorf("a message without a possible promise must be ruled out: %q", body)
+		}
+	}
+}
+
+func TestCommitmentRuledOutKeepsEverythingThatMayStillBeAPromise(t *testing.T) {
+	for _, body := range []string{
+		// допущенное слово обещания
+		"Пришлю завтра.", "Хотите прайс? Завтра позвоню вам.", "Возможно, есть скидка. Проверю и напишу.", "Не волнуйтесь, отправлю сегодня.",
+		"Позвоню завтра. Вам удобно?",
+		// слов обещания нет, но это не вопрос и не реплика: решает модель
+		"Подготовили документы, можете забирать.", "Мы всегда отправляем чек на почту.", "Будет сделано.", "Будет сделано. Когда вам удобно?",
+		"Хорошо, будет сделано. Вам удобно?", "Мы решим этот вопрос. Вам удобно?", "Здравствуйте, это сервис, мы получили заявку. Подождёте?",
+		"Здравствуйте!", "Спасибо!", "Ок",
+	} {
+		if CommitmentRuledOut(body) {
+			t.Errorf("this message may still carry a promise: %q", body)
+		}
+	}
+}
+
+func TestCommitmentSupportSeparatesAdmittedOpenAndRuledOut(t *testing.T) {
+	for _, test := range []struct {
+		body string
+		want LexicalSupport
+	}{
+		{"Пришлю счёт завтра.", LexicalAdmitted},
+		{"Позвоню завтра. Вам удобно?", LexicalAdmitted},
+		{"Хотите, пришлю прайс?", LexicalRuledOut},
+		{"Прислать вам прайс?", LexicalRuledOut},
+		{"Возможно, ответим завтра.", LexicalRuledOut},
+		{"Подготовили документы, можете забирать.", LexicalOpen},
+		{"Будет сделано.", LexicalOpen},
+		{"Здравствуйте!", LexicalOpen},
+		{"", LexicalRuledOut},
+	} {
+		if got := CommitmentSupport(test.body); got != test.want {
+			t.Errorf("%q: got %d, want %d", test.body, got, test.want)
+		}
+	}
+	// Слово обещания сильнее исключения вопросом: вопрос со словом обещания остаётся допущенным, как у прежнего допуска.
+	if CommitmentSupport("Вам удобно, если я позвоню завтра?") != LexicalAdmitted {
+		t.Error("a question that still has an unexcluded promise word stays admitted")
+	}
+}
+
+func TestLexiconSentencesKeepTheQuestionMarkAndNormalizeTheText(t *testing.T) {
+	got := lexiconSentences("Добрый день, Анна! Отправить Ёлку? Да... Хорошо?! Нет.")
+	want := []lexiconSentence{
+		{words: []string{"добрый", "день", "анна"}},
+		{words: []string{"отправить", "елку"}, question: true},
+		{words: []string{"да"}},
+		{words: []string{"хорошо"}, question: true},
+		{words: []string{"нет"}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d sentences %v, want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if strings.Join(got[i].words, " ") != strings.Join(want[i].words, " ") || got[i].question != want[i].question {
+			t.Errorf("sentence %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if len(lexiconSentences(" — ... ")) != 0 {
+		t.Error("a dash and punctuation are not words")
+	}
+}
+
+func TestAPoliteReplyIsTrivialOnlyWhenShortAndOnlyAtTheStart(t *testing.T) {
+	// Четыре слова после приветствия — уже повествование: решает модель.
+	if CommitmentRuledOut("Здравствуйте, мы получили вашу заявку. Позвонить вам?") {
+		t.Error("a statement of four words is not a greeting")
+	}
+	if !CommitmentRuledOut("Добрый вечер, Анна! Позвонить вам завтра?") {
+		t.Error("a short greeting does not change a question")
+	}
+	// Приветствие не в начале предложения не считается приветствием.
+	if CommitmentRuledOut("Нужен вам, спасибо. Позвонить завтра?") {
+		t.Error("a politeness word that does not start the sentence does not make a reply trivial")
+	}
+}
+
+func TestCommitmentRuledOutClosesOffersOfServiceAndHedgesThatHaveNoPromiseWord(t *testing.T) {
+	for _, body := range []string{
+		// предложение услуги: компания не берёт обязательство
+		"Могу уточнить у мастера, если вам это важно.", "Можем отправить расчёт.", "Готовы прислать договор.", "Рады сообщить, что заказ готов.",
+		"Будем рады видеть вас.", "Готова подобрать вариант.",
+		// смягчение в предложении без слова обещания
+		"Возможно, получится отправить сегодня.", "Наверное, это получится сделать завтра.", "Вероятно, потребуется время.", "Может быть, получится.",
+		// несколько закрытых предложений и приветствие
+		"Здравствуйте! Могу уточнить у мастера. Вам это нужно?", "Добрый день. Возможно, получится отправить.",
+	} {
+		if !CommitmentRuledOut(body) {
+			t.Errorf("a sentence without a promise word that offers or hedges must be closed: %q", body)
+		}
+	}
+}
+
+func TestCommitmentRuledOutLeavesOpenWhatTheModelHasToJudge(t *testing.T) {
+	for _, body := range []string{
+		"Подготовили документы, можете забирать.", "Мы всегда отправляем чек на почту.", "Договор мы направляем после предоплаты.",
+		"Будет сделано в течение часа.", "Могу уточнить. Будет сделано.", "Возможно, получится. Подготовим акт завтра.",
+		// модальное слово без инфинитива рядом не предложение услуги
+		"Я рад вашему отзыву.", "Готов к встрече в понедельник.", "Можем в пятницу, а пока подготовим договор.",
+	} {
+		if CommitmentRuledOut(body) {
+			t.Errorf("this message may still carry a promise: %q", body)
+		}
+	}
+}
+
+func TestOneHedgeListServesTheAnchorsAndTheSentencesWithoutThem(t *testing.T) {
+	for _, hedge := range []string{"Возможно", "Наверное", "Вероятно", "Пожалуй", "Обычно"} {
+		if HasCommitmentAnchor(hedge + ", ответим завтра.") {
+			t.Errorf("«%s» softens the promise word in its sentence", hedge)
+		}
+		if !HasCommitmentAnchor(hedge + ", это хорошо. Ответим завтра.") {
+			t.Errorf("«%s» in another sentence must not cancel the promise", hedge)
+		}
+	}
+	for _, body := range []string{"Как правило, отвечаем быстро. Ответим завтра.", "Может быть, нет. Ответим завтра."} {
+		if !HasCommitmentAnchor(body) {
+			t.Errorf("a pair-word hedge belongs to its own sentence: %q", body)
+		}
+	}
+	for _, word := range []string{"уточнить", "помочь", "отправить", "сделать", "привезти", "найти", "принести"} {
+		if !isInfinitive(word) {
+			t.Errorf("%q is an infinitive", word)
+		}
+	}
+	for _, word := range []string{"мать", "есть", "пять", "дать", "ть", "ответ", "позвоню", "честь", "стоимость", "кровать", "новости", "области", "части", "возможности", "везти"} {
+		if isInfinitive(word) {
+			t.Errorf("%q is not an infinitive", word)
+		}
+	}
+}
+
+func TestNegationDoesNotReachAcrossASentenceBoundary(t *testing.T) {
+	// Отказ в одном предложении не отменяет обещание в следующем.
+	for _, body := range []string{"Нет. Ответим завтра.", "К сожалению, нет! Позвоним в пятницу.", "Не получится сегодня. Отправим завтра.", "Ничего. Сообщим позже."} {
+		if !HasCommitmentAnchor(body) {
+			t.Errorf("a promise after a refusal in another sentence stays a promise: %q", body)
+		}
+	}
+	if HasCommitmentAnchor("Нет, не пришлю.") || HasCommitmentAnchor("Мы ничего не отправим.") {
+		t.Error("a negation in the same sentence still cancels the word")
+	}
+}
+
+func TestCommitmentOpenTextKeepsOnlyTheSentencesWherePromisesAreStillPossible(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		// вопрос и предложение услуги рядом с обычным ответом убираются, ответ остаётся как написан
+		{"Да, в студии можно с животными. Скинуть вам фото интерьеров залов?", "Да, в студии можно с животными."},
+		{"Стандартно два рабочих дня. Если сроки горят, есть срочная печать — могу рассчитать, если пришлёте макет.", "Стандартно два рабочих дня."},
+		{"Добрый день! Готовых в витрине нет. Хотите, пришлю примеры?", "Готовых в витрине нет."},
+		{"Хотите, пришлю прайс? Завтра позвоню вам.", "Завтра позвоню вам."},
+		{"Мастер заедет завтра. Хотите, пришлю? Курьер привезёт в пятницу.", "Мастер заедет завтра. Курьер привезёт в пятницу."},
+		// слово обещания остаётся с регистром и знаками
+		{"Спасибо! Пришлём Вам договор в ПЯТНИЦУ, ок?", "Пришлём Вам договор в ПЯТНИЦУ, ок?"},
+		// нечего оставлять — возвращается весь текст
+		{"Здравствуйте!", "Здравствуйте!"},
+		{"Хотите, пришлю прайс?", "Хотите, пришлю прайс?"},
+		{"", ""},
+	} {
+		if got := CommitmentOpenText(tc.body); got != tc.want {
+			t.Errorf("%q: got %q, want %q", tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestCommitmentStatedNeedsAPromiseWordInAStatement(t *testing.T) {
+	for body, want := range map[string]bool{
+		"Позвоню завтра.":                          true,
+		"Здравствуйте! Пришлю расчёт до вечера.":   true,
+		"Позвоню завтра, ок?":                      false, // вопрос не считается: решать его оставлено модели
+		"Будет ли удобно, если тренер перезвонит?": false,
+		"Удобно? Перезвоню вам в пять.":            true,
+		"Хотите, пришлю?":                          false,
+		"Возможно, ответим.":                       false,
+		"Не пришлю.":                               false,
+		"Будет сделано.":                           false, // слова обещания нет
+		"":                                         false,
+	} {
+		if got := CommitmentStated(body); got != want {
+			t.Errorf("%q: got %v, want %v", body, got, want)
+		}
+	}
+}
+
+func TestLexiconSentencesKeepTheOriginalTextOfEachSentence(t *testing.T) {
+	got := lexiconSentences("  Добрый день, Анна!  Пришлём ВАМ счёт… Ёлка?  ")
+	texts := []string{}
+	for _, sentence := range got {
+		texts = append(texts, sentence.text)
+	}
+	if strings.Join(texts, "|") != "Добрый день, Анна!|Пришлём ВАМ счёт…|Ёлка?" {
+		t.Fatalf("texts: %q", texts)
+	}
+}
+
+func TestMoreModalWordsMakeAnOfferNotAPromise(t *testing.T) {
+	for _, body := range []string{"Юрист сможет изучить материалы на этой неделе.", "Мастер сможет приехать завтра.", "Можно записать вас на пятницу.", "Смогу уточнить у мастера."} {
+		if !CommitmentRuledOut(body) {
+			t.Errorf("a possibility is not a promise: %q", body)
+		}
+	}
+}
+
+func TestOnlyTheFirstPersonVerbToPromiseIsAPromiseWord(t *testing.T) {
+	for _, body := range []string{"Обещаю ответить сегодня.", "Обещаем вернуть деньги до пятницы.", "Пообещаю, что позвонят.", "ОБЕЩАЕМ, что перезвоним."} {
+		if !HasCommitmentAnchor(body) {
+			t.Errorf("a first-person promise word must be admitted: %q", body)
+		}
+	}
+	for _, body := range []string{
+		"Других обещаний в переписке не было.", "Поставщик обещал на этой неделе, но точно сказать не могу.", "Это обещание мы выполнили.",
+		"Менеджер обещала позвонить вчера.", "Обещание данное ранее остаётся в силе.", "Они обещают, но сроки сдвигают.",
+	} {
+		if HasCommitmentAnchor(body) {
+			t.Errorf("a noun, a past form or somebody else's promise is not a new promise of the company: %q", body)
+		}
+	}
+	if HasCommitmentAnchor("Ничего не обещаю.") || HasCommitmentAnchor("Не обещаем сроки.") {
+		t.Error("a negated promise verb is not a promise")
+	}
+}
+
+func TestAMarkerInALaterClauseClosesOnlyItsOwnClauseAndAnOfferOfTheCompanyClosesTheSentence(t *testing.T) {
+	// Обещание не пропадает из текста для прохода из-за слова смягчения или «можно» в следующей фразе.
+	kept := []string{
+		"Вижу отмену. Деньги вернём на карту сегодня, обычно банк зачисляет их в течение 1–3 дней.",
+		"Понятно. В субботу утром сборщик отрегулирует петли, а если понадобится, поставит новые.",
+		"Видим, это наш брак. В течение двух часов курьер доставит новый букет, этот можно не возвращать.",
+		"Юрист изучит документы и до пятницы даст заключение: какие есть риски и что можно ответить арендодателю.",
+	}
+	for _, body := range kept {
+		if CommitmentRuledOut(body) {
+			t.Errorf("a marker in a later clause must not rule out the message: %q", body)
+		}
+		open := CommitmentOpenText(body)
+		if want := strings.TrimSpace(body[strings.LastIndex(body[:len(body)-1], ". ")+1:]); !strings.Contains(open, want) {
+			t.Errorf("the sentence with the promise must stay in the text for the scan: got %q, want it to contain %q", open, want)
+		}
+	}
+	// Признак в ведущей фразе по-прежнему закрывает предложение, в том числе за вежливым словом.
+	closed := []string{
+		"Возможно, ответим завтра.",
+		"Конечно, возможно, получится отправить сегодня.",
+		"Спасибо, обычно отвечаем в тот же день.",
+		"Хотите, подберём варианты.",
+		"Если нужно, подберём варианты.",
+		// предложение услуги от первого лица закрывает предложение целиком, где бы оно ни стояло
+		"Если сроки горят, есть срочная печать — могу рассчитать, если пришлёте макет.",
+		"Мастер свободен в пятницу, а если вам удобнее, могу записать на понедельник.",
+		"Если передадите дело нам, юрист сможет изучить материалы уже на этой неделе.",
+		"Курьеры работают до 22:00, а если нужно позже, смогут привезти завтра.",
+	}
+	for _, body := range closed {
+		if !CommitmentRuledOut(body) {
+			t.Errorf("a marker in the leading clause rules the sentence out: %q", body)
+		}
+	}
+}
+
+func TestClauseBreaksFollowCommasColonsAndDashesAndSkipEmptyOnes(t *testing.T) {
+	sentences := lexiconSentences("Спасибо,, вернём — обычно за три дня: ждите")
+	if len(sentences) != 1 {
+		t.Fatalf("one sentence expected: %+v", sentences)
+	}
+	s := sentences[0]
+	if got := strings.Join(s.words, " "); got != "спасибо вернем обычно за три дня ждите" {
+		t.Fatalf("words: %q", got)
+	}
+	if len(s.breaks) != 3 || s.breaks[0] != 1 || s.breaks[1] != 2 || s.breaks[2] != 6 {
+		t.Fatalf("clause breaks: %v", s.breaks)
+	}
+	// ведущая фраза — первая содержательная: «спасибо» только вежливое слово
+	if s.leadEnd() != 2 {
+		t.Fatalf("the leading clause is «вернём»: %d", s.leadEnd())
+	}
+	if lexiconSentences("Да.")[0].leadEnd() != 1 {
+		t.Fatal("a sentence of lead words is led by all of it")
+	}
+}
+
+func TestLexiconFunctionsAgreeAndNeverPanicOnPunctuationHeavyText(t *testing.T) {
+	words := []string{"ответим", "завтра", "возможно", "обычно", "могу", "сможет", "хотите", "если", "нужно", "можно", "не", "банк", "зачисляет", "деньги", "вернём",
+		"спасибо", "конечно", "мастер", "приедет", "а", "и", "как", "правило", "пришлю", "будет", "готово", "?", ",", ",", ":", "—", ".", "!", ";", "\n", " "}
+	rng := newLexiconRandom(1)
+	for i := 0; i < 3000; i++ {
+		var body strings.Builder
+		for n := rng.next(14); n > 0; n-- {
+			body.WriteString(words[rng.next(len(words))])
+			body.WriteByte(' ')
+		}
+		text := body.String()
+		support := CommitmentSupport(text)
+		if HasCommitmentAnchor(text) != (support == LexicalAdmitted) {
+			t.Fatalf("the anchor and the admitted state must agree: %q", text)
+		}
+		if (support == LexicalRuledOut) != CommitmentRuledOut(text) && support != LexicalAdmitted {
+			t.Fatalf("ruled out must agree with the support: %q", text)
+		}
+		if open := CommitmentOpenText(text); strings.TrimSpace(text) != "" && open == "" {
+			t.Fatalf("the open text of a non-empty message is never empty: %q", text)
+		}
+		_ = CommitmentStated(text)
+	}
+}
+
+// lexiconRandom — детерминированный генератор для проверки без зависимости от math/rand.
+type lexiconRandom struct{ state uint64 }
+
+func newLexiconRandom(seed uint64) *lexiconRandom {
+	return &lexiconRandom{state: seed*2862933555777941757 + 3037000493}
+}
+
+func (r *lexiconRandom) next(n int) int {
+	r.state = r.state*6364136223846793005 + 1442695040888963407
+	return int((r.state >> 33) % uint64(n))
 }

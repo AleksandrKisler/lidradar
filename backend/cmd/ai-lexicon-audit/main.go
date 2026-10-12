@@ -102,6 +102,27 @@ func audit(cases []benchmark.Case, withTexts bool) report {
 	return result
 }
 
+// supportNames — имена состояний словаря в выводе -support.
+var supportNames = map[application.LexicalSupport]string{
+	application.LexicalAdmitted: "ADMITTED",
+	application.LexicalOpen:     "OPEN",
+	application.LexicalRuledOut: "RULED_OUT",
+}
+
+// supportByMessage относит каждое исходящее сообщение набора к состоянию словаря. В выводе только идентификаторы и состояния,
+// без текстов: файл можно соединять с отчётами прохода по моделям и для контрольных выборок.
+func supportByMessage(cases []benchmark.Case) map[string]string {
+	result := map[string]string{}
+	for _, c := range cases {
+		for _, message := range c.Input.Messages {
+			if message.Direction == "OUTGOING" {
+				result[message.ID] = supportNames[application.CommitmentSupport(message.Body)]
+			}
+		}
+	}
+	return result
+}
+
 func ratio(part, whole int) float64 {
 	if whole == 0 {
 		return 0
@@ -113,12 +134,19 @@ func main() {
 	dataset := flag.String("dataset", "models/datasets/commitment_dev_v1.jsonl", "набор в формате lidradar-ai-benchmark.v1")
 	texts := flag.Bool("texts", false, "печатать тексты пропусков и ложных срабатываний; только для наборов DEV, контрольные выборки так не читают")
 	summary := flag.Bool("summary", false, "печатать только итоги и группы без списков случаев")
+	support := flag.Bool("support", false, "печатать для каждого исходящего сообщения только состояние словаря (ADMITTED, OPEN, RULED_OUT), без текстов и итогов")
 	flag.Parse()
 	file, err := os.Open(*dataset)
 	fatal(err)
 	defer file.Close()
 	cases, digest, err := benchmark.Load(file)
 	fatal(err)
+	if *support {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		fatal(encoder.Encode(supportByMessage(cases)))
+		return
+	}
 	result := audit(cases, *texts)
 	result.Dataset, result.SHA256 = *dataset, digest
 	if *summary {

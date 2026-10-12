@@ -132,8 +132,11 @@ func TestContextRetriesAreBoundedAndOnlyForV9AndOnlyForTheContextError(t *testin
 	count := func(version, body string, status int) (int, error) {
 		requests := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requests++
-			_, _ = io.Copy(io.Discard, r.Body)
+			data, _ := io.ReadAll(r.Body)
+			// Проход по обещаниям — отдельные запросы со своими повторами; здесь считаются только запросы основного вызова.
+			if !strings.Contains(string(data), "Ты проверяешь переписку компании") {
+				requests++
+			}
 			w.WriteHeader(status)
 			_, _ = io.WriteString(w, body)
 		}))

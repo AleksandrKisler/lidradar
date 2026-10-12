@@ -13,14 +13,16 @@ import (
 // enums prevent inventing amounts or IDs; they do not replace server validation.
 // Preserve property order: summary precedes facts in constrained generation.
 func analysisGenerationSchemaV6(prompt string) (json.RawMessage, error) {
-	return analysisGenerationSchema(prompt, false)
+	return analysisGenerationSchema(prompt, false, nil)
 }
 
 func analysisGenerationSchemaV7(prompt string) (json.RawMessage, error) {
-	return analysisGenerationSchema(prompt, true)
+	return analysisGenerationSchema(prompt, true, nil)
 }
 
-func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
+// analysisGenerationSchema строит грамматику ответа. scanned — сообщения без слов обещания, которые проход по обещаниям
+// (promise_scan.go) допустил к решению модели; для них факт и договорённость разрешены так же, как для слов словаря.
+func analysisGenerationSchema(prompt string, v2 bool, scanned scanEligibility) (json.RawMessage, error) {
 	var request application.AnalyzeConversationRequestV1
 	if err := json.Unmarshal([]byte(prompt), &request); err != nil || len(request.Messages) == 0 || request.AnalysisThroughMessageID == "" {
 		return nil, errors.New("price-grounded generation requires message context")
@@ -46,7 +48,16 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 	}
 	idJSON, _ := json.Marshal(ids)
 	throughJSON, _ := json.Marshal(request.AnalysisThroughMessageID)
-	evidence := fmt.Sprintf(`{"type":"array","minItems":1,"items":{"type":"string","enum":%s}}`, idJSON)
+	// Массив доказательств без верхней границы допускал бесконечное повторение одного идентификатора: на слепой выборке три ответа
+	// модели дошли так до конца контекста (4,9–5,5 тыс. токенов, около двух минут). Для инструкции v9 число элементов ограничено числом
+	// допустимых идентификаторов; ответ, который уже проходил проверку, остаётся возможным, бесконечный цикл — нет.
+	evidenceBound := func(allowed int) string {
+		if request.PromptVersion != application.AnalysisPromptV9 {
+			return ""
+		}
+		return fmt.Sprintf(`,"maxItems":%d`, allowed)
+	}
+	evidence := fmt.Sprintf(`{"type":"array","minItems":1%s,"items":{"type":"string","enum":%s}}`, evidenceBound(len(ids)), idJSON)
 	types := []string{"BOOKING_INTENT", "BUSINESS_COMMITMENT", "FOLLOW_UP_CANDIDATE"}
 	if v2 {
 		possiblePromise := false
@@ -58,7 +69,7 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 					types = append(types, "PURCHASE_INTENT")
 				}
 			}
-			if application.PossibleBusinessCommitmentEvidence(m) {
+			if scanned.allows(m) {
 				possiblePromise = true
 			}
 		}
@@ -89,7 +100,7 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 				case "BOOKING_INTENT":
 					allowed = application.PossibleBookingEvidence(m)
 				case "BUSINESS_COMMITMENT":
-					allowed = application.PossibleBusinessCommitmentEvidence(m)
+					allowed = scanned.allows(m)
 				case "FOLLOW_UP_CANDIDATE":
 					allowed = allowed && application.HasFollowUpDeferral(m.Body)
 				case "PURCHASE_INTENT":
@@ -116,7 +127,7 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 			}
 			ids, _ := json.Marshal(eligible)
 			typeJSON, _ := json.Marshal(kind)
-			variants = append(variants, fmt.Sprintf(`{"type":"object","additionalProperties":false,"required":["type","value","confidence","evidenceMessageIds"],"properties":{"type":{"const":%s},"value":{"type":"boolean"},"confidence":{"type":"number","minimum":0,"maximum":1},"evidenceMessageIds":{"type":"array","minItems":1,"items":{"type":"string","enum":%s}}}}`, typeJSON, ids))
+			variants = append(variants, fmt.Sprintf(`{"type":"object","additionalProperties":false,"required":["type","value","confidence","evidenceMessageIds"],"properties":{"type":{"const":%s},"value":{"type":"boolean"},"confidence":{"type":"number","minimum":0,"maximum":1},"evidenceMessageIds":{"type":"array","minItems":1%s,"items":{"type":"string","enum":%s}}}}`, typeJSON, evidenceBound(len(eligible)), ids))
 		}
 		other = strings.Join(variants, ",")
 	}
@@ -138,7 +149,7 @@ func analysisGenerationSchema(prompt string, v2 bool) (json.RawMessage, error) {
 		variants = price + "," + variants
 	}
 	if v2 {
-		candidates := agreementGenerationCandidates(request.Messages)
+		candidates := agreementCandidates(request.Messages, scanned)
 		agreements := map[string]any{"const": []any{}}
 		if len(candidates) > 0 {
 			agreements = map[string]any{"type": "array", "maxItems": len(candidates), "items": map[string]any{"oneOf": candidates}}

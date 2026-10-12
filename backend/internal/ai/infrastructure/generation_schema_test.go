@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -289,5 +290,79 @@ func TestV9BudgetAcceptanceIsNotBookingEvidence(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"2750"`) {
 		t.Fatal("actual monetary evidence lost")
+	}
+}
+
+// evidenceBounds возвращает maxItems массивов доказательств по каждому варианту факта; пустое значение — границы нет.
+func evidenceBounds(t *testing.T, schema json.RawMessage) map[string][]string {
+	t.Helper()
+	var parsed struct {
+		Properties struct {
+			Facts struct {
+				Items struct {
+					OneOf []struct {
+						Properties struct {
+							Type     struct{ Const string } `json:"type"`
+							Evidence struct {
+								MaxItems *int `json:"maxItems"`
+								Items    struct {
+									Enum []string `json:"enum"`
+								} `json:"items"`
+							} `json:"evidenceMessageIds"`
+						} `json:"properties"`
+					} `json:"oneOf"`
+				} `json:"items"`
+			} `json:"facts"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(schema, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	result := map[string][]string{}
+	for _, variant := range parsed.Properties.Facts.Items.OneOf {
+		bound := ""
+		if variant.Properties.Evidence.MaxItems != nil {
+			bound = fmt.Sprint(*variant.Properties.Evidence.MaxItems)
+		}
+		result[variant.Properties.Type.Const] = append(result[variant.Properties.Type.Const], bound+"/"+fmt.Sprint(len(variant.Properties.Evidence.Items.Enum)))
+	}
+	return result
+}
+
+func TestEvidenceArraysOfPromptV9AreBoundedByTheNumberOfAllowedMessages(t *testing.T) {
+	messages := []application.ContextMessage{
+		{ID: "m1", Direction: "INCOMING", Body: "Можно записаться на завтра?"},
+		{ID: "m2", Direction: "OUTGOING", Body: "Пришлю расписание."},
+		{ID: "m3", Direction: "INCOMING", Body: "Хорошо."},
+		{ID: "m4", Direction: "OUTGOING", Body: "Позвоню вечером."},
+	}
+	build := func(version string) json.RawMessage {
+		prompt, _ := application.EncodeAnalysisRequest(application.AnalyzeConversationRequestV1{
+			Task: "ANALYZE_CONVERSATION", SchemaVersion: application.AnalysisSchemaV2, PromptVersion: version,
+			ConversationID: "c", BaseConversationRevision: 1, AnalysisThroughMessageID: "m4", Messages: messages})
+		schema, err := analysisGenerationSchema(prompt, true, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return schema
+	}
+	v9, v8 := evidenceBounds(t, build(application.AnalysisPromptV9)), evidenceBounds(t, build(application.AnalysisPromptV8))
+	// отрицательный факт о цене получает границу по числу всех сообщений, прочие — по числу допустимых для типа
+	if got := v9["PRICE_MENTIONED"]; len(got) != 1 || got[0] != "4/4" {
+		t.Fatalf("price evidence: %v", got)
+	}
+	if got := v9["BUSINESS_COMMITMENT"]; len(got) != 1 || got[0] != "1/1" {
+		t.Fatalf("a commitment names one latest message: %v", got)
+	}
+	if got := v9["BOOKING_INTENT"]; len(got) != 1 || got[0] != "1/1" {
+		t.Fatalf("booking evidence: %v", got)
+	}
+	// прежние версии инструкции остаются без границы: их tuple заморожен
+	for kind, bounds := range v8 {
+		for _, bound := range bounds {
+			if !strings.HasPrefix(bound, "/") {
+				t.Errorf("v8 %s must stay unbounded, got %s", kind, bound)
+			}
+		}
 	}
 }

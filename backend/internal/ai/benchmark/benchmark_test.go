@@ -351,3 +351,80 @@ func TestCommitmentDevDatasetIsValidAndLabelsTheCompanyPromiseAsEvidence(t *test
 		t.Fatalf("the set needs both classes: %d promises, %d non-promises", positives, negatives)
 	}
 }
+
+func TestCommitmentAgreementsAreTrackedAgainstTheLabelledPromise(t *testing.T) {
+	promise := func(id, last string) Case {
+		return Case{Version: DatasetVersion, ID: id, Split: SplitDev,
+			Input: application.AnalyzeConversationRequestV1{Task: "ANALYZE_CONVERSATION", SchemaVersion: application.AnalysisSchemaV2, PromptVersion: application.AnalysisPromptV9, ConversationID: id, BaseConversationRevision: 1, AnalysisThroughMessageID: id + "-m2",
+				Messages: []application.ContextMessage{{ID: id + "-m1", Direction: "INCOMING", Body: "Когда будет готов заказ?"}, {ID: id + "-m2", Direction: "OUTGOING", Body: last}}},
+			Expected: []domain.SemanticFact{{Type: domain.FactBusinessCommitment, Value: true, Confidence: 1, EvidenceMessageIDs: []string{id + "-m2"}}}}
+	}
+	none := Case{Version: DatasetVersion, ID: "none", Split: SplitDev,
+		Input: application.AnalyzeConversationRequestV1{Task: "ANALYZE_CONVERSATION", SchemaVersion: application.AnalysisSchemaV2, PromptVersion: application.AnalysisPromptV9, ConversationID: "none", BaseConversationRevision: 1, AnalysisThroughMessageID: "none-m2",
+			Messages: []application.ContextMessage{{ID: "none-m1", Direction: "INCOMING", Body: "Сколько стоит?"}, {ID: "none-m2", Direction: "OUTGOING", Body: "Работаем до восьми."}}}}
+	agreement := func(trigger string, confidence float64, waiting domain.AgreementWaitingFor) domain.AgreementObservation {
+		return domain.AgreementObservation{Kind: domain.AgreementCommitment, WaitingFor: waiting, Status: domain.AgreementPending, TriggerMessageID: trigger, EvidenceMessageIDs: []string{trigger}, Confidence: confidence}
+	}
+	// ответы по случаям: найдено, пропущено, слабая договорённость, лишняя на необещании
+	answers := map[string][]domain.AgreementObservation{
+		"hit":  {agreement("hit-m2", .95, domain.AgreementBusiness)},
+		"miss": {},
+		"weak": {agreement("weak-m2", .6, domain.AgreementBusiness)},
+		"wait": {agreement("wait-m2", .95, domain.AgreementCustomer)},
+		"none": {agreement("none-m2", .95, domain.AgreementBusiness)},
+	}
+	cases := []Case{promise("hit", "Позвоню завтра."), promise("miss", "Позвоню завтра."), promise("weak", "Позвоню завтра."), promise("wait", "Позвоню завтра."), none}
+	provider := answerByCase(func(id string) string {
+		var facts []domain.SemanticFact
+		for _, c := range cases {
+			if c.ID == id {
+				facts = c.Expected
+			}
+		}
+		if facts == nil {
+			facts = []domain.SemanticFact{}
+		}
+		through := id + "-m2"
+		raw, _ := json.Marshal(domain.AnalysisResultV2{SchemaVersion: application.AnalysisSchemaV2, AnalysisThroughMessageID: through, Summary: "Резюме.", Facts: facts, Agreements: answers[id]})
+		return string(raw)
+	})
+	report, err := Run(context.Background(), provider, cases, "sum", Thresholds{MinimumValidRate: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := report.CommitmentAgreements
+	// найдена одна из четырёх; слабая и ожидающая клиента не в счёт; одна лишняя на необещании
+	if got == nil || got.TruePositive != 1 || got.FalseNegative != 3 || got.FalsePositive != 1 || got.Precision != .5 || got.Recall != .25 {
+		t.Fatalf("commitment agreements: %+v", got)
+	}
+}
+
+func TestCommitmentAgreementsCountAnInvalidAnswerAsMissedPromises(t *testing.T) {
+	c := Case{Version: DatasetVersion, ID: "bad", Split: SplitDev,
+		Input: application.AnalyzeConversationRequestV1{Task: "ANALYZE_CONVERSATION", SchemaVersion: application.AnalysisSchemaV2, PromptVersion: application.AnalysisPromptV9, ConversationID: "bad", BaseConversationRevision: 1, AnalysisThroughMessageID: "bad-m2",
+			Messages: []application.ContextMessage{{ID: "bad-m1", Direction: "INCOMING", Body: "Когда?"}, {ID: "bad-m2", Direction: "OUTGOING", Body: "Позвоню завтра."}}},
+		Expected: []domain.SemanticFact{{Type: domain.FactBusinessCommitment, Value: true, Confidence: 1, EvidenceMessageIDs: []string{"bad-m2"}}}}
+	report, err := Run(context.Background(), infrastructure.FakeProvider{Output: "not json"}, []Case{c}, "sum", Thresholds{MinimumValidRate: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.CommitmentAgreements; report.Invalid != 1 || got == nil || got.FalseNegative != 1 || got.TruePositive != 0 {
+		t.Fatalf("an invalid answer misses the promise: %+v %+v", report.Invalid, got)
+	}
+	// Набор версии 1 договорённостей не содержит: метрики нет.
+	v1, _, err := Load(strings.NewReader(dataset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := Run(context.Background(), infrastructure.FakeProvider{Output: `{"schemaVersion":"analyze-conversation.v1","analysisThroughMessageId":"message-1","summary":"Запрос.","facts":[]}`}, v1, "sum", Thresholds{MinimumValidRate: 0})
+	if err != nil || plain.CommitmentAgreements != nil {
+		t.Fatalf("v1 has no agreements: %+v %v", plain.CommitmentAgreements, err)
+	}
+}
+
+// answerByCase отвечает на запрос случая заранее заготовленным ответом.
+type answerByCase func(caseID string) string
+
+func (f answerByCase) Infer(ctx context.Context, _ string) (string, error) {
+	return f(CaseID(ctx)), nil
+}

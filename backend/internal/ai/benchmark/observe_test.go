@@ -298,3 +298,37 @@ func TestRunKeepsGoingThroughIsolatedFailures(t *testing.T) {
 		t.Fatalf("invalid answers are results, not outages: %v", err)
 	}
 }
+
+type fixedProvider struct {
+	output string
+	err    error
+}
+
+func (p fixedProvider) Infer(context.Context, string) (string, error) { return p.output, p.err }
+
+func TestRecorderKeepsTheFinalAnswerOnTheLastRequestOfTheCaseOnly(t *testing.T) {
+	recorder := NewRecorder()
+	recorder.add(Observation{CaseID: "case-a", Status: 200, Output: "scan"})
+	recorder.add(Observation{CaseID: "case-a", Status: 200, Output: "main"})
+	recorder.add(Observation{CaseID: "case-b", Status: 200, Output: "other"})
+	wrapped := recorder.Wrap(fixedProvider{output: "final-answer"})
+	if _, err := wrapped.Infer(WithCaseID(context.Background(), "case-a"), "prompt"); err != nil {
+		t.Fatal(err)
+	}
+	got := recorder.Observations()
+	if got[0].Final != "" || got[1].Final != "final-answer" || got[2].Final != "" {
+		t.Fatalf("the final answer belongs to the last request of its own case: %+v", got)
+	}
+	// ответ, которого не было, в след не попадает; ошибка поставщика по-прежнему записывается
+	failing := recorder.Wrap(fixedProvider{err: errors.New("broken")})
+	if _, err := failing.Infer(WithCaseID(context.Background(), "case-b"), "prompt"); err == nil {
+		t.Fatal("the error must reach the caller")
+	}
+	if got := recorder.Observations(); got[2].Final != "" || got[2].ProviderError == "" {
+		t.Fatalf("a failure records its error and no final answer: %+v", got[2])
+	}
+	// случай без обращений к модели получает запись, как и прежде
+	if _, err := recorder.Wrap(fixedProvider{output: "x"}).Infer(WithCaseID(context.Background(), "case-new"), "prompt"); err != nil {
+		t.Fatal(err)
+	}
+}

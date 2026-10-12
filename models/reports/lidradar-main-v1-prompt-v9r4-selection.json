@@ -1,0 +1,124 @@
+{
+  "selectedAt": "2026-10-12T00:32:22.286530+00:00",
+  "promptVersion": "analyze-conversation.prompt.v9",
+  "schemaVersion": "analyze-conversation.v2",
+  "sha256": {
+    "backend/internal/ai/application/agreement_evidence.go": "b9877f3eebe9555f8d64e0281924fac88d3e549cc7bef6bf373aa17953cde31f",
+    "backend/internal/ai/application/agreement_projection.go": "52ec5c141d538ff63f6a82e3e25f6765eedbc25eb3ce99161c23069e7a2077bd",
+    "backend/internal/ai/application/agreement_subject.go": "4e9130ff72d9de2f5d2a1cc4555aefe896b0fcdf1c8d163ea0a9d2390947fc74",
+    "backend/internal/ai/application/analysis.go": "40a8327ab3247e5de781084711f5ed5fc5174e6a47dec88ec80b269834cc1544",
+    "backend/internal/ai/application/background.go": "5c1b7cfe1cf56e31332edb0a267750199dc753be72a3d8af2f5aeb2f50593431",
+    "backend/internal/ai/application/commitment_lexicon.go": "596d898b8a4d36ba96fc9769151bbd81ff8751ac47c4d503bb9e0a7ca11e1d58",
+    "backend/internal/ai/application/price_evidence.go": "6d69733df3e65f999a0bedecf2d1580f1d4423aff2d996bd88b6592eebc1af1c",
+    "backend/internal/ai/application/service.go": "0e798c9be72fd885bef914156681dc609fa442a02ef8525886bcbafca4d8b33a",
+    "backend/internal/ai/infrastructure/agreement_generation.go": "b2ced0521524ef094a78e01f1ca20219d0294dfa859c99a0fb13d0b08ab2b7bb",
+    "backend/internal/ai/infrastructure/agreement_projection_store.go": "255b231db483dc76e72c3555ab107de341db85c6f0e0c203b50c46b218932197",
+    "backend/internal/ai/infrastructure/cloud_client.go": "a979242f87361acbb1bf882339029bdbddbf96356b154819fa52ed0acf494824",
+    "backend/internal/ai/infrastructure/commitment_fact.go": "a68bf50bf84e65cbfb4690b6afb610777324faa281332d82bf692369a8cac27a",
+    "backend/internal/ai/infrastructure/context_window.go": "ea6a68938fcc07d5072274fb910b73e43f82fa224f99f9501322cb37a8ba90bf",
+    "backend/internal/ai/infrastructure/credentials.go": "3b5f42d16b8f13429b4ec165d9be7869c3d141d5feb8339910b393d0efd93467",
+    "backend/internal/ai/infrastructure/fact_conflicts.go": "1060085e018ef88d7b805cb39535b55a7051bdc0aa61de07ad73590df8965eab",
+    "backend/internal/ai/infrastructure/generation_schema.go": "a1ad4338a1220fb4d25e4adf1a4745b8615d49e44dbe563ec548dd0d9b78e1c2",
+    "backend/internal/ai/infrastructure/memory_store.go": "89670e1c4a0ceb3619c879ded1bf83af7bd3c802f375f6830dd59b356fa78e2d",
+    "backend/internal/ai/infrastructure/postgres_context_builder.go": "f595f85087f37ee34ab69b50eca30f05e566b2af91f3972a5615b89efefa0175",
+    "backend/internal/ai/infrastructure/postgres_store.go": "6e8fd9d4944ae6f822f7068a7c5fd34066c8fc4a68b90658b6814a7d883391fb",
+    "backend/internal/ai/infrastructure/promise_rescue.go": "09a662022cbeb0bc3e2c11b9f82bdbe4ee24bd1af421f163dfa6a7601584cf33",
+    "backend/internal/ai/infrastructure/promise_scan.go": "75a66fba1024008d8d5c9a17dc0e83317f369041ea875d6cab7611bba65c3c83",
+    "backend/internal/ai/infrastructure/promise_scan_examples.go": "abd049e5fe150b4425977a1a3df15aea1ac6262be57321731afacf2823977388",
+    "backend/internal/ai/infrastructure/provider.go": "4d5ff5b316b24dbf7ad7c5adf2120b7ac88dc67a78c89601332cf6ccdbc4c939",
+    "backend/internal/ai/infrastructure/provider_aliases.go": "8c134f5579b0e3ce27ffecdfcd06c12fa421492c4359cd617f4b1d7f3674cb19",
+    "backend/internal/ai/infrastructure/provider_examples_v8.go": "177524d5148a193212c4345ce171956263d6caf31487505df03455dfb7100c4f",
+    "backend/internal/ai/infrastructure/provider_examples_v9.go": "f5fb5168bbbce99ce0d8c1f657208bf487811ea555fc3a5f94f65b567f57d2dd",
+    "backend/internal/ai/infrastructure/repairs.go": "1afb2afb5d4477d4d11027ed27975cef77ff24c194dc0a6f582f497a7ecdf83d",
+    "backend/internal/ai/domain/ai.go": "00c1cb73a5c031637e76ba171b659ceba20f8fb9c2f6a0a0b6cfb0f5b440cbc6",
+    "backend/internal/ai/benchmark/benchmark.go": "e6208df76dfe5745da131073900a43c1cfe69fcf6e88fb783bb6ffcf0f3aa34c",
+    "backend/internal/ai/benchmark/observe.go": "6cfd9ad248bedee572160c3733d71aa48decce9fa31a72f430d347889ea3e8b0",
+    "backend/internal/ai/benchmark/serverinfo.go": "8c9348b92720a4c37776dd362240525de5f42f03a9a678b2fdf28c7876ceb051",
+    "backend/cmd/ai-benchmark/main.go": "6b6fd2553f59bffa536bbfe84dac6ef774ff9a2bf7097690a868609f091b7bb0",
+    "contracts/ai/analyze_conversation_v1.schema.json": "e39f09323b7e5b6f9b72c47688e7b13f1670a901fb69eb9001f245e72b3ae83b",
+    "contracts/ai/analyze_conversation_v2.schema.json": "64011c502b8f012cb1e23e5ef0fd2a42199489275f6dd2b204112584915f542d"
+  },
+  "treeSha256": "864d535a18d43c7999c20ffe859f762394b6ad2926ace217fffe29d7fe2eb1b3",
+  "datasets": {
+    "models/datasets/golden_v1.jsonl": {
+      "sha256": "f53df595a718f7019bfa58fd857f20488875cc6914dc49f10e619ca5242fcc34",
+      "cases": 400
+    },
+    "models/datasets/golden_v1.sha256": {
+      "sha256": "74be41189fc468fc9e0e30634544db285046301e99d90686a06ee425f174dbfd"
+    },
+    "models/datasets/dev_v1.jsonl": {
+      "sha256": "b4b83c909c7dd814e25e068ea0be3c851575ae42a578a5335ef8f98a4e29d238",
+      "cases": 100
+    },
+    "models/datasets/intent_regression_v2.jsonl": {
+      "sha256": "c5183b949b24ddad0369da35babf2a52f9c7bc39b45f89dd128e62d89833ad22",
+      "cases": 27
+    },
+    "models/datasets/agreements_dev_v2.jsonl": {
+      "sha256": "712300ff227a40ff7e7a0869a9abcdb1cb7587329610ef7a600d0278e082717c",
+      "cases": 21
+    },
+    "models/datasets/agreements_independent_v2.jsonl": {
+      "sha256": "be4589226b2274c9cb61530ba3334ed2e2b245d53b1458b364e003b558ae4baf",
+      "cases": 6
+    },
+    "models/datasets/qa06_v1.jsonl": {
+      "sha256": "472290a386f6972a017e7b471935bfe692b2c36775c73678e868152edb3aef01",
+      "cases": 37
+    },
+    "models/datasets/context_probe_v1.jsonl": {
+      "sha256": "b46f84751aa051bdc00cbe30f9bc8737e2c0993ae63950e6dd554ced5ee6e30b",
+      "cases": 6
+    },
+    "models/datasets/commitment_dev_v1.jsonl": {
+      "sha256": "6417fd296ac8986efe3322c05601896fd30019742c9f9254f17c56aad3e2c18c",
+      "cases": 305
+    },
+    "models/datasets/commitment_holdout_v1.jsonl": {
+      "sha256": "1ee80017af86e7faaf57ca484cf3d73ef89ee5d81939684216ea151941ec9d21",
+      "cases": 188
+    },
+    "models/datasets/commitment_holdout_v1.sha256": {
+      "sha256": "bc7230c627f8cac559c783d44cadffb03009779de1df4b775bc3dc45d365a80a"
+    },
+    "models/datasets/commitment_holdout_v2.jsonl": {
+      "sha256": "51da6523950b1ac3b3d7d7c52ddb3849be4e71811448b119468b4c5f27be6e25",
+      "cases": 248
+    },
+    "models/datasets/commitment_holdout_v2.sha256": {
+      "sha256": "6e56c82564a7e97672d6e39e74d71e82e4e930879e470ec536d6eb23ed69c0a6"
+    },
+    "models/datasets/commitment_holdout_v3.jsonl": {
+      "sha256": "cb8a9cc9a486b36332ac9a4cb54bb9388cd70fc6da8aa30a12a5d26bf9a1adb4",
+      "cases": 320
+    },
+    "models/datasets/commitment_holdout_v3.sha256": {
+      "sha256": "5eb51c1f927c1e817a0570145e75906571503dc5314519c376d7d3d62d76a14c"
+    }
+  },
+  "devReports": {
+    "models/reports/lidradar-main-v1-prompt-v9r4-dev.json": {
+      "sha256": "f72629eb38ddd5b0fdfd383e397dffc3803ef62ccdc558c646bd105eec22e70d",
+      "cases": 100,
+      "passed": true
+    },
+    "models/reports/lidradar-main-v1-prompt-v9r4-dev-intents.json": {
+      "sha256": "0b6af20bb17e6d49d8d604f579a08f081f6d08016423907fd6efbc7f7789d8a0",
+      "cases": 27,
+      "passed": true
+    },
+    "models/reports/lidradar-main-v1-prompt-v9r4-dev-agreements.json": {
+      "sha256": "02c78d04f58c455c5777c2a2957518c0c3852e965ad9214c4a0bd5f8c317639a",
+      "cases": 21,
+      "passed": true
+    },
+    "models/reports/lidradar-main-v1-prompt-v9r4-dev-independent.json": {
+      "sha256": "3399451cbc202fe49b066bac4abbd450ff426be04a0f45e39dac8da78412a2fb",
+      "cases": 6,
+      "passed": true
+    }
+  },
+  "go": "go version go1.26.6 darwin/arm64",
+  "note": "Selected before opening GOLDEN; prompt and sampling frozen."
+}

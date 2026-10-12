@@ -232,22 +232,31 @@ func (p LlamaProvider) Infer(ctx context.Context, prompt string) (string, error)
 		return "", err
 	}
 	infer := p.infer
+	var probabilities map[string]float64
 	if version == application.AnalysisPromptV9 {
 		infer = p.inferWithinContext
+		// Проход по обещаниям расширяет допуск основного вызова, а решает по-прежнему он; допущенные словарём обещания,
+		// которые основной вызов пропустил, добавляет спасение (promise_scan.go, promise_rescue.go).
+		probabilities = p.agreedProbabilities(ctx, aliased, p.promiseProbabilities(ctx, aliased))
+		ctx = withScanEligibility(ctx, eligibilityFrom(aliased, probabilities))
 	}
 	raw, err := infer(ctx, aliased)
 	if err != nil {
 		return "", err
 	}
 	if version == application.AnalysisPromptV9 {
-		raw = resolveContradictoryFacts(raw)
+		raw = dedupeAgreements(resolveContradictoryFacts(raw))
 	}
 	restored, err := aliases.restore(raw)
 	if err != nil || version != application.AnalysisPromptV9 {
 		return restored, err
 	}
-	return ensureCommitmentFact(prompt, restored), nil
+	completed := completeCommitmentFact(prompt, restored, scanEligibilityFrom(ctx).canonical(aliases))
+	return dropUnsupportedPrices(prompt, rescueCommitments(prompt, completed, aliases.canonicalProbabilities(probabilities))), nil
 }
+
+// maxAnalysisCompletionTokens — предел длины ответа основного вызова v9. Самый длинный настоящий ответ на всех наборах — 371 токен.
+const maxAnalysisCompletionTokens = 1536
 
 func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error) {
 	if p.URL == "" {
@@ -262,13 +271,19 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 		return "", err
 	}
 	messages := []map[string]string{{"role": "system", "content": systemPrompt}}
+	// Допуск прохода по обещаниям действует только в инструкции v9; прежние версии строятся по одному словарю.
+	var scanned scanEligibility
+	if promptVersion == application.AnalysisPromptV9 {
+		scanned = scanEligibilityFrom(ctx)
+	}
 	if promptVersion == application.AnalysisPromptV9 {
 		var input application.AnalyzeConversationRequestV1
 		_ = json.Unmarshal([]byte(prompt), &input)
-		if len(agreementGenerationCandidates(input.Messages)) == 0 {
+		if len(agreementCandidates(input.Messages, scanned)) == 0 {
 			messages[0]["content"] = analysisSystemPromptV6 + "\nКонтракт ответа analyze-conversation.v2, agreements: []. PURCHASE_INTENT: явное желание купить/заказать, в том числе новый заказ после отмены старого. Вопрос о доступности дня/времени для своего визита — BOOKING_INTENT, даже без названия услуги."
 		}
-		messages = append(messages, selectExamplesV9(input.Messages)...)
+		messages = append(messages, selectExamples(input.Messages, scanned)...)
+		messages[0]["content"] += scanHint(input.Messages, scanned)
 	} else if promptVersion == application.AnalysisPromptV3 {
 		messages = append(messages, analysisFewShotMessagesV3...)
 	} else if promptVersion == application.AnalysisPromptV4 {
@@ -305,7 +320,7 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 	if promptVersion == application.AnalysisPromptV6 || promptVersion == application.AnalysisPromptV7 || promptVersion == application.AnalysisPromptV8 || promptVersion == application.AnalysisPromptV9 {
 		temperature, presencePenalty = 0.2, 0
 		if promptVersion == application.AnalysisPromptV7 || promptVersion == application.AnalysisPromptV8 || promptVersion == application.AnalysisPromptV9 {
-			schema, err = analysisGenerationSchemaV7(prompt)
+			schema, err = analysisGenerationSchema(prompt, true, scanned)
 		} else {
 			schema, err = analysisGenerationSchemaV6(prompt)
 		}
@@ -318,7 +333,7 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 			messages[0]["content"] += "\nВ текущих messages нет допустимой числовой суммы: PRICE_MENTIONED отсутствует. Не заменяй его другим типом факта. Если это только вопрос о стоимости, верни facts: []."
 		}
 	}
-	body, _ := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"model":                p.Model,
 		"messages":             messages,
 		"temperature":          temperature,
@@ -333,7 +348,13 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 			"type":   "json_object",
 			"schema": schema,
 		},
-	})
+	}
+	if promptVersion == application.AnalysisPromptV9 {
+		// Настоящий ответ не длиннее 371 токена (p99 — 275). Предел страхует от цикла в строке резюме, которую грамматика не ограничивает:
+		// без него такой цикл занимал единственный слот узла до конца контекста.
+		payload["max_tokens"] = maxAnalysisCompletionTokens
+	}
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.URL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -354,13 +375,17 @@ func (p LlamaProvider) infer(ctx context.Context, prompt string) (string, error)
 	}
 	var result struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
 		return "", err
+	}
+	if len(result.Choices) == 1 && result.Choices[0].FinishReason == "length" {
+		return "", errors.New("llama.cpp оборвал ответ по длине: модель не закончила JSON в пределах max_tokens")
 	}
 	if len(result.Choices) != 1 || !json.Valid([]byte(result.Choices[0].Message.Content)) {
 		return "", errors.New("llama.cpp вернул неверный структурированный ответ")

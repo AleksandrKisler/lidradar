@@ -62,6 +62,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0052: Роли PostgreSQL production-стека: владелец без суперправ и рабочий логин без владения](0052-database-roles-owner-and-runtime.md) — Accepted, 2026-10-10.
 - [0053: Квалификация AI tuple: выбор до GOLDEN, пороги, привязка к серверу и оборудованию](0053-ai-tuple-qualification.md) — Proposed, 2026-10-10.
 - [0054: Словарь обещаний компании: единый допуск, расширение по категориям и слепая выборка обязательств](0054-commitment-lexicon.md) — Proposed, 2026-10-10.
+- [0055: Проход по обещаниям: допуск к обещанию определяет модель, словарь остаётся подсказкой](0055-promise-scan.md) — Proposed, 2026-10-11.
 
 ## Workflow
 
