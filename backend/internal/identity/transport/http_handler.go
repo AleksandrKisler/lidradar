@@ -27,6 +27,12 @@ type Authentication interface {
 	Authenticate(context.Context, string) (domain.User, error)
 	Logout(context.Context, string) error
 	Refresh(context.Context, string, application.Client) (application.Authenticated, error)
+	// Команды безопасности учётной записи (ADR 0058).
+	ChangePassword(ctx context.Context, sessionToken, currentPassword, newPassword string, client application.Client) error
+	RequestPasswordReset(ctx context.Context, email string, client application.Client) error
+	ResetPassword(ctx context.Context, token, newPassword string, client application.Client) error
+	RequestEmailVerification(ctx context.Context, sessionToken string, client application.Client) error
+	VerifyEmail(ctx context.Context, token string, client application.Client) error
 }
 
 type CookieConfiguration struct {
@@ -52,6 +58,11 @@ func (h Handler) Router() http.Handler {
 	router.Post("/logout", h.logout)
 	router.Post("/refresh", h.refresh)
 	router.Get("/me", h.me)
+	router.Post("/password/change", h.changePassword)
+	router.Post("/password/forgot", h.forgotPassword)
+	router.Post("/password/reset", h.resetPassword)
+	router.Post("/email/verification", h.resendVerification)
+	router.Post("/email/verify", h.verifyEmail)
 	return router
 }
 
@@ -137,6 +148,82 @@ func (h Handler) me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Команды безопасности учётной записи (ADR 0058). Успех — 204 без тела: ответ сброса пароля не должен
+// зависеть от того, существует ли адрес.
+
+type passwordChangeRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+type forgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+type resetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"newPassword"`
+}
+
+type verifyEmailRequest struct {
+	Token string `json:"token"`
+}
+
+func (h Handler) changePassword(w http.ResponseWriter, r *http.Request) {
+	var request passwordChangeRequest
+	if httpplatform.DecodeJSON(w, r, &request) != nil {
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
+		return
+	}
+	if handleError(w, r, h.auth.ChangePassword(r.Context(), sessionToken(r), request.CurrentPassword, request.NewPassword, client(r))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) forgotPassword(w http.ResponseWriter, r *http.Request) {
+	var request forgotPasswordRequest
+	if httpplatform.DecodeJSON(w, r, &request) != nil {
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
+		return
+	}
+	if handleError(w, r, h.auth.RequestPasswordReset(r.Context(), request.Email, client(r))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) resetPassword(w http.ResponseWriter, r *http.Request) {
+	var request resetPasswordRequest
+	if httpplatform.DecodeJSON(w, r, &request) != nil {
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
+		return
+	}
+	if handleError(w, r, h.auth.ResetPassword(r.Context(), request.Token, request.NewPassword, client(r))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) resendVerification(w http.ResponseWriter, r *http.Request) {
+	if handleError(w, r, h.auth.RequestEmailVerification(r.Context(), sessionToken(r), client(r))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
+	var request verifyEmailRequest
+	if httpplatform.DecodeJSON(w, r, &request) != nil {
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
+		return
+	}
+	if handleError(w, r, h.auth.VerifyEmail(r.Context(), request.Token, client(r))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h Handler) setSession(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: SessionCookieName, Value: token, Path: "/",
@@ -181,6 +268,15 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 		httpplatform.WriteError(w, r, http.StatusForbidden, "INVITATION_REQUIRED", "Registration is by invitation only", nil)
 	case errors.Is(err, application.ErrInvitationInvalid):
 		httpplatform.WriteError(w, r, http.StatusForbidden, "INVITATION_INVALID", "Invitation code is not valid", nil)
+	case errors.Is(err, application.ErrInvalidCurrentPassword):
+		// Не 401: клиент считает 401 потерей сессии и разлогинил бы пользователя за опечатку.
+		httpplatform.WriteError(w, r, http.StatusForbidden, "INVALID_CURRENT_PASSWORD", "Current password is not correct", nil)
+	case errors.Is(err, application.ErrResetTokenInvalid):
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "RESET_TOKEN_INVALID", "Password reset link is not valid", nil)
+	case errors.Is(err, application.ErrVerificationTokenInvalid):
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "VERIFICATION_TOKEN_INVALID", "Email verification link is not valid", nil)
+	case errors.Is(err, application.ErrMailUnavailable):
+		httpplatform.WriteError(w, r, http.StatusServiceUnavailable, "MAIL_UNAVAILABLE", "Mail is not available", nil)
 	case errors.Is(err, application.ErrInvalidCredentials):
 		httpplatform.WriteError(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Email or password is invalid", nil)
 	case errors.Is(err, application.ErrUnauthenticated):

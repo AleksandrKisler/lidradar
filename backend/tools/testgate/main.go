@@ -57,6 +57,13 @@ var required = []string{
 	"lidradar/backend/internal/tenant/infrastructure/TestParallelCreationsSpendASingleRightOnce",
 	"lidradar/backend/internal/integration/TestPlatformCodeGivesOneOrganizationAndIsSingleUse",
 	"lidradar/backend/internal/integration/TestMemberCodeRegistersAndJoinsWithoutTheRightToCreateOrganizations",
+	// Безопасность учётной записи (ADR 0058): одноразовые токены при гонке, атомарность с аудитом, порядок блокировок
+	// и очередь писем без двойной выдачи держатся на PostgreSQL.
+	"lidradar/backend/internal/identity/infrastructure/TestConcurrentResetsOfOneTokenSucceedExactlyOnce",
+	"lidradar/backend/internal/identity/infrastructure/TestChangePasswordRollsBackEverythingWhenTheAuditCannotBeWritten",
+	"lidradar/backend/internal/identity/infrastructure/TestIssueResetAndChangeDoNotDeadlock",
+	"lidradar/backend/internal/mail/infrastructure/TestParallelWorkersNeverTakeTheSameMessage",
+	"lidradar/backend/internal/integration/TestPasswordResetEndsEverySessionAndTheLinkWorksOnce",
 }
 
 func main() {

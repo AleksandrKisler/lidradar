@@ -26,12 +26,14 @@
 
 ## 1. `identity` — пользователи и сессии
 
-**Владеет:** `users` (включая `organization_rights`, ADR 0057), `sessions`,
-`auth_rate_limits`. **Не владеет** организациями, ролями и правами: `/auth/me`
-получает членства через узкий контракт `MembershipLister` модуля `tenant`.
-При регистрации читает и погашает `platform_invitations` (таблица модуля
-`admin`), а коды сотрудников проверяет и принимает через узкий контракт
-`MemberInvitations`, который реализует `tenant`.
+**Владеет:** `users` (включая `organization_rights`, ADR 0057, и
+`email_verified_at`, ADR 0058), `sessions`, `auth_rate_limits`,
+`account_tokens` (ADR 0058). **Не владеет** организациями, ролями и правами:
+`/auth/me` получает членства через узкий контракт `MembershipLister` модуля
+`tenant`. При регистрации читает и погашает `platform_invitations` (таблица
+модуля `admin`), а коды сотрудников проверяет и принимает через узкий контракт
+`MemberInvitations`, который реализует `tenant`. Письма ставит в очередь через
+контракт `Mailer` (`Enqueue`), который реализует модуль `mail`.
 
 **Регистрация по приглашениям** (ADR 0057). Режим `RegistrationMode` задаёт
 конфигурация (`open` в `development` и `test`, `invite_only` в `staging` и
@@ -55,8 +57,10 @@
 обрезается до 1024 символов. Статусы пользователя `ACTIVE`/`DISABLED`.
 
 **Сервис** (`application.Service`): `Register`, `Login`, `Authenticate`,
-`Logout`, `Refresh`, `Mode`. Троттлинг в PostgreSQL (ADR 0032), отпечаток субъекта —
-`sha256(lower(trim(value)))`:
+`Logout`, `Refresh`, `Mode`, а также команды безопасности учётной записи (ADR 0058):
+`ChangePassword`, `RequestPasswordReset`, `ResetPassword`,
+`RequestEmailVerification`, `VerifyEmail`. Троттлинг в PostgreSQL (ADR 0032),
+отпечаток субъекта — `sha256(lower(trim(value)))`:
 
 | Scope | Лимит | Окно | Где |
 |---|---|---|---|
@@ -64,12 +68,41 @@
 | `LOGIN_IP` | 20 | 1 мин | вход |
 | `LOGIN_ACCOUNT` | 5 | 15 мин | вход, сбрасывается при успехе |
 | `REFRESH_IP` | 60 | 1 мин | ротация сессии |
+| `PASSWORD_RESET_IP` | 10 | 1 ч | запрос сброса |
+| `PASSWORD_RESET_ACCOUNT` | 3 | 1 ч | запрос сброса, субъект — адрес почты, до поиска пользователя |
+| `PASSWORD_RESET_CONFIRM_IP` | 20 | 1 ч | завершение сброса |
+| `PASSWORD_CHANGE_ACCOUNT` | 5 | 15 мин | смена пароля, субъект — пользователь, до проверки пароля, сбрасывается при успехе |
+| `EMAIL_VERIFICATION_ACCOUNT` | 3 | 1 ч | повторное письмо подтверждения |
+| `EMAIL_VERIFY_IP` | 30 | 1 ч | подтверждение по токену |
 
 Вход по неизвестному email выполняет холостое хеширование пароля, чтобы время
 ответа не выдавало существование учётной записи; неверный пароль и `DISABLED`
 дают один и тот же `401 INVALID_CREDENTIALS`. Ошибка троттлера (недоступная
 база) не пропускает запрос. Аудит: `USER_REGISTERED`, `USER_LOGGED_IN`,
-`USER_LOGGED_OUT` в `auth_audit_log`; у `Refresh` аудита нет.
+`USER_LOGGED_OUT` в `auth_audit_log`; у `Refresh` аудита нет. Команды безопасности
+учётной записи пишут свои операции (см. ниже) в той же транзакции.
+
+**Безопасность учётной записи** ([ADR 0058](../adr/0058-account-security-and-mail.md)).
+*Токены:* `account_tokens` (`EMAIL_VERIFICATION` — 7 суток, `PASSWORD_RESET` — 60
+минут), 256 бит `base64url`, в базе только SHA-256, одноразовые; выпуск нового
+отзывает неиспользованные прежние того же назначения (частичный уникальный
+индекс гарантирует один действующий токен на пользователя и назначение). Ссылка
+в письме несёт токен во фрагменте (`#token=`). *Смена пароля* — одна транзакция:
+пароль меняется условно по прежнему хэшу (иначе `ErrConflict` →
+`INVALID_CURRENT_PASSWORD`), остальные сессии отзываются, токены сброса
+отзываются, пишется `PASSWORD_CHANGED`. *Запрос сброса* отвечает одинаково для
+любого адреса; для действующего пользователя токен и `PASSWORD_RESET_REQUESTED`
+пишутся одной транзакцией, затем письмо ставится в очередь (ошибки после поиска
+пользователя только логируются). *Завершение сброса:* сначала дешёвая проверка
+токена (`AccountTokenUsable`), затем хэш пароля, затем транзакция — токен гасится,
+пароль меняется, все сессии и прочие токены сброса отзываются, адрес
+подтверждается, пишется `PASSWORD_RESET_COMPLETED`. *Подтверждение почты* мягкое:
+`CompleteEmailVerification` гасит токен и ставит `email_verified_at` (аудит
+`EMAIL_VERIFIED` только при изменении). Порядок блокировок во всех командах один —
+строка пользователя, затем строки токенов: взаимная блокировка исключена
+(тест `TestIssueResetAndChangeDoNotDeadlock`). Аудит пишется в
+`auth_audit_log` в той же транзакции (документированная прямая запись, раздел 19);
+вход, выход и регистрация по-прежнему пишутся после фиксации.
 
 **Транспорт:** `/api/v1/auth/*`, cookie `lidradar_session` (`HttpOnly`,
 `SameSite=Strict`, `Secure` по конфигурации, `MaxAge = LIDRADAR_SESSION_TTL`,
@@ -577,14 +610,58 @@ id`, аренда 30 с; истёкшие аренды с исчерпанным
 из сетевых данных только IP ≤ 64 символов). Контракт `Recorder.Tenant` /
 `Recorder.Auth`; чтения по HTTP нет. Имена операций и типов сущностей —
 `^[A-Z][A-Z0-9_]{0,99}$`; оба журнала append-only (триггеры). Кто пишет:
-identity (3 операции входа), tenant (`ORGANIZATION_UPDATED`, `MEMBER_ADDED`,
+identity (3 операции входа и 4 операции безопасности учётной записи: `PASSWORD_CHANGED`,
+`PASSWORD_RESET_REQUESTED`, `PASSWORD_RESET_COMPLETED`, `EMAIL_VERIFIED`; ADR 0058), tenant (`ORGANIZATION_UPDATED`, `MEMBER_ADDED`,
 `ML_CONSENT_*`), connector (`INTEGRATION_*`), opportunity
 (`OPPORTUNITY_STAGE_CHANGED`), risk (`RISK_ACKNOWLEDGED`, `RISK_RESOLVED`,
 `RISK_FEEDBACK_RECORDED`), corrective (`ACTION_RECORDED`, `OUTCOME_RECORDED`),
 revenue (`REVENUE_CONFIRMED`), notification (`NOTIFICATION_POLICY_*`).
 `catalog` аудит не пишет.
 
-## 17. Вспомогательные пакеты `internal`
+## 17. `mail` — исходящая почта
+
+**Владеет:** `mail_outbox` ([ADR 0058](../adr/0058-account-security-and-mail.md))
+и транспортами писем. HTTP-слоя нет. Другие модули ставят письмо в очередь узким
+контрактом `Enqueue(kind, to, subject, text, expiresAt)` (строки и время, без типов
+почты), саму таблицу не читают и не пишут. Письма — обычный текст UTF-8 без HTML,
+без имени получателя и без персональных данных в теме и тексте.
+
+**Правила домена.** Адрес — простой адрес `net/mail` без имени, ≤ 254 символов, без
+управляющих символов (защита от внедрения заголовков); тема 1…200 символов без
+управляющих; текст ≤ 20 000 байт, допустимы только `\n`, `\r`, `\t`; срок
+(`expires_at`) позже создания. Состояния `PENDING → PROCESSING → SENT | DEAD`;
+повтор возвращает письмо в `PENDING` с отложенным `available_at`.
+
+**Доставка** (`application.Service.DispatchOne`, цепочка воркера, не больше
+одной попытки за вызов). `Claim` арендует самое раннее готовое письмо
+(`FOR UPDATE SKIP LOCKED`; ожидающее с наступившим сроком или арендованное с
+истёкшей арендой, 2 минуты). Письмо с истёкшим `expires_at` не отправляется
+(`EXPIRED`); максимум 8 попыток (`ATTEMPTS_EXHAUSTED`); паузы 5 с, 30 с, 2 мин,
+затем по 10 мин; повтор, который начался бы после срока ссылки, не планируется.
+Временный сбой (SMTP `4xx`, сеть, таймаут, TLS, отказ входа `530/534/535`) повторяется,
+постоянный (остальные `5xx`) завершает письмо как `DEAD`. Результат принимается
+только от арендатора (`domain.ErrLeaseLost` иначе): доставка «хотя бы раз».
+**При любом завершении адрес и текст стираются** (CHECK таблицы), остаются вид,
+тема, домен получателя, число попыток, код сбоя и время. В журнале воркера — только
+идентификатор, вид, номер попытки и код (без адресов и ссылок): события
+`mail.sent`, `mail.retry`, `mail.failed`, `mail.lease_lost`, раз в минуту
+`mail.queue.status`.
+
+**Транспорты.** `SMTPTransport` (стандартная библиотека): TLS обязателен —
+`starttls` (по умолчанию, порт 587; сервер обязан предложить STARTTLS, возврата к
+открытому каналу нет, пароль до TLS не уходит) или `tls` (порт 465); проверка
+сертификата и TLS 1.2 не отключаются; вход PLAIN; срок одной отправки 30 с;
+письмо собирается из проверенных значений (тема по RFC 2047, тело base64).
+`security=none` допустим только для loopback-хоста вне staging и production.
+`Check` проверяет доступ без отправки (воркер вызывает её при старте и пишет
+`mail.smtp.ready` или `mail.smtp.check_failed`). `LogTransport` пишет письмо с
+адресом и ссылкой в журнал воркера (`mail.logged`) и допустим только в
+`development` и `test` при пустом `LIDRADAR_MAIL_SMTP_HOST`.
+
+**Пул и роль.** Таблица без `tenant_id` и RLS: API ставит письма под ролью
+приложения, воркер доставляет под рабочей ролью.
+
+## 18. Вспомогательные пакеты `internal`
 
 - `testsupport` — изолированные схемы на тест, пулы четырёх ролей,
   трассировщик запросов (см. [11-testing.md](11-testing.md)).
@@ -593,12 +670,12 @@ revenue (`REVENUE_CONFIRMED`), notification (`NOTIFICATION_POLICY_*`).
   `production`.
 - `integration` — сквозные тесты с полным API-стеком в процессе.
 
-## 18. Карта прямых чтений и записей чужих таблиц
+## 19. Карта прямых чтений и записей чужих таблиц
 
 | Модуль | Читает | Пишет | Основание |
 |---|---|---|---|
 | `tenant` | `users` (список команды), `service_catalog_items`, `channel_connections`, `telegram_user_links` (факты онбординга) | `users.organization_rights` (уменьшение в транзакции создания организации) | ADR 0045, ADR 0057 |
-| `identity` | `platform_invitations` (проверка кода) | `platform_invitations.consumed_*` (погашение кода платформы в транзакции регистрации) | ADR 0057 |
+| `identity` | `platform_invitations` (проверка кода) | `platform_invitations.consumed_*` (погашение кода платформы в транзакции регистрации); `auth_audit_log` (записи `PASSWORD_CHANGED`, `PASSWORD_RESET_REQUESTED`, `PASSWORD_RESET_COMPLETED`, `EMAIL_VERIFIED` в транзакциях своих команд) | ADR 0057, ADR 0058 |
 | `admin` (команды кодов) | — | `users.organization_rights` (увеличение командой `allow-organization`) | ADR 0057 |
 | `conversation` | `channel_connections` (блокировка при приёме; снимок канала в списке), `external_identities`, `risk_signals`, `opportunities` (сводка активных рисков списка) | — | ADR 0025, 0044 |
 | `opportunity` | `conversation_summaries`, `messages` (доверенные факты) | — | ADR 0008 |

@@ -80,12 +80,18 @@ type memoryRepository struct {
 	platform map[string]bool
 	// consumedBy фиксирует, кто погасил код платформы.
 	consumedBy map[string]string
+	// tokens и audits — токены учётной записи по хэшу и записи аудита, сделанные командами ADR 0058.
+	tokens map[string]*memoryToken
+	audits []memoryAudit
+	// beforeChange вызывается внутри ChangePassword до проверки хэша и моделирует параллельную смену пароля.
+	beforeChange func()
 }
 
 func newMemoryRepository() *memoryRepository {
 	return &memoryRepository{
 		users: map[string]domain.User{}, sessions: map[string]domain.Session{},
 		platform: map[string]bool{}, consumedBy: map[string]string{},
+		tokens: map[string]*memoryToken{},
 	}
 }
 

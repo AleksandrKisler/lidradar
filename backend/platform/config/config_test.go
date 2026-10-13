@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -491,5 +492,246 @@ func mapLookup(values map[string]string) LookupEnv {
 	return func(key string) (string, bool) {
 		value, ok := values[key]
 		return value, ok
+	}
+}
+
+// Настройки почты (ADR 0058): умолчания разработки, адрес ссылок и защита соединения.
+func TestLoadMailDefaults(t *testing.T) {
+	configuration, err := Load(mapLookup(map[string]string{environmentKey: string(EnvironmentDevelopment)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mail := configuration.Mail
+	if mail.WebBaseURL != "http://localhost:5173" || mail.FromName != "LidRadar" || mail.From != "" ||
+		mail.SMTP.Host != "" || mail.SMTP.Port != 587 || mail.SMTP.Security != SMTPStartTLS {
+		t.Fatalf("Mail = %#v", mail)
+	}
+	// Без SMTP-хоста процессу, которому почта не нужна, настройка не мешает.
+	if err := configuration.ValidateWorker(); err != nil || configuration.ValidateAPI() != nil {
+		t.Fatalf("development must start without mail: %v", err)
+	}
+}
+
+func TestLoadMailWebBaseURLFollowsPublicBaseURLAndCanBeOverridden(t *testing.T) {
+	base := map[string]string{
+		environmentKey: string(EnvironmentStaging), databaseURLKey: "postgres://example",
+		publicBaseURLKey: "https://app.example.com/",
+		credentialKeyKey: base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	configuration, err := Load(mapLookup(base))
+	if err != nil || configuration.Mail.WebBaseURL != "https://app.example.com" {
+		t.Fatalf("WebBaseURL = %q, error = %v", configuration.Mail.WebBaseURL, err)
+	}
+	base[webBaseURLKey] = " https://web.example.com/ "
+	configuration, err = Load(mapLookup(base))
+	if err != nil || configuration.Mail.WebBaseURL != "https://web.example.com" {
+		t.Fatalf("explicit WebBaseURL = %q, error = %v", configuration.Mail.WebBaseURL, err)
+	}
+	// Ссылки в письмах с токеном не должны уходить по открытому каналу, а адрес — нести путь или учётные данные.
+	for name, value := range map[string]string{
+		"http в staging": "http://web.example.com", "путь": "https://web.example.com/app", "запрос": "https://web.example.com?x=1",
+		"фрагмент": "https://web.example.com#a", "учётные данные": "https://user:pass@web.example.com", "схема": "ftp://web.example.com",
+		"без хоста": "https://",
+	} {
+		base[webBaseURLKey] = value
+		if _, err := Load(mapLookup(base)); err == nil || !strings.Contains(err.Error(), webBaseURLKey) {
+			t.Errorf("%s: Load() error = %v", name, err)
+		}
+	}
+	// В разработке http допустим.
+	if _, err := Load(mapLookup(map[string]string{environmentKey: "development", webBaseURLKey: "http://localhost:5173"})); err != nil {
+		t.Fatalf("http in development: %v", err)
+	}
+}
+
+func TestLoadMailSMTPSecurityAndPort(t *testing.T) {
+	load := func(values map[string]string) (Config, error) {
+		values[environmentKey] = string(EnvironmentDevelopment)
+		return Load(mapLookup(values))
+	}
+	configuration, err := load(map[string]string{mailSMTPPortKey: "465"})
+	if err != nil || configuration.Mail.SMTP.Security != SMTPImplicitTLS || configuration.Mail.SMTP.Port != 465 {
+		t.Fatalf("порт 465 должен включать шифрование с первого байта: %#v, %v", configuration.Mail.SMTP, err)
+	}
+	configuration, err = load(map[string]string{mailSMTPPortKey: "465", mailSMTPSecurityKey: " STARTTLS "})
+	if err != nil || configuration.Mail.SMTP.Security != SMTPStartTLS {
+		t.Fatalf("явная защита важнее порта: %#v, %v", configuration.Mail.SMTP, err)
+	}
+	for name, values := range map[string]map[string]string{
+		"неизвестная защита": {mailSMTPSecurityKey: "ssl"},
+		"пустая защита":      {mailSMTPSecurityKey: ""},
+		"порт не число":      {mailSMTPPortKey: "abc"},
+		"порт ноль":          {mailSMTPPortKey: "0"},
+		"порт выше предела":  {mailSMTPPortKey: "65536"},
+		"порт отрицательный": {mailSMTPPortKey: "-1"},
+	} {
+		if _, err := load(values); err == nil || !strings.Contains(err.Error(), "LIDRADAR_MAIL_SMTP") {
+			t.Errorf("%s: Load() error = %v", name, err)
+		}
+	}
+}
+
+func TestLoadMailRejectsUnsafeOrInconsistentSMTPSettings(t *testing.T) {
+	valid := map[string]string{
+		mailSMTPHostKey: "smtp.gmail.com", mailSMTPUsernameKey: "bot@gmail.com", mailSMTPPasswordKey: "app-password",
+		mailFromKey: "bot@gmail.com",
+	}
+	load := func(environment Environment, overrides map[string]string) (Config, error) {
+		values := map[string]string{environmentKey: string(environment), databaseURLKey: "postgres://example"}
+		for key, value := range valid {
+			values[key] = value
+		}
+		for key, value := range overrides {
+			if value == "-" {
+				delete(values, key)
+			} else {
+				values[key] = value
+			}
+		}
+		return Load(mapLookup(values))
+	}
+	if configuration, err := load(EnvironmentProduction, nil); err != nil {
+		t.Fatalf("a complete set must load: %v", err)
+	} else if err := configuration.ValidateWorker(); err != nil {
+		t.Fatalf("a complete set must satisfy the worker: %v", err)
+	}
+	cases := map[string]map[string]string{
+		"имя пользователя без пароля":        {mailSMTPPasswordKey: "-"},
+		"пароль без имени пользователя":      {mailSMTPUsernameKey: "-"},
+		"отправитель не задан":               {mailFromKey: "-"},
+		"отправитель с именем":               {mailFromKey: "Bot <bot@gmail.com>"},
+		"отправитель не адрес":               {mailFromKey: "bot"},
+		"хост со схемой":                     {mailSMTPHostKey: "smtp://smtp.gmail.com"},
+		"хост с портом":                      {mailSMTPHostKey: "smtp.gmail.com:587"},
+		"хост с пробелом":                    {mailSMTPHostKey: "smtp gmail.com"},
+		"открытый канал к внешнему хосту":    {mailSMTPSecurityKey: "none"},
+		"имя отправителя с переводом строки": {mailFromNameKey: "Lid\nRadar"},
+		"имя отправителя слишком длинное":    {mailFromNameKey: strings.Repeat("a", 101)},
+	}
+	for name, overrides := range cases {
+		if _, err := load(EnvironmentProduction, overrides); err == nil || !strings.Contains(err.Error(), "LIDRADAR_MAIL") {
+			t.Errorf("%s: Load() error = %v", name, err)
+		}
+	}
+	// Реквизиты без хоста — ошибка, а не молчаливое «почты нет».
+	if _, err := load(EnvironmentDevelopment, map[string]string{mailSMTPHostKey: "-"}); err == nil || !strings.Contains(err.Error(), mailSMTPHostKey) {
+		t.Errorf("credentials without a host: error = %v", err)
+	}
+}
+
+func TestLoadMailPlainSMTPIsOnlyForLoopbackOutsideProduction(t *testing.T) {
+	plain := func(environment Environment, host string) error {
+		_, err := Load(mapLookup(map[string]string{
+			environmentKey: string(environment), databaseURLKey: "postgres://example", mailSMTPHostKey: host,
+			mailSMTPPortKey: "1025", mailSMTPSecurityKey: "none", mailFromKey: "bot@example.com",
+		}))
+		return err
+	}
+	for _, host := range []string{"localhost", "127.0.0.1", "::1", "[::1]"} {
+		if err := plain(EnvironmentDevelopment, host); err != nil {
+			t.Errorf("loopback %s in development: %v", host, err)
+		}
+		if err := plain(EnvironmentProduction, host); err == nil {
+			t.Errorf("loopback %s must still be refused in production", host)
+		}
+	}
+	for _, host := range []string{"smtp.example.com", "192.0.2.10", "0.0.0.0"} {
+		if err := plain(EnvironmentDevelopment, host); err == nil {
+			t.Errorf("plain SMTP to %s must be refused", host)
+		}
+	}
+}
+
+// Worker в staging и production не стартует без почты: журнальный транспорт с токенами там недопустим, а без
+// SMTP сброс пароля молча не работал бы.
+func TestValidateWorkerRequiresMailOutsideDevelopment(t *testing.T) {
+	complete := map[string]string{
+		databaseURLKey: "postgres://example", mailSMTPHostKey: "smtp.gmail.com", mailSMTPUsernameKey: "bot@gmail.com",
+		mailSMTPPasswordKey: "app-password", mailFromKey: "bot@gmail.com",
+	}
+	load := func(environment Environment, drop ...string) Config {
+		t.Helper()
+		values := map[string]string{environmentKey: string(environment)}
+		for key, value := range complete {
+			values[key] = value
+		}
+		for _, key := range drop {
+			delete(values, key)
+		}
+		configuration, err := Load(mapLookup(values))
+		if err != nil {
+			t.Fatalf("Load(%s, drop %v) error = %v", environment, drop, err)
+		}
+		return configuration
+	}
+	for _, environment := range []Environment{EnvironmentStaging, EnvironmentProduction} {
+		if err := load(environment).ValidateWorker(); err != nil {
+			t.Fatalf("%s с полным набором: %v", environment, err)
+		}
+		// Хост без отправителя отвергает уже сама загрузка: письмо без адреса отправителя уйти не может.
+		values := map[string]string{environmentKey: string(environment)}
+		for key, value := range complete {
+			values[key] = value
+		}
+		delete(values, mailFromKey)
+		if _, err := Load(mapLookup(values)); err == nil || !strings.Contains(err.Error(), mailFromKey) {
+			t.Errorf("%s без отправителя: Load() error = %v", environment, err)
+		}
+		for name, drop := range map[string][]string{
+			"без хоста": {mailSMTPHostKey, mailSMTPUsernameKey, mailSMTPPasswordKey, mailFromKey},
+			"без входа": {mailSMTPUsernameKey, mailSMTPPasswordKey},
+		} {
+			err := load(environment, drop...).ValidateWorker()
+			if err == nil || !strings.Contains(err.Error(), string(environment)) {
+				t.Errorf("%s, %s: ValidateWorker() error = %v", environment, name, err)
+			}
+		}
+	}
+	for _, environment := range []Environment{EnvironmentDevelopment, EnvironmentTest} {
+		if err := load(environment, mailSMTPHostKey, mailSMTPUsernameKey, mailSMTPPasswordKey, mailFromKey).ValidateWorker(); err != nil {
+			t.Errorf("%s без почты: %v", environment, err)
+		}
+	}
+}
+
+func TestValidateAPIRequiresALinkBase(t *testing.T) {
+	values := map[string]string{
+		environmentKey: string(EnvironmentProduction), databaseURLKey: "postgres://example",
+		allowedOriginsKey: "https://app.example.com", trustedProxiesKey: "172.16.0.0/12",
+		credentialKeyKey: base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+		publicBaseURLKey: "https://app.example.com",
+	}
+	configuration, err := Load(mapLookup(values))
+	if err != nil || configuration.ValidateAPI() != nil {
+		t.Fatalf("a complete API configuration must pass: %v / %v", err, configuration.ValidateAPI())
+	}
+	configuration.Mail.WebBaseURL = ""
+	if err := configuration.ValidateAPI(); err == nil || !strings.Contains(err.Error(), webBaseURLKey) {
+		t.Fatalf("an empty link base must be reported: %v", err)
+	}
+}
+
+// Пароль SMTP не должен попадать в журнал даже при печати всей конфигурации.
+func TestSMTPSettingsNeverPrintThePassword(t *testing.T) {
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey: string(EnvironmentDevelopment), mailSMTPHostKey: "smtp.gmail.com", mailSMTPUsernameKey: "bot@gmail.com",
+		mailSMTPPasswordKey: "super-secret-app-password", mailFromKey: "bot@gmail.com",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rendered := range []string{
+		fmt.Sprintf("%v", configuration), fmt.Sprintf("%+v", configuration), fmt.Sprintf("%#v", configuration),
+		fmt.Sprintf("%v", configuration.Mail.SMTP), fmt.Sprintf("%s", configuration.Mail.SMTP), fmt.Sprintf("%#v", configuration.Mail.SMTP),
+	} {
+		if strings.Contains(rendered, "super-secret-app-password") {
+			t.Fatalf("пароль SMTP напечатан: %s", rendered)
+		}
+	}
+	if !strings.Contains(configuration.Mail.SMTP.String(), "[redacted]") || !strings.Contains(configuration.Mail.SMTP.String(), "smtp.gmail.com") {
+		t.Fatalf("String() = %s", configuration.Mail.SMTP.String())
+	}
+	if (SMTP{}).String() == "" || strings.Contains((SMTP{}).String(), "[redacted]") {
+		t.Fatalf("пустой пароль не должен выглядеть заданным: %s", (SMTP{}).String())
 	}
 }

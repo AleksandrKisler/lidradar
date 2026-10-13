@@ -81,8 +81,9 @@ PostgreSQL 18 — единственный источник истины (ADR 00
 | `000022_membership_invitations` | `membership_invitations` с RLS и политикой `invitation_by_code` |
 | `000023_unfinished_agreements` | `conversation_summaries.agreements`, `locations.agreement_threshold_minutes`, тип риска `UNFINISHED_AGREEMENT` в проверках `risk_signals`, `notification_preferences`, `notification_digest_items`, `risk_feedback` (ADR 0047) |
 | `000024_platform_invitations` | `platform_invitations` (коды платформы, ADR 0057), `users.organization_rights SMALLINT NOT NULL DEFAULT 0` с `CHECK 0…100` |
+| `000025_account_security` | `users.email_verified_at`, `account_tokens`, `mail_outbox`, шесть новых значений `auth_rate_limits.scope` (ADR 0058) |
 
-Итого 50 таблиц и 70 индексов (без учёта первичных ключей и `UNIQUE`-ограничений).
+Итого 53 таблицы и 73 индекса (измерено в схеме после `000025`; без учёта индексов первичных ключей и `UNIQUE`-ограничений).
 
 ## 3. Таблицы по модулям
 
@@ -96,9 +97,11 @@ PostgreSQL 18 — единственный источник истины (ADR 00
 |---|---|
 | `platform_metadata` | служебные метаданные платформы |
 | `schema_migrations` | журнал миграций (версия, контрольная сумма, время) |
-| `users` | `email` канонический (`= lower(btrim)`), `UNIQUE`; `password_hash` (Argon2id PHC); `status IN (ACTIVE, DISABLED)`; `organization_rights` 0…100 — сколько организаций пользователь ещё вправе создать в режиме `invite_only` (ADR 0057; наружу не отдаётся); **без `tenant_id`** |
+| `users` | `email` канонический (`= lower(btrim)`), `UNIQUE`; `password_hash` (Argon2id PHC); `status IN (ACTIVE, DISABLED)`; `email_verified_at` — время подтверждения почты, `NULL` — не подтверждена (ADR 0058, мягкое подтверждение ничего не блокирует); `organization_rights` 0…100 — сколько организаций пользователь ещё вправе создать в режиме `invite_only` (ADR 0057; наружу не отдаётся); **без `tenant_id`** |
 | `sessions` | `token_hash CHAR(64) UNIQUE`, `expires_at`, `ip INET`, `user_agent`, `revoked_at`; индекс по сроку для живых сессий; без `tenant_id` |
-| `auth_rate_limits` | PK `(scope, subject_hash BYTEA(32))`, `scope IN (REGISTER_IP, LOGIN_IP, LOGIN_ACCOUNT, REFRESH_IP)`, `attempts > 0`, `expires_at > window_started_at`; без `tenant_id` |
+| `account_tokens` | одноразовые токены подтверждения почты и сброса пароля (ADR 0058): `user_id → users ON DELETE CASCADE`, `purpose IN (EMAIL_VERIFICATION, PASSWORD_RESET)`, `token_hash CHAR(64) UNIQUE` (`^[0-9a-f]{64}$`, открытый токен не хранится), `expires_at > created_at`, `used_at`/`revoked_at` не одновременно; частичный `UNIQUE (user_id, purpose) WHERE used_at IS NULL AND revoked_at IS NULL` — один действующий токен на пользователя и назначение; персональных данных нет; без `tenant_id` |
+| `mail_outbox` | очередь исходящих писем (владелец — модуль `mail`, ADR 0058): `kind`, `subject` 1…200 без переводов строки, `recipient` (нижний регистр) и `body` ≤ 20 000 — **только у `PENDING`/`PROCESSING`, у `SENT`/`DEAD` оба `NULL`** (CHECK), `recipient_domain` остаётся, `status IN (PENDING, PROCESSING, SENT, DEAD)`, `attempts 0…20`, `available_at`, `expires_at > created_at`, аренда (`leased_by`, `lease_until` — только у `PROCESSING`), `failure_code` обязателен у `DEAD`, `sent_at` только у `SENT`; индексы по готовым и арендованным; без `tenant_id` |
+| `auth_rate_limits` | PK `(scope, subject_hash BYTEA(32))`, `scope IN (REGISTER_IP, LOGIN_IP, LOGIN_ACCOUNT, REFRESH_IP, PASSWORD_RESET_IP, PASSWORD_RESET_ACCOUNT, PASSWORD_RESET_CONFIRM_IP, PASSWORD_CHANGE_ACCOUNT, EMAIL_VERIFICATION_ACCOUNT, EMAIL_VERIFY_IP)`, `attempts > 0`, `expires_at > window_started_at`; без `tenant_id` |
 | `organizations` | `name`, `default_timezone`, `default_currency CHAR(3) DEFAULT 'RUB'`, `status IN (ACTIVE, SUSPENDED, ARCHIVED)`; собственная политика RLS по `id` |
 | `memberships` | `UNIQUE (tenant_id, user_id)`; `role IN (OWNER, MANAGER)`; `status IN (ACTIVE, INVITED, DISABLED)`; `(status='DISABLED') = (revoked_at IS NOT NULL)`; триггер запрещает `DELETE` (на членство ссылаются факты); политика `member_self` |
 | `membership_invitations` | одноразовые коды приглашения (ADR 0045): `role IN (OWNER, MANAGER)`; `code_hash CHAR(64) UNIQUE` (`^[0-9a-f]{64}$`, открытый код не хранится); `note` ≤ 500 с `btrim`; `expires_at > created_at`; FK создателя, принявшего и отозвавшего на членства; `(accepted_at IS NULL) = (accepted_by IS NULL)`, то же для отзыва, принятие и отзыв взаимоисключающи; индекс `(tenant_id, created_at DESC, id DESC)`; политики `tenant_isolation` и `invitation_by_code` |
@@ -216,7 +219,7 @@ PostgreSQL 18 — единственный источник истины (ADR 00
   приложения и CLI под `lidradar_runtime`, который состоит в трёх ролях, но
   объектами не владеет ([ADR 0052](../adr/0052-database-roles-owner-and-runtime.md)).
 - **Без RLS** остаются таблицы без `tenant_id`: `users`, `sessions`,
-  `auth_rate_limits`, `auth_audit_log`, `platform_invitations`, `ai_nodes`, `ai_node_request_nonces`,
+  `auth_rate_limits`, `auth_audit_log`, `platform_invitations`, `account_tokens`, `mail_outbox`, `ai_nodes`, `ai_node_request_nonces`,
   `platform_metadata`, `schema_migrations`. `admin_audit_log` имеет
   `tenant_id` и потому под политикой, но пишется платформенной ролью.
 - Соединение `LISTEN` для SSE открывается вне пула (без `SET ROLE` и

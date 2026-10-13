@@ -33,6 +33,8 @@ import (
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
+	mailapplication "lidradar/backend/internal/mail/application"
+	mailinfrastructure "lidradar/backend/internal/mail/infrastructure"
 	notificationapplication "lidradar/backend/internal/notification/application"
 	notificationinfrastructure "lidradar/backend/internal/notification/infrastructure"
 	notificationtransport "lidradar/backend/internal/notification/transport"
@@ -145,7 +147,10 @@ func run(ctx context.Context, configuration config.Config) error {
 		identityinfrastructure.SessionTokens{},
 		time.Now,
 		configuration.Auth.SessionTTL,
-	).WithAuditor(auditRecorder).WithRegistration(registrationMode, tenantService)
+	).WithAuditor(auditRecorder).WithRegistration(registrationMode, tenantService).
+		// Почту доставляет worker (ADR 0058): api только ставит письма в очередь, поэтому транспорт ему не нужен.
+		WithMail(mailapplication.NewService(mailinfrastructure.NewPostgresStore(pool), nil, ids.Generator{}, time.Now),
+			configuration.Mail.WebBaseURL, logger)
 	principalResolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),

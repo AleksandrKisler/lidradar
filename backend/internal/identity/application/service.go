@@ -103,6 +103,7 @@ type Service struct {
 	auditor    auditapplication.Recorder
 	mode       RegistrationMode
 	invitation MemberInvitations
+	mail       mailSettings
 }
 
 // WithAuditor включает аудит входа, выхода и регистрации (ТЗ §65).
@@ -207,6 +208,13 @@ func (s Service) Register(ctx context.Context, input RegistrationInput, client C
 	}
 	if err := s.auditAuth(ctx, user.ID, "USER_REGISTERED", client, s.now().UTC()); err != nil {
 		return Authenticated{}, err
+	}
+	// Письмо подтверждения мягкое (ADR 0058): сбой не отменяет регистрацию, пользователь запросит письмо
+	// заново из интерфейса.
+	if s.mail.ready() {
+		if err := s.sendEmailVerification(ctx, user, now, client); err != nil {
+			s.report("identity.verification_failed", mailKindEmailVerification, err)
+		}
 	}
 	return Authenticated{User: user, Token: token}, nil
 }

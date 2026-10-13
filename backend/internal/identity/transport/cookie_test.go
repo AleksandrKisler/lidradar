@@ -19,6 +19,38 @@ type stubAuthentication struct {
 	rights      int
 	registerErr error
 	registered  *application.RegistrationInput
+	// accountErr — ответ команд безопасности учётной записи (ADR 0058); accountCalls собирает их вызовы.
+	accountErr   error
+	accountCalls *[]accountCall
+}
+
+// accountCall — один вызов команды безопасности: что именно получила служба.
+type accountCall struct {
+	Name, Token, First, Second string
+	Client                     application.Client
+}
+
+func (stub stubAuthentication) recordAccount(call accountCall) error {
+	if stub.accountCalls != nil {
+		*stub.accountCalls = append(*stub.accountCalls, call)
+	}
+	return stub.accountErr
+}
+
+func (stub stubAuthentication) ChangePassword(_ context.Context, sessionToken, current, next string, client application.Client) error {
+	return stub.recordAccount(accountCall{Name: "change", Token: sessionToken, First: current, Second: next, Client: client})
+}
+func (stub stubAuthentication) RequestPasswordReset(_ context.Context, email string, client application.Client) error {
+	return stub.recordAccount(accountCall{Name: "forgot", First: email, Client: client})
+}
+func (stub stubAuthentication) ResetPassword(_ context.Context, token, next string, client application.Client) error {
+	return stub.recordAccount(accountCall{Name: "reset", First: token, Second: next, Client: client})
+}
+func (stub stubAuthentication) RequestEmailVerification(_ context.Context, sessionToken string, client application.Client) error {
+	return stub.recordAccount(accountCall{Name: "resend", Token: sessionToken, Client: client})
+}
+func (stub stubAuthentication) VerifyEmail(_ context.Context, token string, client application.Client) error {
+	return stub.recordAccount(accountCall{Name: "verify", First: token, Client: client})
 }
 
 func (stub stubAuthentication) Register(_ context.Context, input application.RegistrationInput, _ application.Client) (application.Authenticated, error) {

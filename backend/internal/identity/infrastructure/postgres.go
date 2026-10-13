@@ -138,7 +138,7 @@ func (r *PostgresRepository) UserByEmail(ctx context.Context, email string) (dom
 		return domain.User{}, false, domain.ErrInvalid
 	}
 	return scanUser(r.pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, display_name, status, created_at, updated_at, organization_rights
+		SELECT id, email, password_hash, display_name, status, created_at, updated_at, organization_rights, email_verified_at
 		FROM users
 		WHERE email = $1`, email))
 }
@@ -148,7 +148,7 @@ func (r *PostgresRepository) UserBySessionHash(ctx context.Context, tokenHash st
 		return domain.User{}, false, domain.ErrInvalid
 	}
 	return scanUser(r.pool.QueryRow(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights
+		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights, u.email_verified_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -173,7 +173,7 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, currentHash stri
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	user, found, err := scanUser(tx.QueryRow(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights
+		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights, u.email_verified_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -221,7 +221,7 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanUser(row rowScanner) (domain.User, bool, error) {
 	var user domain.User
-	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.DisplayName, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.OrganizationRights)
+	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.DisplayName, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.OrganizationRights, &user.EmailVerifiedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, false, nil
 	}

@@ -183,6 +183,81 @@ paths:
           description: Authenticated user and organizations available for explicit tenant selection.
           content: { application/json: { schema: { $ref: '#/components/schemas/AuthMeResponse' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/password/change:
+    post:
+      summary: Change the password of the signed-in user
+      description: 'ADR 0058. Нужны сессия и текущий пароль; новый пароль 12…1024 байт и отличается от текущего. В одной транзакции пароль меняется, все остальные сессии пользователя завершаются (текущая остаётся), неиспользованные ссылки сброса отзываются и пишется PASSWORD_CHANGED; затем в очередь ставится письмо «пароль изменён». Неверный текущий пароль — 403 INVALID_CURRENT_PASSWORD, а не 401: клиент считает 401 потерей сессии. Предел — 5 попыток за 15 минут на пользователя, он расходуется до проверки текущего пароля и сбрасывается при успехе; ошибки формата попытки не тратят.'
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '204': { description: Password changed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: 'INVALID_CURRENT_PASSWORD — текущий пароль не подошёл или уже сменён из другого окна; ORIGIN_NOT_ALLOWED — недоверенный origin.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/v1/auth/password/forgot:
+    post:
+      summary: Request a password reset link by e-mail
+      description: 'ADR 0058. Без сессии. Ответ 204 одинаков для известного, неизвестного, отключённого и неверно записанного адреса: существование учётной записи не раскрывается. Для действующего пользователя выпускается одноразовая ссылка на 60 минут (токен 256 бит во фрагменте адреса) и ставится письмо; ошибка постановки в очередь ответ не меняет. Пределы: 10 в час на адрес клиента и 3 в час на адрес почты; они расходуются до поиска пользователя, поэтому 429 тоже не выдаёт существование.'
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+      responses:
+        '204': { description: Request accepted. The answer is the same whether or not the address is registered. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/v1/auth/password/reset:
+    post:
+      summary: Set a new password with a reset token from the e-mail
+      description: 'ADR 0058. Без сессии. Одна транзакция: токен гасится, пароль меняется, ВСЕ сессии пользователя завершаются, прочие ссылки сброса отзываются, адрес считается подтверждённым (ссылка дошла до ящика), пишется PASSWORD_RESET_COMPLETED. Автоматического входа нет. Любая причина негодности токена (неизвестен, просрочен, использован, отозван, пользователь отключён) — один ответ RESET_TOKEN_INVALID; слабый пароль токен не расходует. Предел 20 попыток в час на адрес клиента. После сброса уходит письмо «пароль изменён».'
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        '204': { description: Password changed and every session of the user ended. }
+        '400': { description: 'INVALID_ARGUMENT — неверное тело или слабый пароль; RESET_TOKEN_INVALID — токен нельзя использовать.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/v1/auth/email/verification:
+    post:
+      summary: Send the e-mail verification link again
+      description: 'ADR 0058. Под сессией. Выпускает новый токен на 7 суток (прежний отзывается) и ставит письмо; уже подтверждённому адресу письмо не нужно, ответ 204 без расхода предела. Предел — 3 письма в час на пользователя. Без настроенной почты — 503 MAIL_UNAVAILABLE.'
+      operationId: resendEmailVerification
+      responses:
+        '204': { description: 'The link was queued, or the address is already verified.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { description: 'MAIL_UNAVAILABLE — почта на сервере не настроена.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/auth/email/verify:
+    post:
+      summary: Confirm the e-mail address with a token from the e-mail
+      description: 'ADR 0058. Без сессии: ссылку открывают в любом браузере. Подтверждение мягкое, ничего не блокирует. Токен одноразовый; любая причина негодности — один ответ VERIFICATION_TOKEN_INVALID. Предел 30 попыток в час на адрес клиента.'
+      operationId: verifyEmail
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyEmailRequest' }
+      responses:
+        '204': { description: Address confirmed. }
+        '400': { description: 'INVALID_ARGUMENT — неверное тело; VERIFICATION_TOKEN_INVALID — токен нельзя использовать.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/organizations:
     post:
       summary: Create an Organization tenant and OWNER membership
@@ -1331,7 +1406,7 @@ components:
       properties: { error: { type: object, required: [code, message, traceId], properties: { code: { type: string }, message: { type: string }, details: { type: object, additionalProperties: true }, traceId: { type: string } } } }
     User:
       type: object
-      required: [id, email, displayName, status, createdAt, updatedAt]
+      required: [id, email, displayName, status, createdAt, updatedAt, emailVerifiedAt]
       properties:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
@@ -1339,6 +1414,7 @@ components:
         status: { type: string, enum: [ACTIVE, DISABLED] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        emailVerifiedAt: { type: [string, 'null'], format: date-time, description: 'Когда подтверждён адрес почты (ADR 0058); null — не подтверждён. Подтверждение мягкое и ничего не блокирует.' }
     RegisterRequest:
       type: object
       additionalProperties: false
@@ -1355,6 +1431,32 @@ components:
       properties:
         email: { type: string, format: email, maxLength: 254 }
         password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        newPassword: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    ForgotPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, maxLength: 254, description: 'Адрес почты; неверно записанный адрес не отличается в ответе от неизвестного.' }
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [token, newPassword]
+      properties:
+        token: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', writeOnly: true, description: 'Токен из ссылки письма (фрагмент #token=…).' }
+        newPassword: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    VerifyEmailRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', writeOnly: true, description: 'Токен из ссылки письма (фрагмент #token=…).' }
     AuthResponse:
       type: object
       required: [user]

@@ -16,16 +16,34 @@ const (
 	ScopeLoginIP      = "LOGIN_IP"
 	ScopeLoginAccount = "LOGIN_ACCOUNT"
 	ScopeRefreshIP    = "REFRESH_IP"
+	// Пределы смены и сброса пароля и подтверждения почты (ADR 0058).
+	ScopePasswordResetIP          = "PASSWORD_RESET_IP"
+	ScopePasswordResetAccount     = "PASSWORD_RESET_ACCOUNT"
+	ScopePasswordResetConfirmIP   = "PASSWORD_RESET_CONFIRM_IP"
+	ScopePasswordChangeAccount    = "PASSWORD_CHANGE_ACCOUNT"
+	ScopeEmailVerificationAccount = "EMAIL_VERIFICATION_ACCOUNT"
+	ScopeEmailVerifyIP            = "EMAIL_VERIFY_IP"
 
 	registerIPLimit   = 5
 	loginIPLimit      = 20
 	loginAccountLimit = 5
 	refreshIPLimit    = 60
 
+	passwordResetIPLimit          = 10
+	passwordResetAccountLimit     = 3
+	passwordResetConfirmLimit     = 20
+	passwordChangeAccountLimit    = 5
+	emailVerificationAccountLimit = 3
+	emailVerifyIPLimit            = 30
+
 	registerIPWindow   = time.Hour
 	loginIPWindow      = time.Minute
 	loginAccountWindow = 15 * time.Minute
 	refreshIPWindow    = time.Minute
+
+	passwordResetWindow     = time.Hour
+	passwordChangeWindow    = 15 * time.Minute
+	emailVerificationWindow = time.Hour
 )
 
 // RateLimitDecision — результат атомарного расходования одной попытки.

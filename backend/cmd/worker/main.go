@@ -3,11 +3,15 @@ package main
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	aiapplication "lidradar/backend/internal/ai/application"
 	aiinfrastructure "lidradar/backend/internal/ai/infrastructure"
@@ -20,6 +24,9 @@ import (
 	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	mailapplication "lidradar/backend/internal/mail/application"
+	maildomain "lidradar/backend/internal/mail/domain"
+	mailinfrastructure "lidradar/backend/internal/mail/infrastructure"
 	notificationapplication "lidradar/backend/internal/notification/application"
 	notificationdomain "lidradar/backend/internal/notification/domain"
 	notificationinfrastructure "lidradar/backend/internal/notification/infrastructure"
@@ -46,7 +53,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	os.Exit(bootstrap.Run(ctx, "lidradar-worker", os.Stderr, run))
+	os.Exit(bootstrap.Run(ctx, "lidradar-worker", os.Stderr, run, config.Config.ValidateWorker))
 }
 
 func run(ctx context.Context, configuration config.Config) error {
@@ -207,6 +214,10 @@ func run(ctx context.Context, configuration config.Config) error {
 		},
 		time.Now, jobsapplication.DefaultLease,
 	)
+	mailService, err := newMailService(ctx, configuration, pool, generator, logger)
+	if err != nil {
+		return err
+	}
 	// In-app доставка всегда локальна; Telegram подключается только с токеном.
 	deliveryChannels := []notificationdomain.Channel{notificationdomain.ChannelInApp}
 	if telegramEnabled {
@@ -220,14 +231,81 @@ func run(ctx context.Context, configuration config.Config) error {
 		loop{event: "notification.delivery_failed", message: "Ошибка доставки уведомления", step: func(ctx context.Context) (bool, error) {
 			return deliveryService.DispatchOne(ctx, ownerID+":notifications", notificationapplication.DefaultDeliveryLease, deliveryChannels...)
 		}},
+		// Письма учётной записи (ADR 0058): ссылка сброса теряет смысл через час, поэтому медленный SMTP не должен
+		// стоять в очереди за Telegram.
+		loop{event: "mail.delivery_failed", message: "Ошибка доставки письма", step: func(ctx context.Context) (bool, error) {
+			return mailService.DispatchOne(ctx, ownerID+":mail", maildomain.DefaultLease)
+		}},
 		loop{event: "diagnostics.failed", message: "Ошибка диагностики очередей", every: diagnosticInterval, step: func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
 			logQueueStats(ctx, logger, claimStore, now)
 			logNotificationStats(ctx, logger, deliveryRepository, now)
+			logMailStats(ctx, logger, mailService)
 			return false, nil
 		}},
 	)
 	return nil
+}
+
+// newMailService выбирает транспорт писем. В staging и production только SMTP (ValidateWorker отказывает в запуске
+// без него); без SMTP-хоста в разработке и тестах письма с ссылками пишутся в журнал воркера.
+func newMailService(
+	ctx context.Context,
+	configuration config.Config,
+	pool *pgxpool.Pool,
+	generator ids.Generator,
+	logger *slog.Logger,
+) (mailapplication.Service, error) {
+	var transport mailapplication.Transport
+	smtp := configuration.Mail.SMTP
+	switch {
+	case smtp.Host != "":
+		smtpTransport, err := mailinfrastructure.NewSMTPTransport(mailinfrastructure.SMTPConfig{
+			Host: smtp.Host, Port: smtp.Port, Security: string(smtp.Security), Username: smtp.Username, Password: smtp.Password,
+			FromAddress: configuration.Mail.From, FromName: configuration.Mail.FromName,
+		})
+		if err != nil {
+			return mailapplication.Service{}, err
+		}
+		transport = smtpTransport
+		// Проверка без отправки: ошибка в реквизитах видна сразу при запуске, а не при первом сбросе пароля.
+		go func() {
+			checkContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := smtpTransport.Check(checkContext); err != nil {
+				logger.Warn("SMTP недоступен или реквизиты не приняты", "event", "mail.smtp.check_failed", "error", err)
+				return
+			}
+			logger.Info("SMTP принимает соединение и вход", "event", "mail.smtp.ready", "host", smtp.Host, "port", smtp.Port)
+		}()
+	case configuration.Environment == config.EnvironmentStaging || configuration.Environment == config.EnvironmentProduction:
+		return mailapplication.Service{}, errors.New("SMTP is required to deliver mail in " + string(configuration.Environment))
+	default:
+		logger.Warn(
+			"SMTP не настроен: письма записываются в журнал воркера вместе со ссылками (только для разработки)",
+			"event", "mail.logged_transport",
+		)
+		transport = mailinfrastructure.LogTransport{Logger: logger}
+	}
+	return mailapplication.NewService(mailinfrastructure.NewPostgresStore(pool), transport, generator, time.Now).WithReporter(logger), nil
+}
+
+func logMailStats(ctx context.Context, logger *slog.Logger, service mailapplication.Service) {
+	stats, err := service.Stats(ctx)
+	if err != nil {
+		logger.Warn("Не удалось прочитать состояние очереди писем", "event", "mail.queue.diagnostics_failed", "error", err)
+		return
+	}
+	logger.Info(
+		"Состояние очереди писем",
+		"event", "mail.queue.status",
+		"mail_pending", stats.Pending,
+		"mail_retry", stats.Retry,
+		"mail_processing", stats.Processing,
+		"mail_dead_24h", stats.Dead,
+		"mail_overdue", stats.Overdue,
+		"mail_expired_leases", stats.ExpiredLeases,
+	)
 }
 
 func logNotificationStats(

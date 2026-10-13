@@ -42,6 +42,8 @@ import (
 	identitytransport "lidradar/backend/internal/identity/transport"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	mailapplication "lidradar/backend/internal/mail/application"
+	mailinfrastructure "lidradar/backend/internal/mail/infrastructure"
 	notificationapplication "lidradar/backend/internal/notification/application"
 	notificationinfrastructure "lidradar/backend/internal/notification/infrastructure"
 	notificationtransport "lidradar/backend/internal/notification/transport"
@@ -76,6 +78,10 @@ type apiFixture struct {
 	candidates    opportunityapplication.CandidateProcessor
 	notifications notificationapplication.Service
 	pool          *pgxpool.Pool
+	// mailDelivery доставляет письма из очереди так, как это делает worker (под рабочей ролью), но в память:
+	// sent хранит всё, что «ушло по SMTP» (ADR 0058).
+	mailDelivery mailapplication.Service
+	sent         *sentMail
 }
 
 func newAPIFixture(t *testing.T) apiFixture {
@@ -233,7 +239,10 @@ func buildAPIFixture(t *testing.T, current bool, mode identityapplication.Regist
 	identityService := identityapplication.NewService(
 		identityRepository, identityinfrastructure.NewPostgresRateLimiter(pool), cryptoplatform.PasswordHasher{},
 		ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
-	).WithAuditor(auditRecorder).WithRegistration(mode, tenantService)
+	).WithAuditor(auditRecorder).WithRegistration(mode, tenantService).
+		WithMail(mailapplication.NewService(mailinfrastructure.NewPostgresStore(pool), nil, ids.Generator{}, time.Now), integrationWebBaseURL, nil)
+	sent := &sentMail{}
+	mailDelivery := mailapplication.NewService(mailinfrastructure.NewPostgresStore(pools.Worker), sent, ids.Generator{}, time.Now)
 	resolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),
@@ -272,7 +281,8 @@ func buildAPIFixture(t *testing.T, current bool, mode identityapplication.Regist
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
 		worker: worker, candidates: candidateProcessor, notifications: deliveryService, pool: pools.Owner,
-		scheduler: jobsapplication.NewScheduler(claimStore, time.Now),
+		scheduler:    jobsapplication.NewScheduler(claimStore, time.Now),
+		mailDelivery: mailDelivery, sent: sent,
 	}
 }
 

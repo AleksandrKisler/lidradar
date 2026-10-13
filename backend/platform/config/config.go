@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
+	"net/mail"
 	"net/netip"
 	"net/url"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -32,6 +35,14 @@ const (
 	cookieSecureKey         = "LIDRADAR_COOKIE_SECURE"
 	registrationModeKey     = "LIDRADAR_REGISTRATION_MODE"
 	publicBaseURLKey        = "LIDRADAR_PUBLIC_BASE_URL"
+	webBaseURLKey           = "LIDRADAR_WEB_BASE_URL"
+	mailSMTPHostKey         = "LIDRADAR_MAIL_SMTP_HOST"
+	mailSMTPPortKey         = "LIDRADAR_MAIL_SMTP_PORT"
+	mailSMTPSecurityKey     = "LIDRADAR_MAIL_SMTP_SECURITY"
+	mailSMTPUsernameKey     = "LIDRADAR_MAIL_SMTP_USERNAME"
+	mailSMTPPasswordKey     = "LIDRADAR_MAIL_SMTP_PASSWORD"
+	mailFromKey             = "LIDRADAR_MAIL_FROM"
+	mailFromNameKey         = "LIDRADAR_MAIL_FROM_NAME"
 	credentialKeyKey        = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
 	telegramTokenKey        = "LIDRADAR_TELEGRAM_TOKEN"
 	// telegramTokenLegacyKey — прежнее имя без «RA»; принимается, чтобы не
@@ -60,6 +71,9 @@ const (
 	defaultDatabaseMax          = int32(10)
 	defaultDatabaseMin          = int32(1)
 	defaultTelegramBot          = "LidRadarDevBot"
+	defaultWebDevURL            = "http://localhost:5173"
+	defaultSMTPPort             = 587
+	defaultMailFromName         = "LidRadar"
 	defaultOwnerEscalationAfter = 30 * time.Minute
 	defaultAIProvider           = "fake"
 	defaultAILlamaURL           = "http://llama-server:8080/v1/chat/completions"
@@ -93,6 +107,7 @@ type Config struct {
 	Auth          Auth
 	Integrations  Integrations
 	Notifications Notifications
+	Mail          Mail
 	AI            AI
 }
 
@@ -152,6 +167,49 @@ type Notifications struct {
 	OwnerEscalationAfter   time.Duration
 }
 
+// SMTPSecurity — способ защиты соединения с почтовым сервером (ADR 0058).
+type SMTPSecurity string
+
+const (
+	// SMTPStartTLS открывает соединение и требует STARTTLS; порт 587, значение по умолчанию.
+	SMTPStartTLS SMTPSecurity = "starttls"
+	// SMTPImplicitTLS шифрует соединение с первого байта; порт 465.
+	SMTPImplicitTLS SMTPSecurity = "tls"
+	// SMTPPlain — без шифрования; допустим только для локального приёмника писем вне production.
+	SMTPPlain SMTPSecurity = "none"
+)
+
+// SMTP — реквизиты почтового сервера. Password никогда не попадает в журналы: String и GoString скрывают его.
+type SMTP struct {
+	Host     string
+	Port     int
+	Security SMTPSecurity
+	Username string
+	Password string
+}
+
+func (s SMTP) String() string {
+	password := "unset"
+	if s.Password != "" {
+		password = "[redacted]"
+	}
+	return fmt.Sprintf("{host=%q port=%d security=%s username=%q password=%s}", s.Host, s.Port, s.Security, s.Username, password)
+}
+
+func (s SMTP) GoString() string { return "config.SMTP" + s.String() }
+
+// Mail содержит настройки исходящей почты (ADR 0058). Отправляет worker; api нужен адрес веб-клиента для
+// ссылок в письмах.
+type Mail struct {
+	// WebBaseURL — origin веб-клиента без пути. По умолчанию LIDRADAR_PUBLIC_BASE_URL (в production клиент
+	// и API на одном origin), в development http://localhost:5173.
+	WebBaseURL string
+	SMTP       SMTP
+	// From — адрес отправителя, FromName — его отображаемое имя.
+	From     string
+	FromName string
+}
+
 // AI содержит машинные настройки Cloud Core и одноразового домашнего узла.
 // Реквизиты узла читаются только из файла с ограниченными правами.
 type AI struct {
@@ -208,6 +266,17 @@ func Load(lookup LookupEnv) (Config, error) {
 			TelegramBotToken: firstConfigured(lookup, telegramTokenKey, telegramTokenLegacyKey),
 			TelegramUsername: strings.TrimPrefix(strings.TrimSpace(valueOrDefault(lookup, telegramUsernameKey, defaultTelegramBot)), "@"),
 		},
+		Mail: Mail{
+			WebBaseURL: strings.TrimRight(strings.TrimSpace(valueOrDefault(lookup, webBaseURLKey, "")), "/"),
+			SMTP: SMTP{
+				Host:     strings.TrimSpace(valueOrDefault(lookup, mailSMTPHostKey, "")),
+				Port:     defaultSMTPPort,
+				Username: strings.TrimSpace(valueOrDefault(lookup, mailSMTPUsernameKey, "")),
+				Password: strings.TrimSpace(valueOrDefault(lookup, mailSMTPPasswordKey, "")),
+			},
+			From:     strings.TrimSpace(valueOrDefault(lookup, mailFromKey, "")),
+			FromName: strings.TrimSpace(valueOrDefault(lookup, mailFromNameKey, defaultMailFromName)),
+		},
 		AI: AI{
 			CloudURL:          strings.TrimRight(strings.TrimSpace(valueOrDefault(lookup, aiCloudURLKey, "")), "/"),
 			CredentialsFile:   strings.TrimSpace(valueOrDefault(lookup, aiCredentialsKey, "")),
@@ -250,6 +319,25 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if configuration.Auth.SessionTTL, err = durationValue(lookup, sessionTTLKey, defaultSessionTTL); err != nil {
 		return Config{}, err
+	}
+	smtpPort, err := int32Value(lookup, mailSMTPPortKey, defaultSMTPPort)
+	if err != nil {
+		return Config{}, err
+	}
+	configuration.Mail.SMTP.Port = int(smtpPort)
+	// Порт 465 по общему соглашению означает шифрование с первого байта; явная настройка важнее.
+	securityDefault := SMTPStartTLS
+	if smtpPort == 465 {
+		securityDefault = SMTPImplicitTLS
+	}
+	configuration.Mail.SMTP.Security = SMTPSecurity(strings.ToLower(strings.TrimSpace(valueOrDefault(lookup, mailSMTPSecurityKey, string(securityDefault)))))
+	if configuration.Mail.WebBaseURL == "" {
+		switch {
+		case configuration.Integrations.PublicBaseURL != "":
+			configuration.Mail.WebBaseURL = configuration.Integrations.PublicBaseURL
+		case configuration.Environment == EnvironmentDevelopment || configuration.Environment == EnvironmentTest:
+			configuration.Mail.WebBaseURL = defaultWebDevURL
+		}
 	}
 	if configuration.AI.PollInterval, err = durationValue(lookup, aiPollIntervalKey, defaultAIPoll); err != nil {
 		return Config{}, err
@@ -384,6 +472,89 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s contains invalid origin %q", allowedOriginsKey, origin)
 		}
 	}
+	return c.validateMail()
+}
+
+// secure сообщает, что процесс обслуживает реальных клиентов: staging или production.
+func (c Config) secure() bool {
+	return c.Environment == EnvironmentStaging || c.Environment == EnvironmentProduction
+}
+
+// validateMail проверяет форму настроек почты (ADR 0058). Требования «почта обязана быть настроена»
+// предъявляет ValidateWorker: общая проверка нужна и процессам, которым почта не нужна.
+func (c Config) validateMail() error {
+	if c.Mail.WebBaseURL != "" {
+		parsed, err := url.Parse(c.Mail.WebBaseURL)
+		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") ||
+			parsed.RawQuery != "" || parsed.Fragment != "" ||
+			(parsed.Scheme != "http" && parsed.Scheme != "https") || (c.secure() && parsed.Scheme != "https") {
+			return fmt.Errorf("%s has unsafe value", webBaseURLKey)
+		}
+	}
+	smtp := c.Mail.SMTP
+	if smtp.Port < 1 || smtp.Port > 65535 {
+		return fmt.Errorf("%s must be between 1 and 65535", mailSMTPPortKey)
+	}
+	switch smtp.Security {
+	case SMTPStartTLS, SMTPImplicitTLS, SMTPPlain:
+	default:
+		return fmt.Errorf("%s has unsupported value %q (use %s, %s or %s)", mailSMTPSecurityKey, smtp.Security, SMTPStartTLS, SMTPImplicitTLS, SMTPPlain)
+	}
+	if c.Mail.FromName == "" || len(c.Mail.FromName) > 100 || strings.IndexFunc(c.Mail.FromName, unicode.IsControl) >= 0 {
+		return fmt.Errorf("%s has invalid value", mailFromNameKey)
+	}
+	if smtp.Host == "" {
+		if smtp.Username != "" || smtp.Password != "" {
+			return fmt.Errorf("%s is required when SMTP credentials are set", mailSMTPHostKey)
+		}
+		return nil
+	}
+	if strings.ContainsAny(smtp.Host, " /\\@:") && !strings.HasPrefix(smtp.Host, "[") && net.ParseIP(smtp.Host) == nil {
+		return fmt.Errorf("%s must be a host name without scheme, port or path", mailSMTPHostKey)
+	}
+	if address, err := mail.ParseAddress(c.Mail.From); err != nil || address.Address != c.Mail.From || len(c.Mail.From) > 254 {
+		return fmt.Errorf("%s must be a plain e-mail address", mailFromKey)
+	}
+	if (smtp.Username == "") != (smtp.Password == "") {
+		return fmt.Errorf("%s and %s must be set together", mailSMTPUsernameKey, mailSMTPPasswordKey)
+	}
+	if smtp.Security == SMTPPlain {
+		if !isLoopbackHost(smtp.Host) || c.secure() {
+			return fmt.Errorf("%s=%s is allowed only for a loopback host outside staging and production", mailSMTPSecurityKey, SMTPPlain)
+		}
+	}
+	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	address := net.ParseIP(strings.Trim(host, "[]"))
+	return address != nil && address.IsLoopback()
+}
+
+// ValidateWorker добавляет требование процесса worker: в staging и production письма доставляет только он, и
+// без SMTP сброс пароля и подтверждение почты молча не работали бы. Журнальный транспорт, куда письмо с токеном
+// попадает открытым текстом, там недопустим, поэтому запуск без почты отказан.
+func (c Config) ValidateWorker() error {
+	if !c.secure() {
+		return nil
+	}
+	var problems []string
+	smtp := c.Mail.SMTP
+	if smtp.Host == "" {
+		problems = append(problems, fmt.Sprintf("%s is required to deliver mail", mailSMTPHostKey))
+	}
+	if c.Mail.From == "" {
+		problems = append(problems, fmt.Sprintf("%s is required", mailFromKey))
+	}
+	if smtp.Username == "" || smtp.Password == "" {
+		problems = append(problems, fmt.Sprintf("%s and %s are required", mailSMTPUsernameKey, mailSMTPPasswordKey))
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("invalid worker configuration for %s: %s", c.Environment, strings.Join(problems, "; "))
+	}
 	return nil
 }
 
@@ -412,6 +583,9 @@ func (c Config) ValidateAPI() error {
 	}
 	if len(c.HTTP.TrustedProxies) == 0 {
 		problems = append(problems, fmt.Sprintf("%s must list the proxies that terminate TLS in front of the api", trustedProxiesKey))
+	}
+	if c.Mail.WebBaseURL == "" {
+		problems = append(problems, fmt.Sprintf("%s (or %s) is required to build links in mail", webBaseURLKey, publicBaseURLKey))
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("invalid API configuration for %s: %s", c.Environment, strings.Join(problems, "; "))
