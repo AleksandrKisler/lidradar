@@ -23,3 +23,7 @@ Clients can retry safely, while storage retention and atomic command integration
 ## Migration and rollback
 
 A replacement must preserve keys and responses. Rollback continues consulting existing PostgreSQL records.
+
+## Note of 2026-10-12
+
+[ADR 0056](0056-data-retention-and-erasure.md) (Accepted) sets the retention of these records: the key, operation and request hash are kept indefinitely, while the stored response body is erased 30 days after creation. A retry with a key whose response was erased receives a "key expired" refusal instead of re-executing the command. Nothing is erased yet: the cleanup process and the refusal code are not implemented.

@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: 9f596fcc22eee9a946eae64887e6c6ef37ed048589e61a61142aece13eb4bc50 -->
+<!-- GENERATED; source-sha256: 445b068653356fb4bf159d2ff4d21e78c8fe961b437dc696bc1f4b2de822b661 -->
 > Источник: [канонический документ](../adr/README.md). Правки вносятся в источник.
 
 # Architecture decision records
@@ -66,6 +66,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0053: Квалификация AI tuple: выбор до GOLDEN, пороги, привязка к серверу и оборудованию](../adr/0053-ai-tuple-qualification.md) — Proposed, 2026-10-10.
 - [0054: Словарь обещаний компании: единый допуск, расширение по категориям и слепая выборка обязательств](../adr/0054-commitment-lexicon.md) — Proposed, 2026-10-10.
 - [0055: Проход по обещаниям: допуск к обещанию определяет модель, словарь остаётся подсказкой](../adr/0055-promise-scan.md) — Proposed, 2026-10-11.
+- [0056: Сроки хранения и стирание данных](../adr/0056-data-retention-and-erasure.md) — Accepted, 2026-10-12.
 
 ## Workflow
 
