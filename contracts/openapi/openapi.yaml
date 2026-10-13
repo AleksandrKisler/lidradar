@@ -103,9 +103,21 @@ paths:
         '401': { $ref: '#/components/responses/AINodeUnauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/AILeaseLost' }
+  /api/v1/auth/registration:
+    get:
+      summary: Get the registration mode
+      description: 'Без сессии. Режим задаёт LIDRADAR_REGISTRATION_MODE (ADR 0057): в open код приглашения не обязателен, в invite_only регистрация требует код платформы или код сотрудника. Нужен странице регистрации, чтобы показать поле кода.'
+      operationId: getRegistrationMode
+      security: []
+      responses:
+        '200':
+          description: Current registration mode.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RegistrationInfo' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/auth/register:
     post:
       summary: Register a LidRadar user
+      description: 'В режиме invite_only обязателен inviteCode: код платформы (выпускает оператор, даёт право создать одну организацию) или код сотрудника (ADR 0045, пользователь сразу получает членство). В open код необязателен, но указанный обрабатывается так же. Код, который нельзя принять по любой причине (неизвестен, просрочен, использован, отозван), получает один и тот же ответ INVITATION_INVALID; занятая почта код не расходует. Все попытки расходуют предел по адресу.'
       operationId: registerUser
       security: []
       requestBody:
@@ -119,7 +131,7 @@ paths:
           headers: { Set-Cookie: { $ref: '#/components/headers/SessionCookie' } }
           content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { description: 'INVITATION_REQUIRED — в режиме invite_only нужен код приглашения; INVITATION_INVALID — код нельзя принять.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/auth/login:
@@ -174,6 +186,7 @@ paths:
   /api/v1/organizations:
     post:
       summary: Create an Organization tenant and OWNER membership
+      description: 'В режиме invite_only создание тратит право пользователя (ADR 0057): его даёт код платформы или команда оператора allow-organization. Транзакция создания уменьшает право на единицу, поэтому одно право создаёт ровно одну организацию. В open право не проверяется.'
       operationId: createOrganization
       requestBody:
         required: true
@@ -186,7 +199,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Organization' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { description: 'ORGANIZATION_CREATION_NOT_ALLOWED — в режиме invite_only у пользователя нет права создать организацию.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/organization:
     parameters: [{ $ref: '#/components/parameters/TenantId' }]
     get:
@@ -1334,6 +1347,7 @@ components:
         email: { type: string, format: email, maxLength: 254 }
         password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
         displayName: { type: string, minLength: 1, maxLength: 200 }
+        inviteCode: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', writeOnly: true, description: 'Код платформы или код сотрудника (ADR 0057); обязателен в режиме invite_only.' }
     LoginRequest:
       type: object
       additionalProperties: false
@@ -1354,10 +1368,16 @@ components:
         role: { type: string, enum: [OWNER, MANAGER] }
     AuthMeResponse:
       type: object
-      required: [user, memberships]
+      required: [user, memberships, canCreateOrganization]
       properties:
         user: { $ref: '#/components/schemas/User' }
         memberships: { type: array, items: { $ref: '#/components/schemas/MembershipSummary' } }
+        canCreateOrganization: { type: boolean, description: 'true в режиме open и в invite_only при действующем праве создать организацию (ADR 0057); по нему интерфейс выбирает между созданием организации и вводом кода сотрудника.' }
+    RegistrationInfo:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [open, invite_only] }
     Membership:
       type: object
       required: [id, tenantId, userId, role, status, createdAt, updatedAt]

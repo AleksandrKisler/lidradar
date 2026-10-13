@@ -64,6 +64,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0054: Словарь обещаний компании: единый допуск, расширение по категориям и слепая выборка обязательств](0054-commitment-lexicon.md) — Proposed, 2026-10-10.
 - [0055: Проход по обещаниям: допуск к обещанию определяет модель, словарь остаётся подсказкой](0055-promise-scan.md) — Proposed, 2026-10-11.
 - [0056: Сроки хранения и стирание данных](0056-data-retention-and-erasure.md) — Accepted, 2026-10-12.
+- [0057: Регистрация по приглашениям](0057-invitation-only-registration.md) — Accepted, 2026-10-13.
 
 ## Workflow
 

@@ -30,6 +30,7 @@ const (
 	trustedProxiesKey       = "LIDRADAR_TRUSTED_PROXIES"
 	sessionTTLKey           = "LIDRADAR_SESSION_TTL"
 	cookieSecureKey         = "LIDRADAR_COOKIE_SECURE"
+	registrationModeKey     = "LIDRADAR_REGISTRATION_MODE"
 	publicBaseURLKey        = "LIDRADAR_PUBLIC_BASE_URL"
 	credentialKeyKey        = "LIDRADAR_INTEGRATION_ENCRYPTION_KEY"
 	telegramTokenKey        = "LIDRADAR_TELEGRAM_TOKEN"
@@ -117,10 +118,21 @@ type HTTP struct {
 	AINodeRateLimitPerMinute int32
 }
 
-// Auth contains server-side session and cookie settings.
+// RegistrationMode задаёт, кто может создать учётную запись и организацию (ADR 0057).
+type RegistrationMode string
+
+const (
+	// RegistrationOpen не требует кода приглашения: так работают development и test.
+	RegistrationOpen RegistrationMode = "open"
+	// RegistrationInviteOnly требует код сотрудника или код платформы; режим по умолчанию в staging и production.
+	RegistrationInviteOnly RegistrationMode = "invite_only"
+)
+
+// Auth contains server-side session, cookie and registration settings.
 type Auth struct {
-	SessionTTL   time.Duration
-	CookieSecure bool
+	SessionTTL       time.Duration
+	CookieSecure     bool
+	RegistrationMode RegistrationMode
 }
 
 // Integrations содержит общие безопасные настройки внешних подключений.
@@ -255,6 +267,11 @@ func Load(lookup LookupEnv) (Config, error) {
 	if configuration.Auth.CookieSecure, err = boolValue(lookup, cookieSecureKey, secureDefault); err != nil {
 		return Config{}, err
 	}
+	registrationDefault := RegistrationOpen
+	if secureDefault {
+		registrationDefault = RegistrationInviteOnly
+	}
+	configuration.Auth.RegistrationMode = RegistrationMode(strings.ToLower(strings.TrimSpace(valueOrDefault(lookup, registrationModeKey, string(registrationDefault)))))
 	allowPlaintext, err := boolValue(lookup, databasePlaintextKey, false)
 	if err != nil {
 		return Config{}, err
@@ -307,6 +324,9 @@ func (c Config) Validate() error {
 	}
 	if c.Auth.SessionTTL <= 0 {
 		return fmt.Errorf("%s must be positive", sessionTTLKey)
+	}
+	if c.Auth.RegistrationMode != RegistrationOpen && c.Auth.RegistrationMode != RegistrationInviteOnly {
+		return fmt.Errorf("%s has unsupported value %q (use %s or %s)", registrationModeKey, c.Auth.RegistrationMode, RegistrationOpen, RegistrationInviteOnly)
 	}
 	if (c.Integrations.PublicBaseURL == "") != (len(c.Integrations.CredentialKey) == 0) {
 		return fmt.Errorf("%s and %s must be configured together", publicBaseURLKey, credentialKeyKey)

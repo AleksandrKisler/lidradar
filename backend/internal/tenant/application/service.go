@@ -96,6 +96,19 @@ type Service struct {
 	ids         IDs
 	now         func() time.Time
 	auditor     auditapplication.Recorder
+	// creation — нужно ли право на создание организации (ADR 0057); нулевое значение не проверяет право.
+	creation domain.OrganizationCreation
+}
+
+// WithOrganizationRights включает проверку права на создание организации: в режиме invite_only
+// транзакция создания тратит единицу users.organization_rights (ADR 0057).
+func (service Service) WithOrganizationRights(required bool) Service {
+	if required {
+		service.creation = domain.CreationNeedsRight
+	} else {
+		service.creation = domain.CreationUnrestricted
+	}
+	return service
 }
 
 // WithAuditor включает аудит настроек организации и изменений состава (ТЗ §65).
@@ -137,9 +150,12 @@ func (service Service) CreateOrganization(ctx context.Context, actorID, name, ti
 		return domain.Organization{}, ErrInvalid
 	}
 	// Новая организация ещё не в заголовке запроса: контекст RLS задаётся из её идентификатора.
-	if err := service.repository.CreateOrganizationWithOwner(tenantctx.WithTenant(ctx, organization.ID), organization, membership); err != nil {
+	if err := service.repository.CreateOrganizationWithOwner(tenantctx.WithTenant(ctx, organization.ID), organization, membership, service.creation); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			return domain.Organization{}, ErrConflict
+		}
+		if errors.Is(err, domain.ErrOrganizationRightMissing) {
+			return domain.Organization{}, ErrOrganizationCreationNotAllowed
 		}
 		return domain.Organization{}, err
 	}
@@ -464,6 +480,8 @@ var (
 	ErrInvitationRevoked = errors.New("invitation was revoked")
 	ErrInvitationUsed    = errors.New("invitation was already accepted")
 	ErrAlreadyMember     = errors.New("user is already an active member")
+	// ErrOrganizationCreationNotAllowed: в режиме invite_only у пользователя нет права создать организацию (ADR 0057).
+	ErrOrganizationCreationNotAllowed = errors.New("creating an organization is not allowed for this user")
 )
 
 // invitationCodeBytes задаёт энтропию кода приглашения: 256 бит, base64url
@@ -650,6 +668,47 @@ func (service Service) AcceptInvitation(ctx context.Context, userID, code string
 	return identityapplication.MembershipSummary{
 		TenantID: account.Organization.ID, OrganizationName: account.Organization.Name, Role: string(account.Membership.Role),
 	}, nil
+}
+
+// CheckMemberInvitation и AcceptMemberInvitation — узкий контракт для регистрации по коду сотрудника
+// (identityapplication.MemberInvitations, ADR 0057). Любое определённо непригодное состояние кода
+// сводится к одной ошибке, чтобы ответ регистрации не различал причины.
+
+// CheckMemberInvitation сообщает, что код можно принять сейчас; сам код не расходуется.
+func (service Service) CheckMemberInvitation(ctx context.Context, code string) error {
+	if !service.ready() {
+		return ErrInvalid
+	}
+	code = strings.TrimSpace(code)
+	if !invitationCodePattern.MatchString(code) {
+		return identityapplication.ErrInvitationInvalid
+	}
+	invitation, err := service.repository.InvitationByCodeHash(ctx, hashInvitationCode(code))
+	if errors.Is(err, domain.ErrNotFound) {
+		return identityapplication.ErrInvitationInvalid
+	}
+	if err != nil {
+		return mapTeamError(err)
+	}
+	if invitation.Status(service.now()) != domain.InvitationPending {
+		return identityapplication.ErrInvitationInvalid
+	}
+	return nil
+}
+
+// AcceptMemberInvitation принимает код для только что созданного пользователя. ErrInvitationInvalid
+// возвращается только при однозначном отказе; прочие ошибки оставляют исход неизвестным.
+func (service Service) AcceptMemberInvitation(ctx context.Context, userID, code string) error {
+	_, err := service.AcceptInvitation(ctx, userID, code)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrInvitationExpired), errors.Is(err, ErrInvitationRevoked),
+		errors.Is(err, ErrInvitationUsed), errors.Is(err, ErrAlreadyMember), errors.Is(err, ErrInvalid):
+		return identityapplication.ErrInvitationInvalid
+	default:
+		return err
+	}
 }
 
 // Onboarding выводит статус настройки организации из фактов; доступен любому

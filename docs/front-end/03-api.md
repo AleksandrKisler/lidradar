@@ -69,11 +69,12 @@
 
 | Метод и путь | Доступ | Request | Успех | Клиентский эффект |
 |---|---|---|---|---|
-| `POST /auth/register` | guest | `{email,password,displayName}` | `201 AuthResponse` + cookie | refetch `/auth/me`; перейти к tenant boot |
+| `GET /auth/registration` | guest | — | `200 {mode: open \| invite_only}` | показать поле «Код приглашения» (обязательное в `invite_only`); ADR 0057 |
+| `POST /auth/register` | guest | `{email,password,displayName,inviteCode?}` | `201 AuthResponse` + cookie | refetch `/auth/me`; перейти к tenant boot. `403 INVITATION_REQUIRED` / `INVITATION_INVALID` показываются у поля кода, остальные поля сохраняются, пароль — нет |
 | `POST /auth/login` | guest | `{email,password}` | `200 AuthResponse` + cookie | refetch `/auth/me`; восстановить только валидный tenant |
 | `POST /auth/logout` | session optional | — | `204` + expired cookie | очистить весь защищённый cache и persisted UI context |
 | `POST /auth/refresh` | active session | — | `200 AuthResponse` + rotated cookie | заменить auth snapshot; это не recovery после 401 |
-| `GET /auth/me` | session | — | `200 {user,memberships[]}` | источник auth/tenant/role guards |
+| `GET /auth/me` | session | — | `200 {user,memberships[],canCreateOrganization}` | источник auth/tenant/role guards; без членств и без права `canCreateOrganization` пользователя ведут к вводу кода сотрудника, а не к созданию организации |
 
 Register: `400/403/409/429`; login: `400/401/403/429`; logout: `403`;
 refresh: `401/403/429`; me: `401`. Ошибка login не должна раскрывать, существует

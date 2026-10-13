@@ -20,7 +20,9 @@ import (
 const SessionCookieName = "lidradar_session"
 
 type Authentication interface {
-	Register(context.Context, string, string, string, application.Client) (application.Authenticated, error)
+	Register(context.Context, application.RegistrationInput, application.Client) (application.Authenticated, error)
+	// Mode — действующий режим регистрации (ADR 0057): единственный источник для сервиса и интерфейса.
+	Mode() application.RegistrationMode
 	Login(context.Context, string, string, application.Client) (application.Authenticated, error)
 	Authenticate(context.Context, string) (domain.User, error)
 	Logout(context.Context, string) error
@@ -44,6 +46,7 @@ func NewHandler(auth Authentication, memberships application.MembershipLister, c
 
 func (h Handler) Router() http.Handler {
 	router := chi.NewRouter()
+	router.Get("/registration", h.registration)
 	router.Post("/register", h.register)
 	router.Post("/login", h.login)
 	router.Post("/logout", h.logout)
@@ -56,6 +59,13 @@ type credentials struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	DisplayName string `json:"displayName,omitempty"`
+	InviteCode  string `json:"inviteCode,omitempty"`
+}
+
+// registration сообщает интерфейсу режим регистрации без сессии (ADR 0057): секретов здесь нет,
+// а режим нужен странице регистрации, чтобы показать поле кода приглашения.
+func (h Handler) registration(w http.ResponseWriter, _ *http.Request) {
+	httpplatform.WriteJSON(w, http.StatusOK, map[string]any{"mode": string(h.auth.Mode())})
 }
 
 func (h Handler) register(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +74,9 @@ func (h Handler) register(w http.ResponseWriter, r *http.Request) {
 		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
 		return
 	}
-	authenticated, err := h.auth.Register(r.Context(), request.Email, request.Password, request.DisplayName, client(r))
+	authenticated, err := h.auth.Register(r.Context(), application.RegistrationInput{
+		Email: request.Email, Password: request.Password, DisplayName: request.DisplayName, InviteCode: request.InviteCode,
+	}, client(r))
 	if handleError(w, r, err) {
 		return
 	}
@@ -118,7 +130,11 @@ func (h Handler) me(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	httpplatform.WriteJSON(w, http.StatusOK, map[string]any{"user": user, "memberships": memberships})
+	// canCreateOrganization: в open право не проверяется, в invite_only его дают код платформы или команда оператора.
+	canCreateOrganization := h.auth.Mode() == application.RegistrationOpen || user.OrganizationRights > 0
+	httpplatform.WriteJSON(w, http.StatusOK, map[string]any{
+		"user": user, "memberships": memberships, "canCreateOrganization": canCreateOrganization,
+	})
 }
 
 func (h Handler) setSession(w http.ResponseWriter, token string) {
@@ -161,6 +177,10 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
 	case errors.Is(err, application.ErrEmailConflict):
 		httpplatform.WriteError(w, r, http.StatusConflict, "EMAIL_ALREADY_REGISTERED", "Email is already registered", nil)
+	case errors.Is(err, application.ErrInvitationRequired):
+		httpplatform.WriteError(w, r, http.StatusForbidden, "INVITATION_REQUIRED", "Registration is by invitation only", nil)
+	case errors.Is(err, application.ErrInvitationInvalid):
+		httpplatform.WriteError(w, r, http.StatusForbidden, "INVITATION_INVALID", "Invitation code is not valid", nil)
 	case errors.Is(err, application.ErrInvalidCredentials):
 		httpplatform.WriteError(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Email or password is invalid", nil)
 	case errors.Is(err, application.ErrUnauthenticated):

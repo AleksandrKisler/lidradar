@@ -4,7 +4,12 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -49,6 +54,14 @@ type Store interface {
 	UserByEmail(ctx context.Context, email string) (UserRecord, bool, error)
 	GrantAdmin(ctx context.Context, admin domain.Admin, audit domain.AuditEntry) (domain.Admin, bool, error)
 	RevokeAdmin(ctx context.Context, userID string, revokedBy *string, at time.Time, audit domain.AuditEntry) (bool, error)
+	// Коды платформы и право на организацию (ADR 0057): каждая команда пишет аудит в своей транзакции.
+	CreatePlatformInvitation(ctx context.Context, invitation domain.PlatformInvitation, audit domain.AuditEntry) error
+	PlatformInvitations(ctx context.Context) ([]domain.PlatformInvitation, error)
+	// RevokePlatformInvitation отзывает ожидающий код; использованный — ErrConflict, неизвестный — ErrNotFound,
+	// уже отозванный возвращается без изменений и без нового аудита.
+	RevokePlatformInvitation(ctx context.Context, id string, at time.Time, audit domain.AuditEntry) (domain.PlatformInvitation, error)
+	// GrantOrganizationRight добавляет единицу права и возвращает новое значение; предел — ErrConflict.
+	GrantOrganizationRight(ctx context.Context, userID string, audit domain.AuditEntry) (int, error)
 	Organizations(ctx context.Context, now time.Time) ([]domain.OrganizationSummary, error)
 	Connections(ctx context.Context) ([]domain.ConnectionHealth, error)
 	QueueStats(ctx context.Context, now time.Time) (domain.QueueStats, error)
@@ -110,6 +123,95 @@ func (service Service) audit(actor *string, source domain.AuditSource, operation
 		return domain.AuditEntry{}, ErrInvalid
 	}
 	return entry, nil
+}
+
+// IssuePlatformInvitationFromCLI выпускает код платформы для регистрации по приглашению (ADR 0057).
+// Открытый код возвращается ровно один раз; в базе и аудите его нет, заметка в аудит не попадает.
+func (service Service) IssuePlatformInvitationFromCLI(ctx context.Context, note string, days int) (domain.PlatformInvitation, string, error) {
+	if !service.ready() {
+		return domain.PlatformInvitation{}, "", ErrInvalid
+	}
+	code, err := newPlatformCode()
+	if err != nil {
+		return domain.PlatformInvitation{}, "", err
+	}
+	id, err := service.ids.NewID()
+	if err != nil {
+		return domain.PlatformInvitation{}, "", err
+	}
+	invitation, err := domain.NewPlatformInvitation(id, hashPlatformCode(code), note, days, service.now())
+	if err != nil {
+		return domain.PlatformInvitation{}, "", ErrInvalid
+	}
+	audit, err := service.audit(nil, domain.SourceCLI, "PLATFORM_INVITATION_ISSUED", "PLATFORM_INVITATION", invitation.ID)
+	if err != nil {
+		return domain.PlatformInvitation{}, "", err
+	}
+	if err := service.store.CreatePlatformInvitation(ctx, invitation, audit); err != nil {
+		return domain.PlatformInvitation{}, "", err
+	}
+	return invitation, code, nil
+}
+
+// PlatformInvitations перечисляет коды платформы без самих кодов (CLI).
+func (service Service) PlatformInvitations(ctx context.Context) ([]domain.PlatformInvitation, error) {
+	if !service.ready() {
+		return nil, ErrInvalid
+	}
+	return service.store.PlatformInvitations(ctx)
+}
+
+// RevokePlatformInvitationFromCLI отзывает ожидающий код платформы.
+func (service Service) RevokePlatformInvitationFromCLI(ctx context.Context, id string) (domain.PlatformInvitation, error) {
+	if !service.ready() || strings.TrimSpace(id) == "" {
+		return domain.PlatformInvitation{}, ErrInvalid
+	}
+	audit, err := service.audit(nil, domain.SourceCLI, "PLATFORM_INVITATION_REVOKED", "PLATFORM_INVITATION", id)
+	if err != nil {
+		return domain.PlatformInvitation{}, err
+	}
+	return service.store.RevokePlatformInvitation(ctx, id, service.now().UTC(), audit)
+}
+
+// AllowOrganizationFromCLI добавляет существующему пользователю право создать ещё одну организацию
+// в режиме invite_only и возвращает новое число прав.
+func (service Service) AllowOrganizationFromCLI(ctx context.Context, email string) (UserRecord, int, error) {
+	if !service.ready() {
+		return UserRecord{}, 0, ErrInvalid
+	}
+	user, found, err := service.store.UserByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
+	if err != nil {
+		return UserRecord{}, 0, err
+	}
+	if !found {
+		return UserRecord{}, 0, ErrNotFound
+	}
+	audit, err := service.audit(nil, domain.SourceCLI, "ORGANIZATION_RIGHT_GRANTED", "USER", user.ID)
+	if err != nil {
+		return UserRecord{}, 0, err
+	}
+	rights, err := service.store.GrantOrganizationRight(ctx, user.ID, audit)
+	if err != nil {
+		return UserRecord{}, 0, err
+	}
+	return user, rights, nil
+}
+
+// platformCodeBytes задаёт энтропию кода платформы: 256 бит, base64url без дополнения, 43 символа,
+// как у кодов сотрудников (ADR 0045), поэтому регистрация принимает оба вида в одном поле.
+const platformCodeBytes = 32
+
+func newPlatformCode() (string, error) {
+	raw := make([]byte, platformCodeBytes)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("создание кода платформы: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func hashPlatformCode(code string) string {
+	digest := sha256.Sum256([]byte(code))
+	return hex.EncodeToString(digest[:])
 }
 
 // Me сообщает, является ли пользователь активным администратором.

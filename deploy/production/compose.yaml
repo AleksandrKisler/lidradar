@@ -2,6 +2,7 @@
 #
 #   cd deploy/production && cp .env.example .env && chmod 600 .env   # затем заполнить
 #   docker compose up -d                                  # edge, web, api, worker, scheduler, postgres, backup
+#   docker compose run --rm platform-admin invite --note "оператор"   # код для первой регистрации (ADR 0057)
 #   docker compose run --rm platform-admin grant --email owner@example.com
 #
 # Снаружи открыты только порты edge (80 и 443). API, база и worker доступны
@@ -108,6 +109,7 @@ services:
       LIDRADAR_PUBLIC_BASE_URL: ${LIDRADAR_PUBLIC_ORIGIN:-https://${LIDRADAR_DOMAIN:?задайте LIDRADAR_DOMAIN в .env}}
       LIDRADAR_ALLOWED_ORIGINS: ${LIDRADAR_PUBLIC_ORIGIN:-https://${LIDRADAR_DOMAIN}}
       LIDRADAR_TRUSTED_PROXIES: ${LIDRADAR_EDGE_IP:-172.29.88.2}/32
+      LIDRADAR_REGISTRATION_MODE: ${LIDRADAR_REGISTRATION_MODE:-invite_only}
       LIDRADAR_INTEGRATION_ENCRYPTION_KEY: ${LIDRADAR_INTEGRATION_ENCRYPTION_KEY:?задайте LIDRADAR_INTEGRATION_ENCRYPTION_KEY в .env}
       LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:?задайте LIDRADAR_TELEGRAM_BOT_USERNAME в .env}
       LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-lidradar-main-v1}

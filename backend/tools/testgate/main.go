@@ -52,6 +52,11 @@ var required = []string{
 	"lidradar/backend/platform/postgres/TestRoleBootstrapReproducesMigrationGrants",
 	"lidradar/backend/platform/postgres/TestRoleBootstrapGrantsMembershipToSeparateApplicationUser",
 	"lidradar/backend/internal/integration/TestPersistentAuthLimitsUseTheClientBehindTrustedProxy",
+	// Регистрация по приглашениям (ADR 0057): гарантии держатся на транзакциях PostgreSQL.
+	"lidradar/backend/internal/identity/infrastructure/TestConcurrentRedemptionsOfOneCodeCreateExactlyOneUser",
+	"lidradar/backend/internal/tenant/infrastructure/TestParallelCreationsSpendASingleRightOnce",
+	"lidradar/backend/internal/integration/TestPlatformCodeGivesOneOrganizationAndIsSingleUse",
+	"lidradar/backend/internal/integration/TestMemberCodeRegistersAndJoinsWithoutTheRightToCreateOrganizations",
 }
 
 func main() {

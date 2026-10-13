@@ -114,7 +114,15 @@ func run(ctx context.Context, configuration config.Config) error {
 	riskInvalidator := riskinfrastructure.NewPostgresInvalidator(pool)
 	riskEvents := risktransport.NewHub()
 	riskRadar := riskapplication.NewRadar(riskStore, permissionService, riskInvalidator, time.Now).WithAuditor(auditRecorder)
-	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now).WithAuditor(auditRecorder)
+	// Режим регистрации (ADR 0057): в invite_only организацию создаёт только пользователь с правом, а код
+	// приглашения обязателен. Служба tenant тратит право, identity проверяет код.
+	registrationMode := identityapplication.RegistrationMode(configuration.Auth.RegistrationMode)
+	inviteOnly := registrationMode == identityapplication.RegistrationInviteOnly
+	if !inviteOnly && (configuration.Environment == config.EnvironmentStaging || configuration.Environment == config.EnvironmentProduction) {
+		logger.Warn("Регистрация открыта: код приглашения не требуется", "event", "registration.open", "environment", string(configuration.Environment))
+	}
+	tenantService := tenantapplication.NewService(tenantRepository, permissionService, ids.Generator{}, time.Now).
+		WithAuditor(auditRecorder).WithOrganizationRights(inviteOnly)
 	catalogService := catalogapplication.NewService(catalogRepository, permissionService, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
 		connectorRepository, permissionService, connectorRegistry, ids.Generator{}, time.Now, connectorOptions...,
@@ -137,7 +145,7 @@ func run(ctx context.Context, configuration config.Config) error {
 		identityinfrastructure.SessionTokens{},
 		time.Now,
 		configuration.Auth.SessionTTL,
-	).WithAuditor(auditRecorder)
+	).WithAuditor(auditRecorder).WithRegistration(registrationMode, tenantService)
 	principalResolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),

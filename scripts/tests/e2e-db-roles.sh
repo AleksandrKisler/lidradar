@@ -153,6 +153,37 @@ expect 'радар организации читается' "$(api GET /api/v1/r
 expect 'подключение канала создаётся' "$(api POST /api/v1/integrations/GENERIC_WEBHOOK/connect '{"name":"RT webhook"}' "${ORGANIZATION}")" 201
 check 'platform-admin выдаёт право под рабочим логином (права через членство, без SET ROLE)' env LIDRADAR_DATABASE_URL="${RUNTIME_DSN}" "${WORK}/bin/platform-admin" grant --email rt@example.test --note e2e
 expect 'административный api отвечает после выдачи права' "$(api GET /api/v1/admin/me)" 200
+
+# --- 4a. регистрация по приглашениям (ADR 0057): настоящий api в режиме invite_only и platform-admin ---
+# Предел регистраций с адреса постоянный (5 в час) и общий для всех процессов: здесь тратятся три попытки.
+CLOSED_PORT="$(free_port)"
+LIDRADAR_DATABASE_URL="${RUNTIME_DSN}" LIDRADAR_HTTP_ADDRESS="127.0.0.1:${CLOSED_PORT}" LIDRADAR_REGISTRATION_MODE=invite_only "${WORK}/bin/api" >"${WORK}/api-closed.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:${CLOSED_PORT}/health/ready" >/dev/null 2>&1 && break; sleep 1; done
+closed() { curl -sS -b "${WORK}/jar-closed" -c "${WORK}/jar-closed" -X "$1" "http://127.0.0.1:${CLOSED_PORT}$2" -H 'Content-Type: application/json' -H "Origin: http://127.0.0.1:${CLOSED_PORT}" ${4:+-H "X-Tenant-ID: $4"} ${3:+-d "$3"} -o "${WORK}/response" -w '%{http_code}'; }
+# Тело запроса строится функцией: вложенные экранированные кавычки внутри "$(…)" ломаются в bash 3.2 (macOS).
+register_body() { printf '{"email":"%s","password":"very-secure-password","displayName":"%s","inviteCode":"%s"}' "$1" "$2" "$3"; }
+expect 'закрытый api сообщает режим invite_only без сессии' "$(curl -sS "http://127.0.0.1:${CLOSED_PORT}/api/v1/auth/registration" | jq -r .mode)" invite_only
+expect 'открытый api сообщает режим open' "$(curl -sS "http://127.0.0.1:${API_PORT}/api/v1/auth/registration" | jq -r .mode)" open
+expect 'регистрация без кода в закрытом режиме отклонена' "$(closed POST /api/v1/auth/register '{"email":"closed@example.test","password":"very-secure-password","displayName":"Closed Owner"}')" 403
+expect 'отказ называет причину INVITATION_REQUIRED' "$(jq -r .error.code "${WORK}/response")" INVITATION_REQUIRED
+INVITE_OUTPUT="$(env LIDRADAR_DATABASE_URL="${RUNTIME_DSN}" "${WORK}/bin/platform-admin" invite --note e2e --days 3)"
+INVITE_CODE="$(printf '%s\n' "${INVITE_OUTPUT}" | sed -n '1s/.*: //p')"
+expect 'platform-admin invite печатает код приглашения в формате 43 символов base64url' "$(printf '%s' "${INVITE_CODE}" | grep -cE '^[A-Za-z0-9_-]{43}$')" 1
+expect 'в базе нет открытого кода, только его хеш' "$(pg postgres "SELECT count(*) FROM platform_invitations WHERE code_hash = '${INVITE_CODE}' OR note = '${INVITE_CODE}'")" 0
+REGISTER_BODY="$(register_body closed@example.test 'Closed Owner' "${INVITE_CODE}")"
+expect 'регистрация по коду платформы' "$(closed POST /api/v1/auth/register "${REGISTER_BODY}")" 201
+REGISTER_BODY="$(register_body second@example.test Second "${INVITE_CODE}")"
+expect 'тот же код второй раз отклонён как недействительный' "$(closed POST /api/v1/auth/register "${REGISTER_BODY}")" 403
+expect 'отказ называет причину INVITATION_INVALID' "$(jq -r .error.code "${WORK}/response")" INVITATION_INVALID
+expect 'после регистрации по коду пользователь вправе создать организацию' "$(closed GET /api/v1/auth/me >/dev/null; jq -r .canCreateOrganization "${WORK}/response")" true
+expect 'организация создаётся по праву' "$(closed POST /api/v1/organizations '{"name":"Closed Studio","defaultTimezone":"Europe/Moscow"}')" 201
+expect 'вторая организация без права отклонена' "$(closed POST /api/v1/organizations '{"name":"Second Studio","defaultTimezone":"Europe/Moscow"}')" 403
+expect 'отказ называет причину ORGANIZATION_CREATION_NOT_ALLOWED' "$(jq -r .error.code "${WORK}/response")" ORGANIZATION_CREATION_NOT_ALLOWED
+check 'platform-admin allow-organization добавляет право' env LIDRADAR_DATABASE_URL="${RUNTIME_DSN}" "${WORK}/bin/platform-admin" allow-organization --email closed@example.test
+expect 'после allow-organization создаётся ещё одна организация' "$(closed POST /api/v1/organizations '{"name":"Third Studio","defaultTimezone":"Europe/Moscow"}')" 201
+expect 'platform-admin invitations показывает использованный код без самого кода' "$(env LIDRADAR_DATABASE_URL="${RUNTIME_DSN}" "${WORK}/bin/platform-admin" invitations | awk -F'\t' '{print $2}')" USED
+expect 'аудит оператора: выпуск кода и выдача права записаны источником CLI' "$(pg postgres "SELECT string_agg(operation, ',' ORDER BY operation) FROM admin_audit_log WHERE source = 'CLI' AND operation IN ('PLATFORM_INVITATION_ISSUED', 'ORGANIZATION_RIGHT_GRANTED')")" 'ORGANIZATION_RIGHT_GRANTED,PLATFORM_INVITATION_ISSUED'
 sleep 5
 expect 'все соединения процессов приложения идут от рабочего логина' "$(pg postgres "SELECT string_agg(DISTINCT usename, ',') FROM pg_stat_activity WHERE datname = 'lidradar' AND backend_type = 'client backend' AND pid <> pg_backend_pid()")" lidradar_runtime
 expect 'суперпользователей среди клиентов базы нет' "$(pg postgres "SELECT count(*) FROM pg_stat_activity a JOIN pg_roles r ON r.rolname = a.usename WHERE r.rolsuper AND a.backend_type = 'client backend' AND a.pid <> pg_backend_pid()")" 0

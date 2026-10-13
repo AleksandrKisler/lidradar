@@ -76,10 +76,48 @@ func (*testTokens) HashToken(value string) string {
 type memoryRepository struct {
 	users    map[string]domain.User
 	sessions map[string]domain.Session
+	// platform хранит коды платформы по хешу: true — код можно погасить, false — просрочен или отозван.
+	platform map[string]bool
+	// consumedBy фиксирует, кто погасил код платформы.
+	consumedBy map[string]string
 }
 
 func newMemoryRepository() *memoryRepository {
-	return &memoryRepository{users: map[string]domain.User{}, sessions: map[string]domain.Session{}}
+	return &memoryRepository{
+		users: map[string]domain.User{}, sessions: map[string]domain.Session{},
+		platform: map[string]bool{}, consumedBy: map[string]string{},
+	}
+}
+
+func (r *memoryRepository) CreateUserSessionWithPlatformInvitation(_ context.Context, user domain.User, session domain.Session, codeHash string, _ time.Time) error {
+	// Порядок как в PostgreSQL: сначала код, потом почта, чтобы недействительный код не выдавал занятость адреса.
+	if !r.platform[codeHash] {
+		return domain.ErrInvitationInvalid
+	}
+	if _, exists := r.users[user.Email]; exists {
+		return domain.ErrConflict
+	}
+	r.users[user.Email] = user
+	r.sessions[session.TokenHash] = session
+	r.platform[codeHash] = false
+	r.consumedBy[codeHash] = user.ID
+	return nil
+}
+func (r *memoryRepository) PlatformInvitationUsable(_ context.Context, codeHash string, _ time.Time) (bool, error) {
+	return r.platform[codeHash], nil
+}
+func (r *memoryRepository) DeleteNewUser(_ context.Context, userID string) error {
+	for email, user := range r.users {
+		if user.ID == userID {
+			delete(r.users, email)
+		}
+	}
+	for hash, session := range r.sessions {
+		if session.UserID == userID {
+			delete(r.sessions, hash)
+		}
+	}
+	return nil
 }
 func (r *memoryRepository) CreateUserSession(_ context.Context, user domain.User, session domain.Session) error {
 	if _, exists := r.users[user.Email]; exists {
@@ -132,9 +170,10 @@ func (r *memoryRepository) RevokeSession(_ context.Context, hash string, at time
 func TestRegisterAuthenticateRefreshAndLogout(t *testing.T) {
 	repository := newMemoryRepository()
 	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
-	service := NewService(repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{}, func() time.Time { return now }, 24*time.Hour)
+	service := NewService(repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{}, func() time.Time { return now }, 24*time.Hour).
+		WithRegistration(RegistrationOpen, nil)
 
-	registered, err := service.Register(context.Background(), " OWNER@Example.com ", "very-secure-password", "Owner", Client{})
+	registered, err := service.Register(context.Background(), RegistrationInput{Email: " OWNER@Example.com ", Password: "very-secure-password", DisplayName: "Owner"}, Client{})
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -170,11 +209,12 @@ func TestRegisterAuthenticateRefreshAndLogout(t *testing.T) {
 
 func TestRegistrationConflictAndLoginErrorAreStable(t *testing.T) {
 	repository := newMemoryRepository()
-	service := NewService(repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{}, time.Now, time.Hour)
-	if _, err := service.Register(context.Background(), "owner@example.com", "very-secure-password", "Owner", Client{}); err != nil {
+	service := NewService(repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{}, time.Now, time.Hour).
+		WithRegistration(RegistrationOpen, nil)
+	if _, err := service.Register(context.Background(), RegistrationInput{Email: "owner@example.com", Password: "very-secure-password", DisplayName: "Owner"}, Client{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Register(context.Background(), "OWNER@example.com", "another-secure-password", "Other", Client{}); err != ErrEmailConflict {
+	if _, err := service.Register(context.Background(), RegistrationInput{Email: "OWNER@example.com", Password: "another-secure-password", DisplayName: "Other"}, Client{}); err != ErrEmailConflict {
 		t.Fatalf("duplicate Register() error = %v", err)
 	}
 	if _, err := service.Login(context.Background(), "owner@example.com", "wrong", Client{}); err != ErrInvalidCredentials {
@@ -188,9 +228,9 @@ func TestLoginBruteForceIsBlockedAndSuccessfulLoginResetsAccountCounter(t *testi
 	service := NewService(
 		repository, newTestRateLimiter(), testPasswords{}, &testIDs{}, &testTokens{},
 		func() time.Time { return now }, time.Hour,
-	)
+	).WithRegistration(RegistrationOpen, nil)
 	client := Client{IPAddress: "192.0.2.10"}
-	if _, err := service.Register(context.Background(), "owner@example.com", "very-secure-password", "Owner", client); err != nil {
+	if _, err := service.Register(context.Background(), RegistrationInput{Email: "owner@example.com", Password: "very-secure-password", DisplayName: "Owner"}, client); err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 1; attempt <= loginAccountLimit; attempt++ {

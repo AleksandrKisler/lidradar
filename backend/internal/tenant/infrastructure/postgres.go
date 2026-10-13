@@ -21,7 +21,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
-func (r *PostgresRepository) CreateOrganizationWithOwner(ctx context.Context, organization domain.Organization, membership domain.Membership) error {
+func (r *PostgresRepository) CreateOrganizationWithOwner(ctx context.Context, organization domain.Organization, membership domain.Membership, creation domain.OrganizationCreation) error {
 	if r == nil || r.pool == nil || organization.ID != membership.TenantID || membership.Role != domain.RoleOwner {
 		return domain.ErrInvalid
 	}
@@ -30,6 +30,19 @@ func (r *PostgresRepository) CreateOrganizationWithOwner(ctx context.Context, or
 		return fmt.Errorf("begin organization creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if creation == domain.CreationNeedsRight {
+		// Единственная запись tenant в таблицу identity (ADR 0057): условное уменьшение в транзакции
+		// создания делает «одно право — одна организация» точным и при параллельных запросах.
+		spent, err := tx.Exec(ctx, `
+			UPDATE users SET organization_rights = organization_rights - 1
+			WHERE id = $1 AND organization_rights > 0`, membership.UserID)
+		if err != nil {
+			return mapPostgresError("spend organization right", err)
+		}
+		if spent.RowsAffected() != 1 {
+			return domain.ErrOrganizationRightMissing
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO organizations(id, name, default_timezone, default_currency, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,

@@ -89,6 +89,16 @@ func newAPIFixtureWithRouterOptions(t *testing.T, options ...httpplatform.Router
 }
 
 func newAPIFixtureForAnalysis(t *testing.T, current bool, routerOptions ...httpplatform.RouterOption) apiFixture {
+	return buildAPIFixture(t, current, identityapplication.RegistrationOpen, routerOptions...)
+}
+
+// newInviteOnlyAPIFixture поднимает стенд в режиме invite_only, как в staging и production (ADR 0057):
+// регистрация требует код, а организацию создаёт только пользователь с правом.
+func newInviteOnlyAPIFixture(t *testing.T) apiFixture {
+	return buildAPIFixture(t, false, identityapplication.RegistrationInviteOnly)
+}
+
+func buildAPIFixture(t *testing.T, current bool, mode identityapplication.RegistrationMode, routerOptions ...httpplatform.RouterOption) apiFixture {
 	t.Helper()
 	pools := testsupport.PostgresRoles(t)
 	// Репозитории API и обработчиков работают под ролью с RLS; захват заданий,
@@ -103,7 +113,8 @@ func newAPIFixtureForAnalysis(t *testing.T, current bool, routerOptions ...httpp
 	conversationRepository := conversationinfrastructure.NewPostgresRepository(pool)
 	opportunityRepository := opportunityinfrastructure.NewPostgresRepository(pool)
 	permissions := application.NewPermissionService(tenantRepository)
-	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now).WithAuditor(auditRecorder)
+	tenantService := application.NewService(tenantRepository, permissions, ids.Generator{}, time.Now).
+		WithAuditor(auditRecorder).WithOrganizationRights(mode == identityapplication.RegistrationInviteOnly)
 	catalogService := catalogapplication.NewService(catalogRepository, permissions, ids.Generator{}, time.Now)
 	connectorService := connectorapplication.NewService(
 		connectorRepository, permissions, connectorinfrastructure.NewRegistry(), ids.Generator{}, time.Now,
@@ -222,7 +233,7 @@ func newAPIFixtureForAnalysis(t *testing.T, current bool, routerOptions ...httpp
 	identityService := identityapplication.NewService(
 		identityRepository, identityinfrastructure.NewPostgresRateLimiter(pool), cryptoplatform.PasswordHasher{},
 		ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
-	).WithAuditor(auditRecorder)
+	).WithAuditor(auditRecorder).WithRegistration(mode, tenantService)
 	resolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),

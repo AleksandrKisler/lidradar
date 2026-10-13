@@ -17,6 +17,51 @@ type memoryStore struct {
 	granted []domain.Admin
 	usage   [2]time.Time
 	deadJob string
+	// Коды платформы и право на организацию (ADR 0057).
+	invitations map[string]domain.PlatformInvitation
+	rights      map[string]int
+}
+
+func (store *memoryStore) CreatePlatformInvitation(_ context.Context, invitation domain.PlatformInvitation, audit domain.AuditEntry) error {
+	if store.invitations == nil {
+		store.invitations = map[string]domain.PlatformInvitation{}
+	}
+	store.invitations[invitation.ID] = invitation
+	store.audits = append(store.audits, audit)
+	return nil
+}
+func (store *memoryStore) PlatformInvitations(context.Context) ([]domain.PlatformInvitation, error) {
+	result := make([]domain.PlatformInvitation, 0, len(store.invitations))
+	for _, invitation := range store.invitations {
+		result = append(result, invitation)
+	}
+	return result, nil
+}
+func (store *memoryStore) RevokePlatformInvitation(_ context.Context, id string, at time.Time, audit domain.AuditEntry) (domain.PlatformInvitation, error) {
+	invitation, found := store.invitations[id]
+	switch {
+	case !found:
+		return domain.PlatformInvitation{}, application.ErrNotFound
+	case invitation.ConsumedAt != nil:
+		return domain.PlatformInvitation{}, application.ErrConflict
+	case invitation.RevokedAt != nil:
+		return invitation, nil
+	}
+	invitation.RevokedAt = &at
+	store.invitations[id] = invitation
+	store.audits = append(store.audits, audit)
+	return invitation, nil
+}
+func (store *memoryStore) GrantOrganizationRight(_ context.Context, userID string, audit domain.AuditEntry) (int, error) {
+	if store.rights == nil {
+		store.rights = map[string]int{}
+	}
+	if store.rights[userID] >= domain.MaxOrganizationRights {
+		return 0, application.ErrConflict
+	}
+	store.rights[userID]++
+	store.audits = append(store.audits, audit)
+	return store.rights[userID], nil
 }
 
 func (store *memoryStore) IsAdmin(_ context.Context, userID string) (bool, error) {

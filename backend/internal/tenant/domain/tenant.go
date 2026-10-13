@@ -23,6 +23,19 @@ var (
 	ErrInvitationUsed    = errors.New("invitation was already accepted")
 	// ErrAlreadyMember — пользователь уже активный участник организации.
 	ErrAlreadyMember = errors.New("user is already an active member")
+	// ErrOrganizationRightMissing — в режиме invite_only у пользователя не осталось права создать
+	// организацию (ADR 0057).
+	ErrOrganizationRightMissing = errors.New("user has no right to create an organization")
+)
+
+// OrganizationCreation задаёт, нужно ли право на создание организации (ADR 0057).
+type OrganizationCreation int
+
+const (
+	// CreationUnrestricted — режим open: право не проверяется.
+	CreationUnrestricted OrganizationCreation = iota
+	// CreationNeedsRight — режим invite_only: транзакция создания тратит единицу users.organization_rights.
+	CreationNeedsRight
 )
 
 type OrganizationStatus string
@@ -193,7 +206,9 @@ func validTimezone(value string) bool {
 
 // Repository keeps every tenant-owned lookup explicitly scoped by tenant ID.
 type Repository interface {
-	CreateOrganizationWithOwner(context.Context, Organization, Membership) error
+	// CreateOrganizationWithOwner создаёт организацию и владельца одной транзакцией; при CreationNeedsRight
+	// в ней же тратится право создателя, а его отсутствие возвращает ErrOrganizationRightMissing.
+	CreateOrganizationWithOwner(context.Context, Organization, Membership, OrganizationCreation) error
 	Organization(context.Context, string) (Organization, bool, error)
 	UpdateOrganization(context.Context, string, Organization) (Organization, bool, error)
 	Membership(context.Context, string, string) (Membership, bool, error)
@@ -221,6 +236,9 @@ type Repository interface {
 	// восстанавливает членство и помечает приглашение принятым одной
 	// транзакцией; аудит записывается от имени нового участника.
 	AcceptInvitation(context.Context, AcceptInvitationCommand) (AccountMembership, error)
+	// InvitationByCodeHash читает приглашение по хешу кода, ничего не меняя; нет строки — ErrNotFound.
+	// Нужно регистрации по приглашению сотрудника, которая проверяет код до создания пользователя (ADR 0057).
+	InvitationByCodeHash(context.Context, string) (Invitation, error)
 	// OnboardingFacts читает факты настройки организации для расчёта статуса
 	// онбординга (ADR 0045).
 	OnboardingFacts(context.Context, string, string) (OnboardingFacts, error)

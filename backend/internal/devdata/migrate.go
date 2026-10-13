@@ -24,8 +24,11 @@ const Version = "frontend-v1"
 
 // SchemaVersion — последняя миграция схемы, на которой проверен набор.
 // Миграция 000023 аддитивна: договорённости пусты, порог 120 минут.
+// Миграция 000024 добавляет коды платформы и право создать организацию (ADR 0057);
+// набор их не использует: у учебных пользователей право равно нулю, регистрация
+// в базе разработки открыта.
 // Содержимое учебной миграции не меняется; up/down проверяются тестами.
-const SchemaVersion = "000023_unfinished_agreements"
+const SchemaVersion = "000024_platform_invitations"
 const DatabaseName = "lidradar_frontend"
 
 //go:embed migrations/*.sql

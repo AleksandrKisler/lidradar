@@ -157,6 +157,54 @@ func TestLoadDefaultsSecureCookiesOutsideDevelopment(t *testing.T) {
 	}
 }
 
+// Регистрация закрыта по умолчанию там, где есть реальные клиенты (ADR 0057), и открыта
+// в разработке и тестах: иначе каждый локальный стенд требовал бы выданный оператором код.
+func TestLoadRegistrationModeDefaultsFollowEnvironment(t *testing.T) {
+	cases := map[Environment]RegistrationMode{
+		EnvironmentDevelopment: RegistrationOpen,
+		EnvironmentTest:        RegistrationOpen,
+		EnvironmentStaging:     RegistrationInviteOnly,
+		EnvironmentProduction:  RegistrationInviteOnly,
+	}
+	for environment, want := range cases {
+		configuration, err := Load(mapLookup(map[string]string{environmentKey: string(environment), databaseURLKey: "postgres://example"}))
+		if err != nil {
+			t.Fatalf("Load(%s) error = %v", environment, err)
+		}
+		if configuration.Auth.RegistrationMode != want {
+			t.Errorf("Load(%s).Auth.RegistrationMode = %q, want %q", environment, configuration.Auth.RegistrationMode, want)
+		}
+	}
+}
+
+func TestLoadRegistrationModeIsExplicitAndValidated(t *testing.T) {
+	configuration, err := Load(mapLookup(map[string]string{
+		environmentKey: string(EnvironmentProduction), databaseURLKey: "postgres://example", registrationModeKey: " Open ",
+	}))
+	if err != nil || configuration.Auth.RegistrationMode != RegistrationOpen {
+		t.Fatalf("explicit open in production: mode = %q, error = %v", configuration.Auth.RegistrationMode, err)
+	}
+	configuration, err = Load(mapLookup(map[string]string{
+		environmentKey: string(EnvironmentDevelopment), registrationModeKey: "invite_only",
+	}))
+	if err != nil || configuration.Auth.RegistrationMode != RegistrationInviteOnly {
+		t.Fatalf("explicit invite_only in development: mode = %q, error = %v", configuration.Auth.RegistrationMode, err)
+	}
+	for _, value := range []string{"closed", "invite-only", "true", ""} {
+		_, err := Load(mapLookup(map[string]string{environmentKey: string(EnvironmentDevelopment), registrationModeKey: value}))
+		if value == "" {
+			// Пустое значение — ошибка, а не молчаливое «открыто»: пропуск настройки не должен открывать регистрацию.
+			if err == nil || !strings.Contains(err.Error(), registrationModeKey) {
+				t.Errorf("empty value must be rejected, error = %v", err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), registrationModeKey) {
+			t.Errorf("Load(%q) error = %v, want registration mode error", value, err)
+		}
+	}
+}
+
 // В staging и production API обязан получить всё, без чего веб-клиент и Telegram
 // не заработают, и иначе отказаться от запуска. За прокси, завершающим TLS, API
 // видит http и не узнаёт свой origin по схеме: каждая мутация браузера, включая

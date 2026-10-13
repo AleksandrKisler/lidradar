@@ -205,6 +205,136 @@ func (store *PostgresStore) RevokeAdmin(ctx context.Context, userID string, revo
 	return true, nil
 }
 
+// Коды платформы и право на организацию (ADR 0057). Таблицей platform_invitations владеет admin;
+// погашает код при регистрации identity. Запись users.organization_rights — единственная запись admin
+// в таблицу identity, она описана в карте прямых обращений.
+
+const platformInvitationColumns = `id::text, code_hash, note, created_at, expires_at, revoked_at, consumed_at, consumed_by_user_id::text`
+
+func scanPlatformInvitation(row rowScanner) (domain.PlatformInvitation, error) {
+	var invitation domain.PlatformInvitation
+	if err := row.Scan(&invitation.ID, &invitation.CodeHash, &invitation.Note, &invitation.CreatedAt, &invitation.ExpiresAt,
+		&invitation.RevokedAt, &invitation.ConsumedAt, &invitation.ConsumedBy); err != nil {
+		return domain.PlatformInvitation{}, err
+	}
+	return invitation, nil
+}
+
+func (store *PostgresStore) CreatePlatformInvitation(ctx context.Context, invitation domain.PlatformInvitation, audit domain.AuditEntry) error {
+	if !store.ready() || invitation.Validate() != nil || !ids.Valid(invitation.ID) {
+		return application.ErrInvalid
+	}
+	tx, err := store.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начало выпуска кода платформы: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO platform_invitations(id, code_hash, note, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5)`,
+		invitation.ID, invitation.CodeHash, invitation.Note, invitation.CreatedAt.UTC(), invitation.ExpiresAt.UTC()); err != nil {
+		return mapAdminError("выпуск кода платформы", err)
+	}
+	if err := insertAudit(ctx, tx, audit); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("фиксация выпуска кода платформы: %w", err)
+	}
+	return nil
+}
+
+func (store *PostgresStore) PlatformInvitations(ctx context.Context) ([]domain.PlatformInvitation, error) {
+	if !store.ready() {
+		return nil, application.ErrInvalid
+	}
+	rows, err := store.pool.Query(ctx, `
+		SELECT `+platformInvitationColumns+`
+		FROM platform_invitations ORDER BY created_at DESC, id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("чтение кодов платформы: %w", err)
+	}
+	defer rows.Close()
+	invitations := make([]domain.PlatformInvitation, 0)
+	for rows.Next() {
+		invitation, err := scanPlatformInvitation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("чтение кода платформы: %w", err)
+		}
+		invitations = append(invitations, invitation)
+	}
+	return invitations, rows.Err()
+}
+
+func (store *PostgresStore) RevokePlatformInvitation(ctx context.Context, id string, at time.Time, audit domain.AuditEntry) (domain.PlatformInvitation, error) {
+	if !store.ready() || !ids.Valid(id) || at.IsZero() {
+		return domain.PlatformInvitation{}, application.ErrInvalid
+	}
+	tx, err := store.pool.Begin(ctx)
+	if err != nil {
+		return domain.PlatformInvitation{}, fmt.Errorf("начало отзыва кода платформы: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	invitation, err := scanPlatformInvitation(tx.QueryRow(ctx, `
+		SELECT `+platformInvitationColumns+` FROM platform_invitations WHERE id = $1 FOR UPDATE`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.PlatformInvitation{}, application.ErrNotFound
+	}
+	if err != nil {
+		return domain.PlatformInvitation{}, mapAdminError("блокировка кода платформы", err)
+	}
+	switch {
+	case invitation.ConsumedAt != nil:
+		return domain.PlatformInvitation{}, application.ErrConflict
+	case invitation.RevokedAt != nil:
+		return invitation, nil
+	}
+	revoked := at.UTC()
+	if _, err := tx.Exec(ctx, `UPDATE platform_invitations SET revoked_at = $2 WHERE id = $1`, id, revoked); err != nil {
+		return domain.PlatformInvitation{}, mapAdminError("отзыв кода платформы", err)
+	}
+	if err := insertAudit(ctx, tx, audit); err != nil {
+		return domain.PlatformInvitation{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.PlatformInvitation{}, fmt.Errorf("фиксация отзыва кода платформы: %w", err)
+	}
+	invitation.RevokedAt = &revoked
+	return invitation, nil
+}
+
+func (store *PostgresStore) GrantOrganizationRight(ctx context.Context, userID string, audit domain.AuditEntry) (int, error) {
+	if !store.ready() || !ids.Valid(userID) {
+		return 0, application.ErrInvalid
+	}
+	tx, err := store.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("начало выдачи права на организацию: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var current int
+	err = tx.QueryRow(ctx, `SELECT organization_rights FROM users WHERE id = $1 AND status = 'ACTIVE' FOR UPDATE`, userID).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, application.ErrNotFound
+	}
+	if err != nil {
+		return 0, mapAdminError("чтение права на организацию", err)
+	}
+	if current >= domain.MaxOrganizationRights {
+		return 0, application.ErrConflict
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET organization_rights = organization_rights + 1 WHERE id = $1`, userID); err != nil {
+		return 0, mapAdminError("выдача права на организацию", err)
+	}
+	if err := insertAudit(ctx, tx, audit); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("фиксация выдачи права на организацию: %w", err)
+	}
+	return current + 1, nil
+}
+
 func (store *PostgresStore) Organizations(ctx context.Context, now time.Time) ([]domain.OrganizationSummary, error) {
 	if !store.ready() || now.IsZero() {
 		return nil, application.ErrInvalid

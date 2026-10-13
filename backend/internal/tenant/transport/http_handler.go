@@ -489,6 +489,8 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 		writeError(w, r, http.StatusConflict, "INVITATION_USED", "Invitation was already accepted")
 	case errors.Is(err, application.ErrAlreadyMember):
 		writeError(w, r, http.StatusConflict, "ALREADY_MEMBER", "User is already an active member")
+	case errors.Is(err, application.ErrOrganizationCreationNotAllowed):
+		writeError(w, r, http.StatusForbidden, "ORGANIZATION_CREATION_NOT_ALLOWED", "Creating an organization requires an invitation")
 	default:
 		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
 	}

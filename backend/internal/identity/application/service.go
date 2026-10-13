@@ -4,6 +4,7 @@ package application
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,7 +17,41 @@ var (
 	ErrUnauthenticated    = errors.New("authentication required")
 	ErrInvalidInput       = errors.New("invalid identity input")
 	ErrEmailConflict      = errors.New("email already registered")
+	// ErrInvitationRequired: в режиме invite_only регистрация без кода невозможна (ADR 0057).
+	ErrInvitationRequired = errors.New("registration requires an invitation")
+	// ErrInvitationInvalid: код неизвестен, просрочен, использован или отозван; причина не различается.
+	ErrInvitationInvalid = errors.New("invitation code cannot be used")
 )
+
+// RegistrationMode задаёт, кто может создать учётную запись (ADR 0057). Нулевое значение
+// считается закрытым режимом: забытая настройка не должна открывать регистрацию.
+type RegistrationMode string
+
+const (
+	RegistrationOpen       RegistrationMode = "open"
+	RegistrationInviteOnly RegistrationMode = "invite_only"
+)
+
+// invitationCodePattern — формат кодов обоих видов: 256 бит в base64url без дополнения.
+var invitationCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+
+// MemberInvitations — узкий контракт приглашений сотрудников (ADR 0045), который реализует модуль
+// tenant: регистрация проверяет код, не расходуя его, создаёт пользователя и только потом принимает код.
+type MemberInvitations interface {
+	// CheckMemberInvitation возвращает nil, если код можно принять сейчас, и ErrInvitationInvalid, если нельзя.
+	CheckMemberInvitation(ctx context.Context, code string) error
+	// AcceptMemberInvitation принимает код для только что созданного пользователя; ErrInvitationInvalid
+	// означает, что приём однозначно не состоялся (гонка), любая другая ошибка неоднозначна.
+	AcceptMemberInvitation(ctx context.Context, userID, code string) error
+}
+
+// RegistrationInput — поля запроса на регистрацию; InviteCode необязателен только в режиме open.
+type RegistrationInput struct {
+	Email       string
+	Password    string
+	DisplayName string
+	InviteCode  string
+}
 
 const (
 	minimumPasswordLength = 12
@@ -66,6 +101,8 @@ type Service struct {
 	now        func() time.Time
 	sessionTTL time.Duration
 	auditor    auditapplication.Recorder
+	mode       RegistrationMode
+	invitation MemberInvitations
 }
 
 // WithAuditor включает аудит входа, выхода и регистрации (ТЗ §65).
@@ -74,25 +111,57 @@ func (s Service) WithAuditor(auditor auditapplication.Recorder) Service {
 	return s
 }
 
+// WithRegistration задаёт режим регистрации и источник кодов сотрудников (ADR 0057); без вызова
+// действует закрытый режим, а коды сотрудников не принимаются.
+func (s Service) WithRegistration(mode RegistrationMode, invitations MemberInvitations) Service {
+	s.mode = mode
+	s.invitation = invitations
+	return s
+}
+
+// Mode возвращает действующий режим; пустое значение приравнено к закрытому.
+func (s Service) Mode() RegistrationMode {
+	if s.mode == RegistrationOpen {
+		return RegistrationOpen
+	}
+	return RegistrationInviteOnly
+}
+
 func NewService(repository domain.Repository, limiter RateLimiter, passwords Passwords, ids IDs, tokens Tokens, now func() time.Time, sessionTTL time.Duration) Service {
 	return Service{repository: repository, limiter: limiter, passwords: passwords, ids: ids, tokens: tokens, now: now, sessionTTL: sessionTTL}
 }
 
-func (s Service) Register(ctx context.Context, email, password, displayName string, client Client) (Authenticated, error) {
+type admission int
+
+const (
+	admissionNone admission = iota
+	admissionPlatform
+	admissionMember
+)
+
+// Register создаёт учётную запись. Код приглашения обрабатывается в обоих режимах, но обязателен только
+// в invite_only; недействительный код отвечает одинаково при любой причине (ADR 0057).
+func (s Service) Register(ctx context.Context, input RegistrationInput, client Client) (Authenticated, error) {
 	if err := s.ready(); err != nil {
 		return Authenticated{}, ErrInvalidInput
 	}
 	if err := s.take(ctx, ScopeRegisterIP, client.IPAddress, registerIPLimit, registerIPWindow); err != nil {
 		return Authenticated{}, err
 	}
-	if !validPassword(password) {
+	if !validPassword(input.Password) {
 		return Authenticated{}, ErrInvalidInput
 	}
-	normalizedEmail, err := domain.NormalizeEmail(email)
+	normalizedEmail, err := domain.NormalizeEmail(input.Email)
 	if err != nil {
 		return Authenticated{}, ErrInvalidInput
 	}
-	passwordHash, err := s.passwords.Hash(password)
+	now := s.now().UTC()
+	code := strings.TrimSpace(input.InviteCode)
+	kind, codeHash, err := s.admit(ctx, code, now)
+	if err != nil {
+		return Authenticated{}, err
+	}
+	passwordHash, err := s.passwords.Hash(input.Password)
 	if err != nil {
 		return Authenticated{}, err
 	}
@@ -100,8 +169,7 @@ func (s Service) Register(ctx context.Context, email, password, displayName stri
 	if err != nil {
 		return Authenticated{}, err
 	}
-	now := s.now().UTC()
-	user, err := domain.NewUser(userID, normalizedEmail, passwordHash, displayName, now)
+	user, err := domain.NewUser(userID, normalizedEmail, passwordHash, input.DisplayName, now)
 	if err != nil {
 		return Authenticated{}, ErrInvalidInput
 	}
@@ -109,16 +177,67 @@ func (s Service) Register(ctx context.Context, email, password, displayName stri
 	if err != nil {
 		return Authenticated{}, err
 	}
-	if err := s.repository.CreateUserSession(ctx, user, session); err != nil {
-		if errors.Is(err, domain.ErrConflict) {
+	switch kind {
+	case admissionPlatform:
+		user.OrganizationRights = 1
+		err = s.repository.CreateUserSessionWithPlatformInvitation(ctx, user, session, codeHash, now)
+	default:
+		err = s.repository.CreateUserSession(ctx, user, session)
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrConflict):
 			return Authenticated{}, ErrEmailConflict
+		case errors.Is(err, domain.ErrInvitationInvalid):
+			return Authenticated{}, ErrInvitationInvalid
 		}
 		return Authenticated{}, err
+	}
+	if kind == admissionMember {
+		if err := s.invitation.AcceptMemberInvitation(ctx, user.ID, code); err != nil {
+			if !errors.Is(err, ErrInvitationInvalid) {
+				// Исход приёма неизвестен: пользователя не удаляем, чтобы не потерять уже принятое членство.
+				return Authenticated{}, err
+			}
+			if removeErr := s.repository.DeleteNewUser(ctx, user.ID); removeErr != nil {
+				return Authenticated{}, removeErr
+			}
+			return Authenticated{}, ErrInvitationInvalid
+		}
 	}
 	if err := s.auditAuth(ctx, user.ID, "USER_REGISTERED", client, s.now().UTC()); err != nil {
 		return Authenticated{}, err
 	}
 	return Authenticated{User: user, Token: token}, nil
+}
+
+// admit определяет вид кода, не расходуя его. Пустой код допустим только в open; код сотрудника
+// принимается лишь при подключённом контракте.
+func (s Service) admit(ctx context.Context, code string, now time.Time) (admission, string, error) {
+	if code == "" {
+		if s.Mode() != RegistrationOpen {
+			return admissionNone, "", ErrInvitationRequired
+		}
+		return admissionNone, "", nil
+	}
+	if !invitationCodePattern.MatchString(code) {
+		return admissionNone, "", ErrInvitationInvalid
+	}
+	codeHash := s.tokens.HashToken(code)
+	usable, err := s.repository.PlatformInvitationUsable(ctx, codeHash, now)
+	if err != nil {
+		return admissionNone, "", err
+	}
+	if usable {
+		return admissionPlatform, codeHash, nil
+	}
+	if s.invitation == nil {
+		return admissionNone, "", ErrInvitationInvalid
+	}
+	if err := s.invitation.CheckMemberInvitation(ctx, code); err != nil {
+		return admissionNone, "", err
+	}
+	return admissionMember, codeHash, nil
 }
 
 func (s Service) Login(ctx context.Context, email, password string, client Client) (Authenticated, error) {

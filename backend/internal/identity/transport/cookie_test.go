@@ -12,20 +12,39 @@ import (
 	"lidradar/backend/internal/identity/domain"
 )
 
-type stubAuthentication struct{}
+// stubAuthentication подменяет службу identity в тестах транспорта. Нулевое значение ведёт себя
+// как закрытый режим без права на организацию; поля нужны тестам регистрации по приглашению.
+type stubAuthentication struct {
+	mode        application.RegistrationMode
+	rights      int
+	registerErr error
+	registered  *application.RegistrationInput
+}
 
-func (stubAuthentication) Register(context.Context, string, string, string, application.Client) (application.Authenticated, error) {
-	return application.Authenticated{}, application.ErrInvalidCredentials
+func (stub stubAuthentication) Register(_ context.Context, input application.RegistrationInput, _ application.Client) (application.Authenticated, error) {
+	if stub.registered != nil {
+		*stub.registered = input
+	}
+	if stub.registerErr != nil {
+		return application.Authenticated{}, stub.registerErr
+	}
+	return application.Authenticated{User: domain.User{ID: "user", Email: input.Email}, Token: "opaque-token"}, nil
 }
 func (stubAuthentication) Login(context.Context, string, string, application.Client) (application.Authenticated, error) {
 	return application.Authenticated{User: domain.User{ID: "user", Email: "u@example.com"}, Token: "opaque-token"}, nil
 }
-func (stubAuthentication) Authenticate(context.Context, string) (domain.User, error) {
-	return domain.User{ID: "user"}, nil
+func (stub stubAuthentication) Authenticate(context.Context, string) (domain.User, error) {
+	return domain.User{ID: "user", OrganizationRights: stub.rights}, nil
 }
 func (stubAuthentication) Logout(context.Context, string) error { return nil }
 func (stubAuthentication) Refresh(context.Context, string, application.Client) (application.Authenticated, error) {
 	return application.Authenticated{}, application.ErrUnauthenticated
+}
+func (stub stubAuthentication) Mode() application.RegistrationMode {
+	if stub.mode == application.RegistrationOpen {
+		return application.RegistrationOpen
+	}
+	return application.RegistrationInviteOnly
 }
 
 // LR-BE-2405: сессионная cookie всегда HttpOnly, SameSite=Strict, Path=/;

@@ -26,9 +26,27 @@
 
 ## 1. `identity` — пользователи и сессии
 
-**Владеет:** `users`, `sessions`, `auth_rate_limits`. **Не владеет**
-организациями, ролями и правами: `/auth/me` получает членства через узкий
-контракт `MembershipLister` модуля `tenant`.
+**Владеет:** `users` (включая `organization_rights`, ADR 0057), `sessions`,
+`auth_rate_limits`. **Не владеет** организациями, ролями и правами: `/auth/me`
+получает членства через узкий контракт `MembershipLister` модуля `tenant`.
+При регистрации читает и погашает `platform_invitations` (таблица модуля
+`admin`), а коды сотрудников проверяет и принимает через узкий контракт
+`MemberInvitations`, который реализует `tenant`.
+
+**Регистрация по приглашениям** (ADR 0057). Режим `RegistrationMode` задаёт
+конфигурация (`open` в `development` и `test`, `invite_only` в `staging` и
+`production`); нулевое значение службы считается закрытым. `Register` принимает
+`RegistrationInput` с необязательным `InviteCode`: пустой код допустим только в
+`open`; код определяет вид без расхода — сначала `platform_invitations`
+(`PlatformInvitationUsable`), затем контракт `CheckMemberInvitation`. Код платформы
+гасится в одной транзакции с вставкой пользователя и сессии: строка кода
+блокируется до вставки (недействительный код отвечает раньше проверки почты),
+пользователь получает `organization_rights = 1`. Код сотрудника: пользователь
+создаётся, затем `AcceptMemberInvitation`; однозначный отказ приёма (гонка)
+удаляет только что созданного пользователя (`DeleteNewUser`, только без следов),
+неоднозначный сбой оставляет его. Занятая почта код не расходует. Любая причина
+недействительности даёт `ErrInvitationInvalid`, отсутствие кода в закрытом
+режиме — `ErrInvitationRequired`.
 
 **Правила домена.** Email нормализуется (`ToLower(TrimSpace)`), должен
 разбираться `net/mail` без имени отправителя и быть не длиннее 254 символов.
@@ -37,7 +55,7 @@
 обрезается до 1024 символов. Статусы пользователя `ACTIVE`/`DISABLED`.
 
 **Сервис** (`application.Service`): `Register`, `Login`, `Authenticate`,
-`Logout`, `Refresh`. Троттлинг в PostgreSQL (ADR 0032), отпечаток субъекта —
+`Logout`, `Refresh`, `Mode`. Троттлинг в PostgreSQL (ADR 0032), отпечаток субъекта —
 `sha256(lower(trim(value)))`:
 
 | Scope | Лимит | Окно | Где |
@@ -529,12 +547,18 @@ id`, аренда 30 с; истёкшие аренды с исчерпанным
 
 ## 15. `admin` — платформенное администрирование
 
-**Владеет:** `platform_admins`, `admin_audit_log`, признаком
-`discarded_at/discarded_by` у четырёх очередей (ADR 0040). Работает вне
+**Владеет:** `platform_admins`, `admin_audit_log`, `platform_invitations`
+(коды платформы, ADR 0057), признаком `discarded_at/discarded_by` у четырёх
+очередей (ADR 0040). Работает вне
 организации на пуле роли `lidradar_platform`; каждый вызов, кроме
 `GET /admin/me`, требует активной строки в `platform_admins` (и `ACTIVE`
 пользователя). Первый администратор — только CLI `platform-admin grant
---email`. Read-модели: организации со счётчиками, каналы, панель очередей,
+--email`. Остальные команды CLI (ADR 0057): `invite [--note] [--days]` выпускает код
+платформы (открытый код печатается один раз), `invitations` перечисляет без кодов,
+`revoke-invitation --id` отзывает ожидающий код, `allow-organization --email`
+добавляет право создать организацию; каждая пишет `admin_audit_log` с источником
+`CLI` в своей транзакции (`PLATFORM_INVITATION_ISSUED/REVOKED`,
+`ORGANIZATION_RIGHT_GRANTED`), заметка в аудит не попадает. Read-модели: организации со счётчиками, каналы, панель очередей,
 последние задания, мёртвые элементы (не отложенные), AI-узлы и прогоны,
 семантический результат переписки, потребление за окно (30 дней по
 умолчанию, максимум 366), трасса «сообщение → задания → AI → риски →
@@ -573,7 +597,9 @@ revenue (`REVENUE_CONFIRMED`), notification (`NOTIFICATION_POLICY_*`).
 
 | Модуль | Читает | Пишет | Основание |
 |---|---|---|---|
-| `tenant` | `users` (список команды), `service_catalog_items`, `channel_connections`, `telegram_user_links` (факты онбординга) | — | ADR 0045 |
+| `tenant` | `users` (список команды), `service_catalog_items`, `channel_connections`, `telegram_user_links` (факты онбординга) | `users.organization_rights` (уменьшение в транзакции создания организации) | ADR 0045, ADR 0057 |
+| `identity` | `platform_invitations` (проверка кода) | `platform_invitations.consumed_*` (погашение кода платформы в транзакции регистрации) | ADR 0057 |
+| `admin` (команды кодов) | — | `users.organization_rights` (увеличение командой `allow-organization`) | ADR 0057 |
 | `conversation` | `channel_connections` (блокировка при приёме; снимок канала в списке), `external_identities`, `risk_signals`, `opportunities` (сводка активных рисков списка) | — | ADR 0025, 0044 |
 | `opportunity` | `conversation_summaries`, `messages` (доверенные факты) | — | ADR 0008 |
 | `risk` | таблицы переписок, контактов, каналов, внешних личностей, каталога услуг, сделок, точек, расписаний, фактов, исходов, действий, выручки | — | ADR 0007, 0038, 0044 |

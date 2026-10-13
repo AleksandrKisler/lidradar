@@ -10,8 +10,11 @@ import (
 
 type permissionRepository struct{ membership domain.Membership }
 
-func (*permissionRepository) CreateOrganizationWithOwner(context.Context, domain.Organization, domain.Membership) error {
+func (*permissionRepository) CreateOrganizationWithOwner(context.Context, domain.Organization, domain.Membership, domain.OrganizationCreation) error {
 	return nil
+}
+func (*permissionRepository) InvitationByCodeHash(context.Context, string) (domain.Invitation, error) {
+	return domain.Invitation{}, domain.ErrNotFound
 }
 func (*permissionRepository) Organization(context.Context, string) (domain.Organization, bool, error) {
 	return domain.Organization{}, false, nil

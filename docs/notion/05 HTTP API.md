@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: 79a254140132a68be3746382e425fbd630411f2627214f39fef4859811aa5740 -->
+<!-- GENERATED; source-sha256: 10dabc557b6d99feeb6ee830dc826eff6f308837a33fb44506a62786df1a7a7b -->
 > Источник: [канонический документ](../backend/04-api.md). Правки вносятся в источник.
 
 # HTTP API
@@ -67,6 +67,9 @@
 | 401 | `WEBHOOK_UNAUTHENTICATED` | секрет вебхука не совпал |
 | 403 | `FORBIDDEN` | нет права, нет членства, не платформенный администратор |
 | 403 | `ORIGIN_NOT_ALLOWED` | мутация с недоверенного `Origin` |
+| 403 | `INVITATION_REQUIRED` | регистрация в режиме `invite_only` без кода приглашения (ADR 0057) |
+| 403 | `INVITATION_INVALID` | код при регистрации нельзя принять: неизвестен, просрочен, использован или отозван (причина не различается) |
+| 403 | `ORGANIZATION_CREATION_NOT_ALLOWED` | в режиме `invite_only` у пользователя нет права создать организацию |
 | 404 | `NOT_FOUND` | ресурс не найден в организации |
 | 404 | `ROUTE_NOT_FOUND` | нет такого маршрута |
 | 405 | `METHOD_NOT_ALLOWED` | |
@@ -187,17 +190,27 @@ Silent NOTIFY loss до хаба этим не обнаруживается. П�
 
 | Метод | Путь | Доступ | Тело → ответ | Особые коды |
 |---|---|---|---|---|
-| POST | `/register` | 🔓 | `{email,password,displayName}` → `201 {"user"}` + cookie | `409 EMAIL_ALREADY_REGISTERED`, `429` |
+| GET | `/registration` | 🔓 | → `200 {"mode":"open"\|"invite_only"}` | `429` |
+| POST | `/register` | 🔓 | `{email,password,displayName,inviteCode?}` → `201 {"user"}` + cookie; `inviteCode` обязателен в `invite_only` | `403 INVITATION_REQUIRED`, `403 INVITATION_INVALID`, `409 EMAIL_ALREADY_REGISTERED`, `429` |
 | POST | `/login` | 🔓 | `{email,password}` → `200 {"user"}` + cookie | `401 INVALID_CREDENTIALS`, `429` |
 | POST | `/logout` | 🍪 (необязательно) | → `204`, cookie стирается | |
 | POST | `/refresh` | 🍪 | → `200 {"user"}` + новая cookie (старая отзывается) | `401`, `429` |
-| GET | `/me` | 🍪 | → `200 {"user","memberships":[{tenantId,organizationName,role}]}` только активные членства активных организаций | `401` |
+| GET | `/me` | 🍪 | → `200 {"user","memberships":[{tenantId,organizationName,role}],"canCreateOrganization"}` только активные членства активных организаций; `canCreateOrganization` — `true` в `open` и при действующем праве в `invite_only` | `401` |
+
+**Регистрация по приглашениям** ([ADR 0057](../adr/0057-invitation-only-registration.md)). Режим задаёт `LIDRADAR_REGISTRATION_MODE`
+(`open` в `development` и `test`, `invite_only` в `staging` и `production`). Поле `inviteCode` принимает
+оба вида кодов одного формата (43 символа `base64url`): **код платформы**, который выпускает оператор командой
+`platform-admin invite` и который даёт право зарегистрироваться и создать одну организацию, и **код сотрудника**
+из [ADR 0045](../adr/0045-team-onboarding-and-secure-connect.md), по которому пользователь сразу получает членство.
+В `open` код необязателен, но указанный обрабатывается так же. Недействительный код получает один ответ
+`403 INVITATION_INVALID` при любой причине; занятая почта (`409`) код не расходует; все попытки, включая неверные
+коды, расходуют предел `REGISTER_IP`. Интерфейс узнаёт режим из `GET /auth/registration`.
 
 ### 2.3. Организация, точки, ML-согласие
 
 | Метод | Путь | Доступ / право | Ответ |
 |---|---|---|---|
-| POST | `/api/v1/organizations` | 🍪 | `{name,defaultTimezone,defaultCurrency?}` → `201 Organization`; создаёт OWNER-членство |
+| POST | `/api/v1/organizations` | 🍪 | `{name,defaultTimezone,defaultCurrency?}` → `201 Organization`; создаёт OWNER-членство. В `invite_only` тратит право пользователя (`403 ORGANIZATION_CREATION_NOT_ALLOWED`, если его нет) |
 | GET | `/api/v1/organization` | 🍪+T, членство | `200 Organization` |
 | PATCH | `/api/v1/organization` | 🍪+T, `organization.manage` | частичное обновление имени, зоны, валюты → `200` |
 | GET | `/api/v1/locations` | 🍪+T, членство | `200 {"items":[Location]}` |
@@ -333,7 +346,10 @@ Silent NOTIFY loss до хаба этим не обнаруживается. П�
 ## 3. Типичные сценарии для фронтенда
 
 1. **Вход и выбор организации:** `POST /auth/login` → `GET /auth/me` →
-   выбрать `tenantId` → слать `X-Tenant-ID` со всеми запросами.
+   выбрать `tenantId` → слать `X-Tenant-ID` со всеми запросами. Новый
+   пользователь: `GET /auth/registration` → `POST /auth/register` с кодом
+   приглашения; если `canCreateOrganization` истинно — создание организации,
+   иначе ввод кода сотрудника (`POST /invitations/accept`).
 2. **Экран Radar:** `GET /radar` + `GET /risks?limit=20`; открыть SSE
    `/events`; по любому событию перечитать оба запроса.
 3. **Работа с риском:** `GET /risks/{id}` → `POST …/recommendation` → `POST

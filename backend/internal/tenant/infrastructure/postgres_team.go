@@ -345,6 +345,31 @@ func (r *PostgresRepository) AcceptInvitation(ctx context.Context, command domai
 	return domain.AccountMembership{Membership: membership, Organization: organization}, nil
 }
 
+// InvitationByCodeHash читает приглашение по хешу кода тем же способом, что и приём: политика
+// invitation_by_code открывает ровно одну строку на время транзакции. Ничего не изменяется.
+func (r *PostgresRepository) InvitationByCodeHash(ctx context.Context, codeHash string) (domain.Invitation, error) {
+	if r == nil || r.pool == nil || len(codeHash) != 64 {
+		return domain.Invitation{}, domain.ErrInvalid
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.Invitation{}, fmt.Errorf("begin invitation lookup: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT set_config('lidradar.invitation_code_hash', $1, true)`, codeHash); err != nil {
+		return domain.Invitation{}, fmt.Errorf("scope invitation lookup: %w", err)
+	}
+	invitation, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+`
+		FROM membership_invitations WHERE code_hash = $1`, codeHash))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Invitation{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Invitation{}, mapPostgresError("find invitation by code", err)
+	}
+	return invitation, nil
+}
+
 // OnboardingFacts читает факты настройки из таблиц точек, каталога, каналов и
 // личных привязок Telegram одним запросом.
 func (r *PostgresRepository) OnboardingFacts(ctx context.Context, tenantID, userID string) (domain.OnboardingFacts, error) {

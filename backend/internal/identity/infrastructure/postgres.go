@@ -29,18 +29,106 @@ func (r *PostgresRepository) CreateUserSession(ctx context.Context, user domain.
 		return fmt.Errorf("begin identity registration: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO users(id, email, password_hash, display_name, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		user.ID, user.Email, user.PasswordHash, user.DisplayName, user.Status, user.CreatedAt, user.UpdatedAt,
-	); err != nil {
-		return mapPostgresError("insert user", err)
-	}
-	if err := insertSession(ctx, tx, session); err != nil {
+	if err := insertUserSession(ctx, tx, user, session); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit identity registration: %w", err)
+	}
+	return nil
+}
+
+// CreateUserSessionWithPlatformInvitation гасит код раньше, чем вставляет пользователя: недействительный код
+// отвечает ErrInvitationInvalid, не касаясь почты, поэтому по ответу нельзя узнать, занят ли адрес (ADR 0057).
+func (r *PostgresRepository) CreateUserSessionWithPlatformInvitation(ctx context.Context, user domain.User, session domain.Session, codeHash string, at time.Time) error {
+	if r == nil || r.pool == nil || user.ID != session.UserID || len(codeHash) != 64 || at.IsZero() {
+		return domain.ErrInvalid
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin invited registration: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Строка кода блокируется до вставки пользователя: недействительный код отвечает ErrInvitationInvalid,
+	// не касаясь почты, поэтому по ответу нельзя узнать, занят ли адрес (ADR 0057). Блокировка же не даёт
+	// двум регистрациям погасить один код.
+	var invitationID string
+	err = tx.QueryRow(ctx, `
+		SELECT id FROM platform_invitations
+		WHERE code_hash = $1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > $2
+		FOR UPDATE`, codeHash, at.UTC()).Scan(&invitationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrInvitationInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("lock platform invitation: %w", err)
+	}
+	if err := insertUserSession(ctx, tx, user, session); err != nil {
+		return err
+	}
+	command, err := tx.Exec(ctx, `
+		UPDATE platform_invitations SET consumed_at = $2, consumed_by_user_id = $3
+		WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL`,
+		invitationID, at.UTC(), user.ID)
+	if err != nil {
+		return mapPostgresError("redeem platform invitation", err)
+	}
+	if command.RowsAffected() != 1 {
+		return domain.ErrInvitationInvalid
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit invited registration: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) PlatformInvitationUsable(ctx context.Context, codeHash string, at time.Time) (bool, error) {
+	if r == nil || r.pool == nil || len(codeHash) != 64 || at.IsZero() {
+		return false, domain.ErrInvalid
+	}
+	var usable bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM platform_invitations
+			WHERE code_hash = $1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > $2
+		)`, codeHash, at.UTC()).Scan(&usable); err != nil {
+		return false, fmt.Errorf("check platform invitation: %w", err)
+	}
+	return usable, nil
+}
+
+func (r *PostgresRepository) DeleteNewUser(ctx context.Context, userID string) error {
+	if r == nil || r.pool == nil || userID == "" {
+		return domain.ErrInvalid
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin new user removal: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Удаляется только пользователь без следов; сессии уходят каскадом. С членством, записью журнала входа
+	// или погашенным кодом платформы строка остаётся: это ошибка, а не молчаливая потеря данных.
+	removed, err := tx.Exec(ctx, `
+		DELETE FROM users
+		WHERE id = $1
+		  AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id = $1)
+		  AND NOT EXISTS (SELECT 1 FROM auth_audit_log WHERE user_id = $1)
+		  AND NOT EXISTS (SELECT 1 FROM platform_invitations WHERE consumed_by_user_id = $1)`, userID)
+	if err != nil {
+		return fmt.Errorf("remove new user: %w", err)
+	}
+	if removed.RowsAffected() == 0 {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists); err != nil {
+			return fmt.Errorf("check new user: %w", err)
+		}
+		if exists {
+			return domain.ErrConflict
+		}
+		return nil // уже удалён: повтор компенсации безопасен
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit new user removal: %w", err)
 	}
 	return nil
 }
@@ -50,7 +138,7 @@ func (r *PostgresRepository) UserByEmail(ctx context.Context, email string) (dom
 		return domain.User{}, false, domain.ErrInvalid
 	}
 	return scanUser(r.pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, display_name, status, created_at, updated_at
+		SELECT id, email, password_hash, display_name, status, created_at, updated_at, organization_rights
 		FROM users
 		WHERE email = $1`, email))
 }
@@ -60,7 +148,7 @@ func (r *PostgresRepository) UserBySessionHash(ctx context.Context, tokenHash st
 		return domain.User{}, false, domain.ErrInvalid
 	}
 	return scanUser(r.pool.QueryRow(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at
+		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -85,7 +173,7 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, currentHash stri
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	user, found, err := scanUser(tx.QueryRow(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at
+		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -133,7 +221,7 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanUser(row rowScanner) (domain.User, bool, error) {
 	var user domain.User
-	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.DisplayName, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.DisplayName, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.OrganizationRights)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, false, nil
 	}
@@ -145,6 +233,17 @@ func scanUser(row rowScanner) (domain.User, bool, error) {
 
 type sessionExecer interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func insertUserSession(ctx context.Context, executor sessionExecer, user domain.User, session domain.Session) error {
+	if _, err := executor.Exec(ctx, `
+		INSERT INTO users(id, email, password_hash, display_name, status, created_at, updated_at, organization_rights)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		user.ID, user.Email, user.PasswordHash, user.DisplayName, user.Status, user.CreatedAt, user.UpdatedAt, user.OrganizationRights,
+	); err != nil {
+		return mapPostgresError("insert user", err)
+	}
+	return insertSession(ctx, executor, session)
 }
 
 func insertSession(ctx context.Context, executor sessionExecer, session domain.Session) error {
