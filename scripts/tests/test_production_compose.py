@@ -28,12 +28,16 @@ LIDRADAR_DB_RUNTIME_PASSWORD=a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718
 LIDRADAR_INTEGRATION_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 LIDRADAR_TELEGRAM_TOKEN=123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 LIDRADAR_TELEGRAM_BOT_USERNAME=LidRadarProdBot
+LIDRADAR_MAIL_SMTP_USERNAME=bot@example.test
+LIDRADAR_MAIL_SMTP_PASSWORD=abcdabcdabcdabcd
+LIDRADAR_MAIL_FROM=bot@example.test
 LIDRADAR_BACKUP_REMOTE=offhost:bucket/prefix
 LIDRADAR_BACKUP_AGE_RECIPIENTS=age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
 """
 ADMIN_PASSWORD = '0123456789abcdef0123456789abcdef0123456789abcdef'
 OWNER_PASSWORD = 'fedcba9876543210fedcba9876543210fedcba9876543210'
 RUNTIME_PASSWORD = 'a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718'
+SMTP_PASSWORD = 'abcdabcdabcdabcd'
 POSTGRES_DIR = DEPLOY / 'postgres'
 GO_SERVICES = ['api', 'worker', 'scheduler', 'migrate']
 TOOLS = ['platform-admin', 'ai-node-register', 'ai-node-manage']
@@ -154,6 +158,15 @@ class ProductionComposeTests(unittest.TestCase):
         for name, service in self.with_tools.items():
             if name != 'postgres':
                 self.assertFalse({k for k in service.get('environment', {}) if k in ('POSTGRES_PASSWORD', 'POSTGRES_USER', 'LIDRADAR_DB_OWNER_PASSWORD', 'LIDRADAR_DB_RUNTIME_PASSWORD')}, name)
+        # Почта (ADR 0058): письма отправляет только worker, поэтому пароль SMTP и реквизиты отправителя нужны
+        # только ему; у api нет ни пароля, ни хоста, а ссылки в письмах он строит из LIDRADAR_PUBLIC_BASE_URL.
+        mail_keys = {'LIDRADAR_MAIL_SMTP_HOST', 'LIDRADAR_MAIL_SMTP_PORT', 'LIDRADAR_MAIL_SMTP_SECURITY',
+                     'LIDRADAR_MAIL_SMTP_USERNAME', 'LIDRADAR_MAIL_SMTP_PASSWORD', 'LIDRADAR_MAIL_FROM', 'LIDRADAR_MAIL_FROM_NAME'}
+        self.assertEqual({k for k in keys('worker') if k.startswith('LIDRADAR_MAIL_')}, mail_keys)
+        for name, service in self.with_tools.items():
+            if name != 'worker':
+                self.assertFalse({k for k in service.get('environment', {}) if k.startswith('LIDRADAR_MAIL_')}, name)
+        self.assertEqual(holders(SMTP_PASSWORD), {'worker'})
         # Копии: у службы нет ни токена бота, ни ключа шифрования приложения, а ключ хранилища
         # не попадает больше никуда.
         for name in ('LIDRADAR_TELEGRAM_TOKEN', key):
@@ -224,6 +237,19 @@ class ProductionComposeTests(unittest.TestCase):
         custom = json.loads(render(COMPLETE_ENV + 'LIDRADAR_PUBLIC_ORIGIN=https://app.example.test:8443\n').stdout)
         self.assertEqual(custom['services']['api']['environment']['LIDRADAR_PUBLIC_BASE_URL'], 'https://app.example.test:8443')
 
+    def test_mail_defaults_target_gmail_with_starttls_and_can_be_overridden(self):
+        # ADR 0058: на старте письма уходят через SMTP Google; другой сервис — заменой значений в .env.
+        environment = self.services['worker']['environment']
+        self.assertEqual(environment['LIDRADAR_MAIL_SMTP_HOST'], 'smtp.gmail.com')
+        self.assertEqual(environment['LIDRADAR_MAIL_SMTP_PORT'], '587')
+        self.assertEqual(environment['LIDRADAR_MAIL_SMTP_SECURITY'], 'starttls')
+        self.assertEqual(environment['LIDRADAR_MAIL_FROM_NAME'], 'LidRadar')
+        self.assertEqual(environment['LIDRADAR_MAIL_SMTP_USERNAME'], 'bot@example.test')
+        custom = json.loads(render(COMPLETE_ENV + 'LIDRADAR_MAIL_SMTP_HOST=smtp.example.test\nLIDRADAR_MAIL_SMTP_PORT=465\n'
+                                   'LIDRADAR_MAIL_SMTP_SECURITY=tls\nLIDRADAR_MAIL_FROM_NAME=Radar\n').stdout)['services']['worker']['environment']
+        self.assertEqual((custom['LIDRADAR_MAIL_SMTP_HOST'], custom['LIDRADAR_MAIL_SMTP_PORT'], custom['LIDRADAR_MAIL_SMTP_SECURITY'],
+                          custom['LIDRADAR_MAIL_FROM_NAME']), ('smtp.example.test', '465', 'tls', 'Radar'))
+
     def test_tools_exist_only_under_their_profile(self):
         for name in TOOLS:
             self.assertNotIn(name, self.services, name)
@@ -235,6 +261,8 @@ class ProductionComposeTests(unittest.TestCase):
             'LIDRADAR_ACME_EMAIL': 'LIDRADAR_ACME_EMAIL', 'POSTGRES_PASSWORD': 'POSTGRES_PASSWORD',
             'LIDRADAR_INTEGRATION_ENCRYPTION_KEY': 'LIDRADAR_INTEGRATION_ENCRYPTION_KEY',
             'LIDRADAR_TELEGRAM_TOKEN': 'LIDRADAR_TELEGRAM_TOKEN', 'LIDRADAR_TELEGRAM_BOT_USERNAME': 'LIDRADAR_TELEGRAM_BOT_USERNAME',
+            'LIDRADAR_MAIL_SMTP_USERNAME': 'LIDRADAR_MAIL_SMTP_USERNAME', 'LIDRADAR_MAIL_SMTP_PASSWORD': 'LIDRADAR_MAIL_SMTP_PASSWORD',
+            'LIDRADAR_MAIL_FROM': 'LIDRADAR_MAIL_FROM',
             'LIDRADAR_BACKUP_REMOTE': 'LIDRADAR_BACKUP_REMOTE', 'LIDRADAR_BACKUP_AGE_RECIPIENTS': 'LIDRADAR_BACKUP_AGE_RECIPIENTS',
             'LIDRADAR_DB_OWNER_PASSWORD': 'LIDRADAR_DB_OWNER_PASSWORD', 'LIDRADAR_DB_RUNTIME_PASSWORD': 'LIDRADAR_DB_RUNTIME_PASSWORD',
         }
@@ -265,6 +293,7 @@ class ProductionComposeTests(unittest.TestCase):
         self.assertIsNone(re.search(r'\d{6,12}:[A-Za-z0-9_-]{30,}', text), 'похоже на токен бота')
         for variable in ('POSTGRES_PASSWORD', 'LIDRADAR_DB_OWNER_PASSWORD', 'LIDRADAR_DB_RUNTIME_PASSWORD',
                          'LIDRADAR_INTEGRATION_ENCRYPTION_KEY', 'LIDRADAR_TELEGRAM_TOKEN',
+                         'LIDRADAR_MAIL_SMTP_USERNAME', 'LIDRADAR_MAIL_SMTP_PASSWORD', 'LIDRADAR_MAIL_FROM',
                          'LIDRADAR_BACKUP_S3_ACCESS_KEY_ID', 'LIDRADAR_BACKUP_S3_SECRET_ACCESS_KEY'):
             self.assertRegex(ENV_EXAMPLE.read_text(encoding='utf-8'), re.compile(rf'^{variable}=$', re.M), msg=f'{variable} в шаблоне должен быть пустым')
         # Приватный ключ age не должен попадать ни в стек, ни в шаблон: его хранит только оператор.

@@ -76,7 +76,9 @@ openssl rand -base64 32   # LIDRADAR_INTEGRATION_ENCRYPTION_KEY
 историю). Обязательны `LIDRADAR_VERSION`, `LIDRADAR_DOMAIN`, `LIDRADAR_ACME_EMAIL`,
 `POSTGRES_PASSWORD`, `LIDRADAR_DB_OWNER_PASSWORD`, `LIDRADAR_DB_RUNTIME_PASSWORD` (три
 разных пароля базы, [раздел 11](#11-роли-базы-данных)), `LIDRADAR_INTEGRATION_ENCRYPTION_KEY`, `LIDRADAR_TELEGRAM_TOKEN`,
-`LIDRADAR_TELEGRAM_BOT_USERNAME`, `LIDRADAR_DATABASE_ALLOW_PLAINTEXT=true` для
+`LIDRADAR_TELEGRAM_BOT_USERNAME`, **почта** `LIDRADAR_MAIL_SMTP_USERNAME`,
+`LIDRADAR_MAIL_SMTP_PASSWORD`, `LIDRADAR_MAIL_FROM` (см. «Почта» ниже; без них `worker` не
+запустится), `LIDRADAR_DATABASE_ALLOW_PLAINTEXT=true` для
 встроенной базы (решение оператора, ADR 0050) и настройки копий вне хоста:
 `LIDRADAR_BACKUP_REMOTE`, `LIDRADAR_BACKUP_S3_*`, `LIDRADAR_BACKUP_AGE_RECIPIENTS`
 (подготовка хранилища и ключей — [offhost-backup.md](offhost-backup.md) § 1: без неё стек не
@@ -93,6 +95,31 @@ docker compose config --quiet && echo 'конфигурация корректн
 
 При пропущенном значении команда называет переменную. Содержимое `.env` не
 выводите: `docker compose config` без `--quiet` печатает секреты.
+
+### Почта (ADR 0058)
+
+Сброс пароля, смена пароля и подтверждение почты отправляют письма через SMTP. На старте — аккаунт Google:
+
+1. Заведите **отдельный** аккаунт Google под LidRadar: пароль приложения даёт доступ к ящику целиком и лежит в
+   `.env`, поэтому личный аккаунт использовать не стоит.
+2. В аккаунте включите двухэтапную проверку и на `myaccount.google.com/apppasswords` создайте пароль приложения
+   (16 символов; вводите без пробелов).
+3. В `.env`: `LIDRADAR_MAIL_SMTP_USERNAME` и `LIDRADAR_MAIL_FROM` — адрес этого аккаунта (Google подменяет
+   отправителя адресом аккаунта), `LIDRADAR_MAIL_SMTP_PASSWORD` — пароль приложения. Хост `smtp.gmail.com`, порт `587`
+   и `starttls` заданы по умолчанию; для другого сервиса поменяйте `LIDRADAR_MAIL_SMTP_HOST`/`_PORT`/`_SECURITY`
+   (порт `465` — `tls`).
+4. После запуска проверьте журнал worker: нужно событие `mail.smtp.ready`; `mail.smtp.check_failed` означает
+   неверные реквизиты или закрытый порт `587` у хостинга.
+
+```bash
+docker compose logs worker | grep mail.smtp
+```
+
+Приёмка: запросите сброс пароля для своего адреса на странице входа («Забыли пароль?»), письмо должно прийти
+за минуту; ссылка работает один раз и 60 минут. Очередь: `mail.queue.status` раз в минуту
+(`mail_dead_24h`, `mail_overdue` растут — письма не доходят). Квота личного аккаунта Google — около 500
+получателей в сутки; при открытии регистрации нужен домен и транзакционный сервис (SPF, DKIM, DMARC). Адреса почты
+получает зарубежный оператор: оценка юриста — вместе с H-12.
 
 ## 3. Первый запуск
 
@@ -425,4 +452,6 @@ LIDRADAR_DB_OWNER_PASSWORD=… LIDRADAR_DB_RUNTIME_PASSWORD=… psql -d БАЗА
 - Секреты хранятся открытым текстом в `.env` (права `600`) и видны членам группы
   `docker`. Ротация ключа шифрования, реестр образов, автоматическая доставка,
   манифест выпуска, мониторинг и вынос журналов за пределы хоста отсутствуют.
-- Хост — единая точка отказа. Регистрация пользователей открыта.
+- Хост — единая точка отказа. Регистрация пользователей закрыта по умолчанию (ADR 0057).
+- Отправка писем через настоящий SMTP Google на хосте не проверялась: признак — `mail.smtp.ready` в журнале
+  worker; доставляемость и папка «Спам» не измерены.

@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: b7fd689add496866dbd2f523a32216a9e17f774200f0a701d6f381d05cef7866 -->
+<!-- GENERATED; source-sha256: f822416a66bb710bfdc18a73e822f4dbffadfbc50851f75c3f9d0cd92f969622 -->
 > Источник: [канонический документ](../adr/README.md). Правки вносятся в источник.
 
 # Architecture decision records
@@ -68,6 +68,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0055: Проход по обещаниям: допуск к обещанию определяет модель, словарь остаётся подсказкой](../adr/0055-promise-scan.md) — Proposed, 2026-10-11.
 - [0056: Сроки хранения и стирание данных](../adr/0056-data-retention-and-erasure.md) — Accepted, 2026-10-12.
 - [0057: Регистрация по приглашениям](../adr/0057-invitation-only-registration.md) — Accepted, 2026-10-13.
+- [0058: Почта, смена и сброс пароля, подтверждение почты](../adr/0058-account-security-and-mail.md) — Accepted, 2026-10-13.
 
 ## Workflow
 

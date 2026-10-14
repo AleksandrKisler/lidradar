@@ -643,3 +643,116 @@ func TestIssueResetAndChangeDoNotDeadlock(t *testing.T) {
 		t.Fatalf("a concurrent command failed (a deadlock is the suspect): %v", err)
 	}
 }
+
+// Сброс по ссылке и выпуск новой ссылки того же пользователя стартуют одновременно: сброс держит строку токена и
+// ждёт строку пользователя, выпуск держит строку пользователя и ждёт строку токена. Единый порядок блокировок
+// (пользователь, затем токены) исключает ожидание по кругу; смещение старта меняется от раунда к раунду, чтобы
+// пересечение попадало в узкое окно между двумя блокировками.
+func TestResetRacingWithAFreshIssueNeverDeadlocks(t *testing.T) {
+	env := newAccountEnv(t, "owner@example.com")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	const rounds = 210
+	for round := 1; round <= rounds; round++ {
+		current := env.issue(t, domain.TokenPasswordReset, fmt.Sprintf("race-current-%d", round), time.Hour, nil)
+		next, err := domain.NewAccountToken(newUUID(t), env.user.ID, domain.TokenPasswordReset, codeHash(fmt.Sprintf("race-next-%d", round)), env.now, env.now.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reset := domain.PasswordReset{
+			TokenHash: current.TokenHash, NewHash: fmt.Sprintf("$argon2id$race-%d", round),
+			At: env.now.Add(time.Minute), Audit: env.audit(t, "PASSWORD_RESET_COMPLETED"),
+		}
+		offset := time.Duration(round%21) * 100 * time.Microsecond // 0…2 мс: окно зависит от скорости сети и машины
+		start := make(chan struct{})
+		var group sync.WaitGroup
+		var resetErr, issueErr error
+		group.Add(2)
+		go func() {
+			defer group.Done()
+			<-start
+			_, resetErr = env.repository.CompletePasswordReset(ctx, reset)
+		}()
+		go func() {
+			defer group.Done()
+			<-start
+			time.Sleep(offset)
+			issueErr = env.repository.IssueAccountToken(ctx, next, nil)
+		}()
+		close(start)
+		group.Wait()
+		// Сброс либо успел, либо опоздал (выпуск отозвал ссылку); любая другая ошибка, в том числе обнаруженная
+		// взаимная блокировка, — дефект порядка блокировок.
+		if resetErr != nil && !errors.Is(resetErr, domain.ErrTokenInvalid) {
+			t.Fatalf("раунд %d, сброс: %v", round, resetErr)
+		}
+		if issueErr != nil {
+			t.Fatalf("раунд %d, выпуск: %v", round, issueErr)
+		}
+	}
+}
+
+// Порядок блокировок закреплён детерминированно: пока сброс ждёт строку пользователя, которую держит другая
+// команда, строка его токена обязана быть свободной. Если сброс берёт токен раньше пользователя, выпуск или смена
+// пароля, держащие пользователя, упрутся в токен и получится ожидание по кругу (взаимная блокировка).
+func TestResetTakesTheUserLockBeforeAnyTokenLock(t *testing.T) {
+	env := newAccountEnv(t, "owner@example.com")
+	reset := env.issue(t, domain.TokenPasswordReset, "reset-secret", time.Hour, nil)
+	command := domain.PasswordReset{
+		TokenHash: reset.TokenHash, NewHash: "$argon2id$reset", At: env.now.Add(time.Minute),
+		Audit: env.audit(t, "PASSWORD_RESET_COMPLETED"),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Другая команда держит строку пользователя.
+	holder, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	var locked string
+	if err := holder.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, env.user.ID).Scan(&locked); err != nil {
+		t.Fatal(err)
+	}
+
+	finished := make(chan error, 1)
+	go func() {
+		_, err := env.repository.CompletePasswordReset(ctx, command)
+		finished <- err
+	}()
+
+	// Ждём, пока сброс упрётся в блокировку по строке пользователя.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := env.pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%users%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("сброс не дошёл до ожидания строки пользователя")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	probe, probeCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer probeCancel()
+	if _, err := holder.Exec(probe, `UPDATE account_tokens SET revoked_at = $2 WHERE id = $1`, reset.ID, env.now); err != nil {
+		t.Fatalf("строка токена занята сбросом, который ещё ждёт строку пользователя: порядок блокировок нарушен (%v)", err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Ссылку отозвали, пока сброс ждал: он обязан отказать, а не сменить пароль.
+	if err := <-finished; !errors.Is(err, domain.ErrTokenInvalid) {
+		t.Fatalf("сброс по отозванной ссылке: %v (ожидался ErrTokenInvalid; взаимная блокировка даёт 40P01)", err)
+	}
+	if env.passwordHash(t) != env.user.PasswordHash {
+		t.Fatal("пароль изменён по отозванной ссылке")
+	}
+}

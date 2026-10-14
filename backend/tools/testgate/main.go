@@ -62,6 +62,7 @@ var required = []string{
 	"lidradar/backend/internal/identity/infrastructure/TestConcurrentResetsOfOneTokenSucceedExactlyOnce",
 	"lidradar/backend/internal/identity/infrastructure/TestChangePasswordRollsBackEverythingWhenTheAuditCannotBeWritten",
 	"lidradar/backend/internal/identity/infrastructure/TestIssueResetAndChangeDoNotDeadlock",
+	"lidradar/backend/internal/identity/infrastructure/TestResetTakesTheUserLockBeforeAnyTokenLock",
 	"lidradar/backend/internal/mail/infrastructure/TestParallelWorkersNeverTakeTheSameMessage",
 	"lidradar/backend/internal/integration/TestPasswordResetEndsEverySessionAndTheLinkWorksOnce",
 }

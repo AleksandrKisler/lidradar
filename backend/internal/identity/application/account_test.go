@@ -245,16 +245,6 @@ func tokenFromMail(t *testing.T, mail sentMail) string {
 	return strings.TrimSpace(token)
 }
 
-func (f *accountFixture) activeSessions(userID string) int {
-	count := 0
-	for _, session := range f.repo.sessions {
-		if session.UserID == userID && session.RevokedAt == nil {
-			count++
-		}
-	}
-	return count
-}
-
 func TestChangePasswordRevokesOtherSessionsAndKeepsCurrent(t *testing.T) {
 	f := newAccountFixture()
 	registered := f.register(t, "owner@example.com")

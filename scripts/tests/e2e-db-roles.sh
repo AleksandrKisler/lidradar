@@ -184,6 +184,61 @@ check 'platform-admin allow-organization добавляет право' env LIDR
 expect 'после allow-organization создаётся ещё одна организация' "$(closed POST /api/v1/organizations '{"name":"Third Studio","defaultTimezone":"Europe/Moscow"}')" 201
 expect 'platform-admin invitations показывает использованный код без самого кода' "$(env LIDRADAR_DATABASE_URL="${RUNTIME_DSN}" "${WORK}/bin/platform-admin" invitations | awk -F'\t' '{print $2}')" USED
 expect 'аудит оператора: выпуск кода и выдача права записаны источником CLI' "$(pg postgres "SELECT string_agg(operation, ',' ORDER BY operation) FROM admin_audit_log WHERE source = 'CLI' AND operation IN ('PLATFORM_INVITATION_ISSUED', 'ORGANIZATION_RIGHT_GRANTED')")" 'ORGANIZATION_RIGHT_GRANTED,PLATFORM_INVITATION_ISSUED'
+# --- 4b. почта и безопасность учётной записи (ADR 0058): настоящие api и worker под рабочим логином ---
+# Worker без SMTP-хоста в development пишет письма с ссылками в журнал (mail.logged): токены берутся оттуда.
+# Тела запросов строятся printf: вложенные кавычки внутри "$(…)" ломаются в bash 3.2 (macOS).
+mail_token() { # mail_token АДРЕС ПОДСТРОКА_ТЕМЫ: токен из последней записанной ссылки; ждёт доставку до 30 секунд
+  local token=''
+  for _ in $(seq 1 30); do
+    token="$({ grep '"event":"mail.logged"' "${WORK}/worker.log" || true; } | jq -r --arg to "$1" --arg subject "$2" 'select(.to == $to and (.subject | contains($subject))) | .text' | { grep -o '#token=[A-Za-z0-9_-]*' || true; } | tail -n 1 | cut -d= -f2)"
+    if [ -n "${token}" ]; then printf '%s' "${token}"; return 0; fi
+    sleep 1
+  done
+  return 1
+}
+token_body() { printf '{"token":"%s"}' "$1"; }
+reset_body() { printf '{"token":"%s","newPassword":"%s"}' "$1" "$2"; }
+login_body() { printf '{"email":"%s","password":"%s"}' "$1" "$2"; }
+change_body() { printf '{"currentPassword":"%s","newPassword":"%s"}' "$1" "$2"; }
+email_body() { printf '{"email":"%s"}' "$1"; }
+
+VERIFY_TOKEN="$(mail_token rt@example.test 'Подтвердите почту' || true)"
+expect 'worker доставил письмо подтверждения после регистрации (ссылка во фрагменте адреса)' "$(printf '%s' "${VERIFY_TOKEN}" | grep -cE '^[A-Za-z0-9_-]{43}$')" 1
+expect 'до подтверждения адрес не подтверждён' "$(api GET /api/v1/auth/me >/dev/null; jq -r '.user.emailVerifiedAt' "${WORK}/response")" null
+expect 'подтверждение по токену без сессии' "$(curl -sS -X POST "http://127.0.0.1:${API_PORT}/api/v1/auth/email/verify" -H 'Content-Type: application/json' -H "Origin: http://127.0.0.1:${API_PORT}" -d "$(token_body "${VERIFY_TOKEN}")" -o /dev/null -w '%{http_code}')" 204
+expect 'после подтверждения адрес подтверждён' "$(api GET /api/v1/auth/me >/dev/null; jq -r '.user.emailVerifiedAt != null' "${WORK}/response")" true
+expect 'повтор того же токена отклонён' "$(api POST /api/v1/auth/email/verify "$(token_body "${VERIFY_TOKEN}")")" 400
+expect 'отказ называет причину VERIFICATION_TOKEN_INVALID' "$(jq -r .error.code "${WORK}/response")" VERIFICATION_TOKEN_INVALID
+
+expect 'запрос сброса для известного адреса: 204' "$(api POST /api/v1/auth/password/forgot "$(email_body rt@example.test)")" 204
+KNOWN_BODY="$(wc -c <"${WORK}/response" | tr -d ' ')"
+expect 'запрос сброса для неизвестного адреса отвечает так же' "$(api POST /api/v1/auth/password/forgot "$(email_body nobody@example.test)")" 204
+expect 'тело ответа в обоих случаях пустое' "${KNOWN_BODY}$(wc -c <"${WORK}/response" | tr -d ' ')" 00
+RESET_TOKEN="$(mail_token rt@example.test 'Сброс пароля' || true)"
+expect 'worker доставил письмо со ссылкой сброса' "$(printf '%s' "${RESET_TOKEN}" | grep -cE '^[A-Za-z0-9_-]{43}$')" 1
+expect 'письмо неизвестному адресу не отправлялось' "$(grep '"event":"mail.logged"' "${WORK}/worker.log" | jq -r 'select(.to == "nobody@example.test") | .to' | wc -l | tr -d ' ')" 0
+expect 'слабый пароль при сбросе отклонён без траты токена' "$(api POST /api/v1/auth/password/reset "$(reset_body "${RESET_TOKEN}" short)")" 400
+expect 'сброс по токену меняет пароль' "$(api POST /api/v1/auth/password/reset "$(reset_body "${RESET_TOKEN}" brand-new-secure-password)")" 204
+expect 'сессия до сброса завершена' "$(api GET /api/v1/auth/me)" 401
+expect 'повтор токена сброса отклонён' "$(api POST /api/v1/auth/password/reset "$(reset_body "${RESET_TOKEN}" another-secure-password)")" 400
+expect 'отказ называет причину RESET_TOKEN_INVALID' "$(jq -r .error.code "${WORK}/response")" RESET_TOKEN_INVALID
+expect 'прежний пароль больше не подходит' "$(api POST /api/v1/auth/login "$(login_body rt@example.test very-secure-password)")" 401
+expect 'новый пароль подходит' "$(api POST /api/v1/auth/login "$(login_body rt@example.test brand-new-secure-password)")" 200
+expect 'неверный текущий пароль при смене — 403, а не 401' "$(api POST /api/v1/auth/password/change "$(change_body wrong-current-password third-secure-password)")" 403
+expect 'отказ называет причину INVALID_CURRENT_PASSWORD' "$(jq -r .error.code "${WORK}/response")" INVALID_CURRENT_PASSWORD
+expect 'сессия после неверного текущего пароля цела' "$(api GET /api/v1/auth/me)" 200
+expect 'смена пароля с верным текущим' "$(api POST /api/v1/auth/password/change "$(change_body brand-new-secure-password third-secure-password)")" 204
+expect 'текущая сессия пережила смену пароля' "$(api GET /api/v1/auth/me)" 200
+expect 'новый пароль после смены подходит' "$(api POST /api/v1/auth/login "$(login_body rt@example.test third-secure-password)")" 200
+for _ in $(seq 1 30); do
+  [ "$(pg postgres "SELECT count(*) FROM mail_outbox WHERE status IN ('PENDING', 'PROCESSING')")" = 0 ] && break
+  sleep 1
+done
+expect 'очередь писем разобрана, мёртвых писем нет' "$(pg postgres "SELECT count(*) FROM mail_outbox WHERE status <> 'SENT'")" 0
+expect 'в очереди не осталось ни адресов, ни ссылок' "$(pg postgres "SELECT count(*) FROM mail_outbox WHERE recipient IS NOT NULL OR body IS NOT NULL")" 0
+expect 'в базе нет открытых токенов' "$(pg postgres "SELECT count(*) FROM account_tokens WHERE token_hash IN ('${VERIFY_TOKEN}', '${RESET_TOKEN}')")" 0
+expect 'аудит записал подтверждение, сброс и смену пароля' "$(pg postgres "SELECT string_agg(operation, ',' ORDER BY operation) FROM auth_audit_log WHERE operation IN ('EMAIL_VERIFIED', 'PASSWORD_RESET_REQUESTED', 'PASSWORD_RESET_COMPLETED', 'PASSWORD_CHANGED')")" 'EMAIL_VERIFIED,PASSWORD_CHANGED,PASSWORD_RESET_COMPLETED,PASSWORD_RESET_REQUESTED'
+expect 'worker сообщил состояние очереди писем' "$(grep -c '"event":"mail.queue.status"' "${WORK}/worker.log" | awk '{print ($1 > 0)}')" 1
 sleep 5
 expect 'все соединения процессов приложения идут от рабочего логина' "$(pg postgres "SELECT string_agg(DISTINCT usename, ',') FROM pg_stat_activity WHERE datname = 'lidradar' AND backend_type = 'client backend' AND pid <> pg_backend_pid()")" lidradar_runtime
 expect 'суперпользователей среди клиентов базы нет' "$(pg postgres "SELECT count(*) FROM pg_stat_activity a JOIN pg_roles r ON r.rolname = a.usename WHERE r.rolsuper AND a.backend_type = 'client backend' AND a.pid <> pg_backend_pid()")" 0

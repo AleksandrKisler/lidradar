@@ -74,9 +74,16 @@
 | `POST /auth/login` | guest | `{email,password}` | `200 AuthResponse` + cookie | refetch `/auth/me`; восстановить только валидный tenant |
 | `POST /auth/logout` | session optional | — | `204` + expired cookie | очистить весь защищённый cache и persisted UI context |
 | `POST /auth/refresh` | active session | — | `200 AuthResponse` + rotated cookie | заменить auth snapshot; это не recovery после 401 |
-| `GET /auth/me` | session | — | `200 {user,memberships[],canCreateOrganization}` | источник auth/tenant/role guards; без членств и без права `canCreateOrganization` пользователя ведут к вводу кода сотрудника, а не к созданию организации |
+| `GET /auth/me` | session | — | `200 {user,memberships[],canCreateOrganization}`; `user.emailVerifiedAt` (ISO-время или `null`) | источник auth/tenant/role guards; без членств и без права `canCreateOrganization` пользователя ведут к вводу кода сотрудника, а не к созданию организации |
+| `POST /auth/password/change` | session | `{currentPassword,newPassword}` | `204` | раздел «Настройки → Аккаунт»; остальные сессии завершены на сервере, текущая остаётся; `403 INVALID_CURRENT_PASSWORD` показывается у поля (это не `401`: клиент считает `401` потерей сессии); `429` — обратный отсчёт; ADR 0058 |
+| `POST /auth/password/forgot` | guest | `{email}` | `204` для любого адреса | форма «Забыли пароль?»: после успеха всегда один текст «если адрес зарегистрирован, письмо отправлено», ответ не зависит от существования адреса; `429` — отсчёт |
+| `POST /auth/password/reset` | open | `{token,newPassword}` | `204` | страница `/reset-password#token=…`: токен читается из фрагмента один раз и убирается из адреса; входа нет, переход на `/login?reset=done`; `400 RESET_TOKEN_INVALID` — «Ссылка недействительна» с переходом к новому письму |
+| `POST /auth/email/verification` | session | — | `204` | кнопка «Отправить письмо ещё раз» (баннер и «Аккаунт»); `429` — отсчёт; `503 MAIL_UNAVAILABLE` — спокойное сообщение |
+| `POST /auth/email/verify` | open | `{token}` | `204` | страница `/verify-email#token=…`; после успеха сессия перечитывается, напоминание исчезает; `400 VERIFICATION_TOKEN_INVALID` — «Ссылка недействительна» |
 
 Register: `400/403/409/429`; login: `400/401/403/429`; logout: `403`;
+password/change: `400/401/403/429`; password/forgot: `400/403/429`; password/reset: `400/403/429`;
+email/verification: `401/403/429/503`; email/verify: `400/403/429`;
 refresh: `401/403/429`; me: `401`. Ошибка login не должна раскрывать, существует
 ли email. На logout локальная очистка выполняется и при сетевой неопределённости,
 но UI сообщает, что серверное завершение сессии не подтверждено.

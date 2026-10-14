@@ -722,7 +722,7 @@ func TestSMTPSettingsNeverPrintThePassword(t *testing.T) {
 	}
 	for _, rendered := range []string{
 		fmt.Sprintf("%v", configuration), fmt.Sprintf("%+v", configuration), fmt.Sprintf("%#v", configuration),
-		fmt.Sprintf("%v", configuration.Mail.SMTP), fmt.Sprintf("%s", configuration.Mail.SMTP), fmt.Sprintf("%#v", configuration.Mail.SMTP),
+		fmt.Sprintf("%v", configuration.Mail.SMTP), fmt.Sprint(configuration.Mail.SMTP), fmt.Sprintf("%#v", configuration.Mail.SMTP),
 	} {
 		if strings.Contains(rendered, "super-secret-app-password") {
 			t.Fatalf("пароль SMTP напечатан: %s", rendered)

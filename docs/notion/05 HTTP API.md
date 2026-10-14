@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: 10dabc557b6d99feeb6ee830dc826eff6f308837a33fb44506a62786df1a7a7b -->
+<!-- GENERATED; source-sha256: 30577de04690d598f8e8a4c9ff54c6a4538283fe60f17058ad6f7e42fa0bb478 -->
 > Источник: [канонический документ](../backend/04-api.md). Правки вносятся в источник.
 
 # HTTP API
@@ -147,7 +147,8 @@
 - Ограничение по адресу клиента: `/api/v1/auth/*` — 120 запросов в минуту,
   `/api/v1/webhooks/*` — 1200, `/internal/v1/ai/*` — 600; правила независимы,
   ответ `429` с `Retry-After`. Отдельно вход ограничивается по учётной записи
-  (5 неудач за 15 минут) и по адресу (20 в минуту) в PostgreSQL. Адрес клиента —
+  (5 неудач за 15 минут) и по адресу (20 в минуту) в PostgreSQL; сброс и смена пароля и подтверждение почты имеют
+  собственные пределы (раздел 2.2). Адрес клиента —
   адрес соединения; если соединение пришло от узла из `LIDRADAR_TRUSTED_PROXIES`,
   адрес берётся из `X-Forwarded-For` ([ADR 0049](../adr/0049-trusted-proxies-client-address.md)),
   от остальных узлов заголовок игнорируется.
@@ -195,7 +196,12 @@ Silent NOTIFY loss до хаба этим не обнаруживается. П�
 | POST | `/login` | 🔓 | `{email,password}` → `200 {"user"}` + cookie | `401 INVALID_CREDENTIALS`, `429` |
 | POST | `/logout` | 🍪 (необязательно) | → `204`, cookie стирается | |
 | POST | `/refresh` | 🍪 | → `200 {"user"}` + новая cookie (старая отзывается) | `401`, `429` |
-| GET | `/me` | 🍪 | → `200 {"user","memberships":[{tenantId,organizationName,role}],"canCreateOrganization"}` только активные членства активных организаций; `canCreateOrganization` — `true` в `open` и при действующем праве в `invite_only` | `401` |
+| GET | `/me` | 🍪 | → `200 {"user","memberships":[{tenantId,organizationName,role}],"canCreateOrganization"}` только активные членства активных организаций; `canCreateOrganization` — `true` в `open` и при действующем праве в `invite_only`; `user.emailVerifiedAt` — время подтверждения почты или `null` | `401` |
+| POST | `/password/change` | 🍪 | `{currentPassword,newPassword}` → `204`; остальные сессии завершаются, текущая остаётся | `400`, `401`, `403 INVALID_CURRENT_PASSWORD`, `429` |
+| POST | `/password/forgot` | 🔓 | `{email}` → `204` для любого адреса | `400` (только неверное тело), `429` |
+| POST | `/password/reset` | 🔓 | `{token,newPassword}` → `204`; все сессии пользователя завершаются, входа нет | `400 INVALID_ARGUMENT`, `400 RESET_TOKEN_INVALID`, `429` |
+| POST | `/email/verification` | 🍪 | → `204`: письмо поставлено в очередь или адрес уже подтверждён | `401`, `429`, `503 MAIL_UNAVAILABLE` |
+| POST | `/email/verify` | 🔓 | `{token}` → `204` | `400 VERIFICATION_TOKEN_INVALID`, `429` |
 
 **Регистрация по приглашениям** ([ADR 0057](../adr/0057-invitation-only-registration.md)). Режим задаёт `LIDRADAR_REGISTRATION_MODE`
 (`open` в `development` и `test`, `invite_only` в `staging` и `production`). Поле `inviteCode` принимает
@@ -205,6 +211,26 @@ Silent NOTIFY loss до хаба этим не обнаруживается. П�
 В `open` код необязателен, но указанный обрабатывается так же. Недействительный код получает один ответ
 `403 INVITATION_INVALID` при любой причине; занятая почта (`409`) код не расходует; все попытки, включая неверные
 коды, расходуют предел `REGISTER_IP`. Интерфейс узнаёт режим из `GET /auth/registration`.
+
+**Смена и сброс пароля, подтверждение почты** ([ADR 0058](../adr/0058-account-security-and-mail.md)). Письма ставит в очередь
+API, отправляет `worker` (модуль `mail`, см. [../backend/03-modules.md](../backend/03-modules.md)); ссылки несут токен во фрагменте
+(`/reset-password#token=…`, `/verify-email#token=…`), а не в параметре запроса. Токен — 256 бит `base64url`,
+в базе только SHA-256, одноразовый. Успех всех пяти команд — `204` без тела.
+
+- **Смена** требует сессию и текущий пароль. Новый пароль 12…1024 байт и не равен текущему. Одна транзакция:
+  пароль, отзыв остальных сессий и неиспользованных ссылок сброса, запись `PASSWORD_CHANGED`. Неверный текущий
+  пароль — `403 INVALID_CURRENT_PASSWORD`, не `401`: клиент считает `401` потерей сессии. Предел
+  `PASSWORD_CHANGE_ACCOUNT` — 5 за 15 минут на пользователя; он расходуется до проверки пароля, сбрасывается
+  при успехе, ошибки формата его не тратят.
+- **Сброс.** `forgot` отвечает `204` одинаково для известного, неизвестного, отключённого и неверно записанного
+  адреса; пределы `PASSWORD_RESET_IP` (10 в час) и `PASSWORD_RESET_ACCOUNT` (3 в час на адрес) расходуются до
+  поиска пользователя. Ссылка действует 60 минут; новый запрос отзывает прежнюю ссылку. `reset` (предел
+  `PASSWORD_RESET_CONFIRM_IP`, 20 в час) завершает **все** сессии пользователя, подтверждает адрес и пишет
+  `PASSWORD_RESET_COMPLETED`; автоматического входа нет. Любая причина негодности токена — `RESET_TOKEN_INVALID`;
+  слабый пароль токен не расходует.
+- **Подтверждение мягкое:** ничего не блокируется. Письмо уходит после регистрации и по запросу
+  (`/email/verification`, `EMAIL_VERIFICATION_ACCOUNT` — 3 в час); ссылка действует 7 суток. `verify` (предел
+  `EMAIL_VERIFY_IP`, 30 в час) работает без сессии; негодный токен — `VERIFICATION_TOKEN_INVALID`.
 
 ### 2.3. Организация, точки, ML-согласие
 
@@ -229,9 +255,10 @@ Silent NOTIFY loss до хаба этим не обнаруживается. П�
 | DELETE | `/api/v1/organization/invitations/{invitationId}` | 🍪+T, `member.manage` | `204` (повтор идемпотентен); принятое → `409 INVITATION_USED`; аудит `INVITATION_REVOKED` |
 | POST | `/api/v1/invitations/accept` | 🍪 (без `X-Tenant-ID`) | `{"code"}` → `200 {"membership":{tenantId,organizationName,role}}`; создаёт или восстанавливает членство; `404` неизвестный код, `409 INVITATION_EXPIRED`/`INVITATION_REVOKED`/`INVITATION_USED`/`ALREADY_MEMBER`; аудит `INVITATION_ACCEPTED` |
 
-Команда работает по одноразовым кодам, а не по адресам почты: у MVP нет
-почтовой инфраструктуры, а код без адреса не даёт поверхности для перебора
-учётных записей (ADR 0045).
+Команда работает по одноразовым кодам, а не по адресам почты: код без адреса не
+даёт поверхности для перебора учётных записей (ADR 0045). Почтовая очередь
+появилась с ADR 0058, но только для писем учётной записи (сброс и смена пароля,
+подтверждение адреса); приглашения по адресу почты не вводились.
 
 ### 2.4. Каталог услуг (`/api/v1/services`)
 
