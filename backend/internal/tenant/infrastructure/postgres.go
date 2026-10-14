@@ -360,14 +360,22 @@ type membershipExecer interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
+// insertMembership создаёт членство только для действующего пользователя. Блокировка FOR SHARE строки пользователя
+// сериализует вставку с обезличиванием учётной записи (ADR 0059), которое держит эту строку FOR UPDATE: принятое в
+// эту минуту приглашение не оставит активное членство у закрытого пользователя. Отключённый или неизвестный
+// пользователь — ErrNotFound, как раньше давало нарушение внешнего ключа.
 func insertMembership(ctx context.Context, executor membershipExecer, membership domain.Membership) error {
-	_, err := executor.Exec(ctx, `
+	command, err := executor.Exec(ctx, `
 		INSERT INTO memberships(id, tenant_id, user_id, role, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		SELECT $1::uuid, $2::uuid, $3::uuid, $4, $5, $6::timestamptz, $7::timestamptz
+		WHERE EXISTS (SELECT 1 FROM users WHERE id = $3::uuid AND status = 'ACTIVE' FOR SHARE)`,
 		membership.ID, membership.TenantID, membership.UserID, membership.Role, membership.Status, membership.CreatedAt, membership.UpdatedAt,
 	)
 	if err != nil {
 		return mapPostgresError("insert membership", err)
+	}
+	if command.RowsAffected() != 1 {
+		return domain.ErrNotFound
 	}
 	return nil
 }

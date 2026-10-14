@@ -33,6 +33,9 @@ import (
 	identityapplication "lidradar/backend/internal/identity/application"
 	identityinfrastructure "lidradar/backend/internal/identity/infrastructure"
 	identitytransport "lidradar/backend/internal/identity/transport"
+	lifecycleapplication "lidradar/backend/internal/lifecycle/application"
+	lifecycleinfrastructure "lidradar/backend/internal/lifecycle/infrastructure"
+	lifecycletransport "lidradar/backend/internal/lifecycle/transport"
 	mailapplication "lidradar/backend/internal/mail/application"
 	mailinfrastructure "lidradar/backend/internal/mail/infrastructure"
 	notificationapplication "lidradar/backend/internal/notification/application"
@@ -139,15 +142,21 @@ func run(ctx context.Context, configuration config.Config) error {
 	revenueService := revenueapplication.NewService(
 		revenueinfrastructure.NewPostgresStore(pool), permissionService, ids.Generator{}, time.Now,
 	).WithInvalidator(riskInvalidator)
+	// Выгрузки и закрытие учётной записи (ADR 0059): данные принадлежат модулю lifecycle, команды пользователя — identity.
+	// Платформенный пул читает данные пользователя по его идентификатору, пул приложения выгружает организацию под RLS.
+	rateLimiter := identityinfrastructure.NewPostgresRateLimiter(pool)
+	lifecycleService := lifecycleapplication.NewService(
+		lifecycleinfrastructure.NewPostgresStore(platformPool, pool), cryptoplatform.PasswordHasher{}, ids.Generator{}, time.Now,
+	).WithOrganizationExport(permissionService, auditRecorder, rateLimiter)
 	identityService := identityapplication.NewService(
 		identityRepository,
-		identityinfrastructure.NewPostgresRateLimiter(pool),
+		rateLimiter,
 		cryptoplatform.PasswordHasher{},
 		ids.Generator{},
 		identityinfrastructure.SessionTokens{},
 		time.Now,
 		configuration.Auth.SessionTTL,
-	).WithAuditor(auditRecorder).WithRegistration(registrationMode, tenantService).
+	).WithAuditor(auditRecorder).WithRegistration(registrationMode, tenantService).WithAccountData(lifecycleService).
 		// Почту доставляет worker (ADR 0058): api только ставит письма в очередь, поэтому транспорт ему не нужен.
 		WithMail(mailapplication.NewService(mailinfrastructure.NewPostgresStore(pool), nil, ids.Generator{}, time.Now),
 			configuration.Mail.WebBaseURL, logger)
@@ -206,6 +215,7 @@ func run(ctx context.Context, configuration config.Config) error {
 	).WithInvalidator(riskInvalidator).WithLeadCorrector(opportunityService)
 	risktransport.NewHandler(riskRadar, principalResolver, riskEvents).WithFeedback(riskFeedback).RegisterRoutes(router, "/api/v1")
 	correctivetransport.NewHandler(correctiveService, principalResolver).RegisterRoutes(router, "/api/v1")
+	lifecycletransport.NewHandler(lifecycleService, principalResolver).WithLogger(logger).RegisterRoutes(router, "/api/v1")
 	revenuetransport.NewHandler(revenueService, principalResolver).RegisterRoutes(router, "/api/v1")
 	return httpplatform.Serve(ctx, configuration.HTTP, router, logger)
 }

@@ -91,6 +91,27 @@ func TestRecoveryHidesPanicDetails(t *testing.T) {
 	}
 }
 
+// http.ErrAbortHandler — осознанный обрыв частично отправленного ответа (выгрузка организации, ADR 0059): его нельзя
+// превращать в 500 и дописывать JSON в поток, иначе клиент увидит «успешную» загрузку оборванного файла.
+func TestRecoveryLetsAnAbortedResponseThrough(t *testing.T) {
+	var logs bytes.Buffer
+	router := NewRouter("lidradar-api", observability.NewLogger(&logs, "test", "test"), readinessStub{})
+	router.Get("/abort", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("partial"))
+		panic(http.ErrAbortHandler)
+	})
+	defer func() {
+		if recovered := recover(); recovered != http.ErrAbortHandler {
+			t.Fatalf("recovered = %v, want http.ErrAbortHandler", recovered)
+		}
+		if bytes.Contains(logs.Bytes(), []byte("http.panic")) {
+			t.Fatalf("осознанный обрыв записан как паника: %s", logs.String())
+		}
+	}()
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/abort", nil))
+	t.Fatal("ServeHTTP вернулся нормально: обрыв проглочен")
+}
+
 func TestRouterRejectsUntrustedMutationOrigin(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "http://api.example/api/v1/test", nil)
 	request.Header.Set("Origin", "https://evil.example")

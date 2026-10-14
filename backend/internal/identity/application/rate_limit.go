@@ -23,6 +23,10 @@ const (
 	ScopePasswordChangeAccount    = "PASSWORD_CHANGE_ACCOUNT"
 	ScopeEmailVerificationAccount = "EMAIL_VERIFICATION_ACCOUNT"
 	ScopeEmailVerifyIP            = "EMAIL_VERIFY_IP"
+	// Пределы выгрузки личных данных и запросов на закрытие учётной записи (ADR 0059). Подтверждение паролем
+	// делит счётчик ScopePasswordChangeAccount со сменой пароля.
+	ScopeAccountExportAccount   = "ACCOUNT_EXPORT_ACCOUNT"
+	ScopeAccountDeletionAccount = "ACCOUNT_DELETION_ACCOUNT"
 
 	registerIPLimit   = 5
 	loginIPLimit      = 20
@@ -36,6 +40,9 @@ const (
 	emailVerificationAccountLimit = 3
 	emailVerifyIPLimit            = 30
 
+	accountExportAccountLimit   = 3
+	accountDeletionAccountLimit = 5
+
 	registerIPWindow   = time.Hour
 	loginIPWindow      = time.Minute
 	loginAccountWindow = 15 * time.Minute
@@ -44,6 +51,7 @@ const (
 	passwordResetWindow     = time.Hour
 	passwordChangeWindow    = 15 * time.Minute
 	emailVerificationWindow = time.Hour
+	accountLimitWindow      = time.Hour
 )
 
 // RateLimitDecision — результат атомарного расходования одной попытки.

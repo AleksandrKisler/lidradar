@@ -42,6 +42,9 @@ const (
 	PermissionServiceManage      = "service.manage"
 	PermissionNotificationManage = "notification.manage"
 	PermissionMemberManage       = "member.manage"
+	// PermissionOrganizationExport — выгрузка данных организации (ADR 0059): в ней переписки, контакты, деньги и
+	// команда всей организации, поэтому право только у владельца.
+	PermissionOrganizationExport = "organization.export"
 )
 
 var ownerPermissions = map[string]struct{}{
@@ -50,6 +53,7 @@ var ownerPermissions = map[string]struct{}{
 	PermissionRevenueConfirm: {}, PermissionRevenueRead: {}, PermissionAnalyticsRead: {},
 	PermissionIntegrationManage: {}, PermissionOrganizationManage: {}, PermissionLocationManage: {},
 	PermissionServiceManage: {}, PermissionNotificationManage: {}, PermissionMemberManage: {},
+	PermissionOrganizationExport: {},
 }
 
 var managerPermissions = map[string]struct{}{

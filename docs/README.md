@@ -27,6 +27,7 @@
 | Копии вне хоста | [Расписание, шифрование, хранилище, восстановление](runbooks/offhost-backup.md) |
 | Production-стек | [Развёртывание на одном хосте, обновление и откат](runbooks/production-deployment.md) |
 | Развёртывание за proxy | [Проверка доверительной границы](runbooks/proxy-deployment.md) |
+| Обращения о данных | [Выгрузка, закрытие аккаунта и стирание по обращению](runbooks/data-requests.md) |
 | Нагрузка | [Метод и ограничения](runbooks/capacity-test.md) |
 | Квалификация AI | [Порядок прогона и фиксации tuple](runbooks/ai-qualification.md) |
 | Инженерные правила | [Работа с изменениями](engineering/CODEX_RULES.md), [готовность изменения](engineering/DEFINITION_OF_DONE.md) |

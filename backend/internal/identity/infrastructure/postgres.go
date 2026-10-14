@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -138,7 +139,7 @@ func (r *PostgresRepository) UserByEmail(ctx context.Context, email string) (dom
 		return domain.User{}, false, domain.ErrInvalid
 	}
 	return scanUser(r.pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, display_name, status, created_at, updated_at, organization_rights, email_verified_at
+		SELECT `+userColumns("")+`
 		FROM users
 		WHERE email = $1`, email))
 }
@@ -148,7 +149,7 @@ func (r *PostgresRepository) UserBySessionHash(ctx context.Context, tokenHash st
 		return domain.User{}, false, domain.ErrInvalid
 	}
 	return scanUser(r.pool.QueryRow(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights, u.email_verified_at
+		SELECT `+userColumns("u.")+`
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -173,7 +174,7 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, currentHash stri
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	user, found, err := scanUser(tx.QueryRow(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.display_name, u.status, u.created_at, u.updated_at, u.organization_rights, u.email_verified_at
+		SELECT `+userColumns("u.")+`
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
@@ -219,9 +220,22 @@ func (r *PostgresRepository) RevokeSession(ctx context.Context, tokenHash string
 
 type rowScanner interface{ Scan(...any) error }
 
+// userColumns перечисляет колонки пользователя в порядке scanUser; prefix — псевдоним таблицы с точкой.
+func userColumns(prefix string) string {
+	columns := []string{
+		"id", "email", "password_hash", "display_name", "status", "created_at", "updated_at",
+		"organization_rights", "email_verified_at", "deletion_requested_at", "deletion_due_at",
+	}
+	for index, column := range columns {
+		columns[index] = prefix + column
+	}
+	return strings.Join(columns, ", ")
+}
+
 func scanUser(row rowScanner) (domain.User, bool, error) {
 	var user domain.User
-	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.DisplayName, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.OrganizationRights, &user.EmailVerifiedAt)
+	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.DisplayName, &user.Status, &user.CreatedAt, &user.UpdatedAt,
+		&user.OrganizationRights, &user.EmailVerifiedAt, &user.DeletionRequestedAt, &user.DeletionDueAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, false, nil
 	}
@@ -246,14 +260,21 @@ func insertUserSession(ctx context.Context, executor sessionExecer, user domain.
 	return insertSession(ctx, executor, session)
 }
 
+// insertSession создаёт сессию только для действующего пользователя. Блокировка FOR SHARE строки пользователя
+// сериализует вставку с обезличиванием (ADR 0059), которое держит эту строку FOR UPDATE: вход, начавшийся до
+// закрытия учётной записи, не оставит сессию с IP и user agent после него. Отключённый пользователь — ErrNotFound.
 func insertSession(ctx context.Context, executor sessionExecer, session domain.Session) error {
-	_, err := executor.Exec(ctx, `
+	command, err := executor.Exec(ctx, `
 		INSERT INTO sessions(id, user_id, token_hash, expires_at, ip, user_agent, created_at)
-		VALUES ($1, $2, $3, $4, NULLIF($5, '')::inet, NULLIF($6, ''), $7)`,
+		SELECT $1::uuid, $2::uuid, $3, $4::timestamptz, NULLIF($5, '')::inet, NULLIF($6, ''), $7::timestamptz
+		WHERE EXISTS (SELECT 1 FROM users WHERE id = $2::uuid AND status = 'ACTIVE' FOR SHARE)`,
 		session.ID, session.UserID, session.TokenHash, session.ExpiresAt, session.IPAddress, session.UserAgent, session.CreatedAt,
 	)
 	if err != nil {
 		return mapPostgresError("insert session", err)
+	}
+	if command.RowsAffected() != 1 {
+		return domain.ErrNotFound
 	}
 	return nil
 }

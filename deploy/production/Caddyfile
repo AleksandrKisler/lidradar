@@ -20,11 +20,35 @@
 		?Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	}
 
-	# API, вебхуки провайдеров и API домашнего AI-узла. flush_interval -1 нужен
-	# потоку событий (SSE): без него события копились бы в буфере proxy.
-	# Сжатие здесь не включается: оно буферизует поток.
-	@api path /api/* /internal/v1/ai/*
+	# API веб-клиента и вебхуки провайдеров. flush_interval -1 нужен потоку событий
+	# (SSE): без него события копились бы в буфере proxy. Сжатие здесь не включается:
+	# оно буферизует поток.
+	@api path /api/*
 	handle @api {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy api:8080 {
+			flush_interval -1
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+	}
+
+	# API домашнего AI-узла: узел сам ходит к API (входящих портов дома нет). Узел и без
+	# этого проходит секрет, подпись запроса и допуск организаций; список адресов
+	# LIDRADAR_AI_NODE_ALLOWED_IPS (адреса или CIDR через пробел) закрывает путь от остальных
+	# адресов ещё на краю. По умолчанию открыто любому адресу, чтобы выпуск без домашнего
+	# узла и смена его адреса не требовали правки файла; рекомендуется задать статичный
+	# адрес узла (ADR 0050, уточнение 2026-10-15).
+	@ainode path /internal/v1/ai/*
+	handle @ainode {
+		@ainode_denied {
+			not remote_ip {$LIDRADAR_AI_NODE_ALLOWED_IPS:0.0.0.0/0 ::/0}
+		}
+		respond @ainode_denied "forbidden" 403
 		request_body {
 			max_size 2MB
 		}

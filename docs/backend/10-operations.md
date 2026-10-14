@@ -216,6 +216,7 @@ Caddyfile закреплены тестами (`scripts/tests/test_production_co
 | `migrate` | применить встроенные миграции | владелец схемы; коды 0/1; сигналы не слушает |
 | `platform-admin grant\|revoke\|list --email --note` | права платформенного администратора | единственный способ выдать первое право; код 2 при неверных аргументах |
 | `platform-admin invite [--note] [--days 1…60]`, `invitations`, `revoke-invitation --id`, `allow-organization --email` | коды платформы и право создать организацию (ADR 0057) | единственный способ выдать первый код; открытый код печатается один раз; аудит `admin_audit_log` с источником `CLI` |
+| `platform-admin erase-user --email --note --confirm-email [--dry-run]` | немедленно обезличивает пользователя, минуя отсрочку 30 суток (ADR 0059); блокировки (единственный владелец, платформенный администратор) соблюдаются | `--note` — обязательное основание без персональных данных (например, номер обращения, ≤ 500 символов), пишется в `admin_audit_log` (`USER_ERASED`, источник `CLI`); боевой запуск требует `--confirm-email`, совпадающий с `--email`, `--dry-run` подтверждения не требует: он исполняет и откатывает, счётчики по таблицам совпадают с боевым запуском; код 2 при неверных аргументах, ненулевой код при блокировке, повторе и неизвестном адресе (ничего не изменено). Порядок работы с обращениями — [runbook](../runbooks/data-requests.md) |
 | `ai-node-register --tenant-id --name --output` | регистрация узла | пишет файл реквизитов `0600`, секрет не печатает |
 | `ai-node-manage allow-tenant\|rotate\|revoke` | допуски и секреты узла | |
 | `load-generate --organizations --conversations --messages --label --webhook-secret` | синтетический набор для staging; пишет пакетными `INSERT` (COPY не работает с таблицами под RLS), поэтому подходит и владельцу без суперправ | отказывается в `production` |
@@ -234,9 +235,13 @@ Caddyfile закреплены тестами (`scripts/tests/test_production_co
   (проверка SMTP при старте worker), `mail.logged_transport` (только development), `mail.sent` / `mail.retry` /
   `mail.failed` / `mail.lease_lost` / `mail.delivery_failed`, `scheduler.failed`,
   `risk.invalidation.reconnect`, `postgres.migrations.applied`,
-  `ai.agent.configured` / `ai.agent.operation_failed`. Раз в минуту worker
-  пишет `background.queue.status`, `notification.queue.status` и `mail.queue.status` со
-  счётчиками очередей — это основной сигнал «очередь растёт».
+  `ai.agent.configured` / `ai.agent.operation_failed`, `lifecycle.deletion_failed`,
+  `account.deletion.anonymized` / `account.deletion.blocked` / `account.deletion.failed` /
+  `account.deletion.notice_failed` (исполнитель закрытия учётных записей, ADR 0059; только идентификатор
+  пользователя, режим и коды причин), `organization.export.aborted` (оборванная выгрузка организации, без
+  содержимого). Раз в минуту worker пишет `background.queue.status`, `notification.queue.status`,
+  `mail.queue.status` и `lifecycle.deletions.status` (`deletions_scheduled/due/overdue`) со счётчиками
+  очередей — это основной сигнал «очередь растёт».
 - **Корреляция** — входящий `X-Request-ID`/`Traceparent` или сгенерированные
   значения; `X-Request-ID` возвращается в ответе, `traceId` — в конверте
   ошибки.
@@ -253,7 +258,9 @@ Caddyfile закреплены тестами (`scripts/tests/test_production_co
   и `nodesReady = 0` (узел), доля `429` на вебхуках (предел частоты),
   `503` на `/health/ready` после деплоя (миграции), p95 сводки аналитики, `mail.smtp.check_failed` после запуска
   (неверные реквизиты SMTP) и рост `mail_dead_24h`/`mail_overdue` (письма не доходят: сброс пароля и подтверждение
-  почты тогда не работают).
+  почты тогда не работают), рост `deletions_overdue` (исполнитель закрытия учётных записей не успевает или
+  падает: смотреть `account.deletion.failed` и `lifecycle.deletion_failed`; обезличивание откладывается
+  безопасно, но срок уже наступил) и повторяющиеся `organization.export.aborted` (клиенты не дочитывают архив).
 
 ## 6. Ёмкость и масштабирование
 
@@ -308,6 +315,8 @@ deadlock. Лимиты вебхуков проверяют с корректны
 | ротация секрета узла | `ai-node-manage rotate` и замена файла на узле | при подозрении на утечку |
 | разбор мёртвых элементов | панель `dead-letters`, `retry`/`replay`/`discard` | ежедневно в пилоте |
 | проверка Telegram | `GET /integrations/{id}/health`, `deliveries_dead` | после смены токена или URL |
+| обращение о стирании данных сотрудника | `platform-admin erase-user --dry-run`, затем с `--confirm-email` ([runbook](../runbooks/data-requests.md)) | по обращению; личность подтверждается по runbook |
+| повтор стираний после восстановления из копии | записи `ACCOUNT_ANONYMIZED` и `USER_ERASED` сохранённой испорченной базы, журнал обращений; сначала запускается только `worker` ([runbook](../runbooks/data-requests.md) § 5) | после каждого восстановления, до выдачи трафика, пока нет журнала стираний (механизм 7 ADR 0056) |
 
 Локальная разработка: `docker compose up --build` поднимает базу, миграции,
 API, worker, scheduler; профиль `ai` добавляет узел с `fake`-провайдером.

@@ -74,16 +74,20 @@
 | `POST /auth/login` | guest | `{email,password}` | `200 AuthResponse` + cookie | refetch `/auth/me`; восстановить только валидный tenant |
 | `POST /auth/logout` | session optional | — | `204` + expired cookie | очистить весь защищённый cache и persisted UI context |
 | `POST /auth/refresh` | active session | — | `200 AuthResponse` + rotated cookie | заменить auth snapshot; это не recovery после 401 |
-| `GET /auth/me` | session | — | `200 {user,memberships[],canCreateOrganization}`; `user.emailVerifiedAt` (ISO-время или `null`) | источник auth/tenant/role guards; без членств и без права `canCreateOrganization` пользователя ведут к вводу кода сотрудника, а не к созданию организации |
+| `GET /auth/me` | session | — | `200 {user,memberships[],canCreateOrganization}`; `user.emailVerifiedAt` и `user.deletionDueAt` (ISO-время или `null`; второе — срок закрытия аккаунта, ADR 0059) | источник auth/tenant/role guards; без членств и без права `canCreateOrganization` пользователя ведут к вводу кода сотрудника, а не к созданию организации |
 | `POST /auth/password/change` | session | `{currentPassword,newPassword}` | `204` | раздел «Настройки → Аккаунт»; остальные сессии завершены на сервере, текущая остаётся; `403 INVALID_CURRENT_PASSWORD` показывается у поля (это не `401`: клиент считает `401` потерей сессии); `429` — обратный отсчёт; ADR 0058 |
 | `POST /auth/password/forgot` | guest | `{email}` | `204` для любого адреса | форма «Забыли пароль?»: после успеха всегда один текст «если адрес зарегистрирован, письмо отправлено», ответ не зависит от существования адреса; `429` — отсчёт |
 | `POST /auth/password/reset` | open | `{token,newPassword}` | `204` | страница `/reset-password#token=…`: токен читается из фрагмента один раз и убирается из адреса; входа нет, переход на `/login?reset=done`; `400 RESET_TOKEN_INVALID` — «Ссылка недействительна» с переходом к новому письму |
 | `POST /auth/email/verification` | session | — | `204` | кнопка «Отправить письмо ещё раз» (баннер и «Аккаунт»); `429` — отсчёт; `503 MAIL_UNAVAILABLE` — спокойное сообщение |
 | `POST /auth/email/verify` | open | `{token}` | `204` | страница `/verify-email#token=…`; после успеха сессия перечитывается, напоминание исчезает; `400 VERIFICATION_TOKEN_INVALID` — «Ссылка недействительна» |
+| `POST /auth/account/export` | session | `{password}` | `200` файл JSON (`Content-Disposition: attachment`) | карточка «Мои данные» («Настройки → Аккаунт», страница «Аккаунт»): пароль в диалоге, файл сохраняется через временную ссылку на объект и сразу освобождается; `403 INVALID_CURRENT_PASSWORD` — у поля пароля, `429` — обратный отсчёт; ADR 0059 |
+| `POST /auth/account/deletion` | session | `{password}` | `200 {deletionDueAt}` | карточка «Удаление аккаунта»: после успеха сессия перечитывается, над содержимым появляется напоминание со сроком; `409 ACCOUNT_DELETION_BLOCKED` — список причин из `details.blockers` в диалоге; `403 INVALID_CURRENT_PASSWORD`, `429` как выше |
+| `DELETE /auth/account/deletion` | session | — | `204`, идемпотентно | «Отменить удаление» в напоминании и в карточке; после успеха сессия перечитывается, напоминание исчезает |
 
 Register: `400/403/409/429`; login: `400/401/403/429`; logout: `403`;
 password/change: `400/401/403/429`; password/forgot: `400/403/429`; password/reset: `400/403/429`;
 email/verification: `401/403/429/503`; email/verify: `400/403/429`;
+account/export: `400/401/403/429`; account/deletion `POST`: `400/401/403/409/429`; `DELETE`: `401/403/429`;
 refresh: `401/403/429`; me: `401`. Ошибка login не должна раскрывать, существует
 ли email. На logout локальная очистка выполняется и при сетевой неопределённости,
 но UI сообщает, что серверное завершение сессии не подтверждено.
@@ -102,12 +106,13 @@ refresh: `401/403/429`; me: `401`. Ошибка login не должна раск
 | `POST /organization/ml-consent` | T, OWNER | — | `201` новое / `200` уже active | ml-consent |
 | `DELETE /organization/ml-consent` | T, OWNER | — | `204` | ml-consent |
 | `GET /organization/onboarding` | T, member | — | `200 OnboardingStatus` | — (перечитывать после каждого шага настройки) |
-| `GET /organization/members` | T, OWNER (`member.manage`) | — | `200 {items: Member[]}` | — |
+| `GET /organization/members` | T, OWNER (`member.manage`) | — | `200 {items: Member[]}`; у закрытой и обезличенной учётной записи `email` пустой, имя «Удалён» | в таблице команды такая строка подписана «Учётная запись удалена», действия над ней скрыты |
 | `PATCH /organization/members/{userId}` | T, OWNER | `{role}` | `200 Membership` | members |
 | `DELETE /organization/members/{userId}` | T, OWNER | — | `204`, идемпотентно | members |
 | `GET /organization/invitations` | T, OWNER | — | `200 {items: Invitation[]}` | — |
 | `POST /organization/invitations` | T, OWNER | `{role, note?}` | `201 {invitation, code}` — код показать один раз | invitations |
 | `DELETE /organization/invitations/{invitationId}` | T, OWNER | — | `204`, идемпотентно | invitations |
+| `POST /organization/export` | T, OWNER (`organization.export`) | — | `200` потоковый ZIP (`Content-Disposition: attachment`) | карточка «Выгрузка данных организации» («Настройки → Данные»): ответ читается как `Blob`, имя файла берётся из заголовка и очищается (`safeFilename`); `403`, `429 RATE_LIMITED` с отсчётом, `429 EXPORT_BUSY` — «Другая выгрузка идёт, повторите позже»; обрыв потока — сбой загрузки, архив без `manifest.json` неполный; ADR 0059 |
 | `POST /invitations/accept` | session, без T | `{code}` | `200 {membership: MembershipSummary}` | auth/me; предложить переключить tenant |
 | `GET /locations` | T, member | — | `200 {items: Location[]}` | — |
 | `POST /locations` | T, OWNER | `CreateLocationRequest` (без `active`: поле отклоняется `400`) | `201 Location` | locations, onboarding |

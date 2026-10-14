@@ -24,6 +24,8 @@ import (
 	eventsinfrastructure "lidradar/backend/internal/events/infrastructure"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	lifecycleapplication "lidradar/backend/internal/lifecycle/application"
+	lifecycleinfrastructure "lidradar/backend/internal/lifecycle/infrastructure"
 	mailapplication "lidradar/backend/internal/mail/application"
 	maildomain "lidradar/backend/internal/mail/domain"
 	mailinfrastructure "lidradar/backend/internal/mail/infrastructure"
@@ -39,6 +41,7 @@ import (
 	tenantinfrastructure "lidradar/backend/internal/tenant/infrastructure"
 	"lidradar/backend/platform/bootstrap"
 	"lidradar/backend/platform/config"
+	cryptoplatform "lidradar/backend/platform/crypto"
 	"lidradar/backend/platform/ids"
 	"lidradar/backend/platform/postgres"
 )
@@ -47,6 +50,7 @@ const (
 	idleInterval       = 500 * time.Millisecond
 	errorInterval      = time.Second
 	diagnosticInterval = time.Minute
+	deletionInterval   = time.Minute
 )
 
 func main() {
@@ -218,6 +222,11 @@ func run(ctx context.Context, configuration config.Config) error {
 	if err != nil {
 		return err
 	}
+	// Исполнитель закрытия учётных записей (ADR 0059): платформенный пул читает и меняет данные одного пользователя
+	// в нескольких организациях; письма об исходе ставит в ту же очередь, которую разбирает цепочка писем.
+	lifecycleService := lifecycleapplication.NewService(
+		lifecycleinfrastructure.NewPostgresStore(platformPool, nil), cryptoplatform.PasswordHasher{}, generator, time.Now,
+	).WithMail(mailService, configuration.Mail.WebBaseURL).WithReporter(logger)
 	// In-app доставка всегда локальна; Telegram подключается только с токеном.
 	deliveryChannels := []notificationdomain.Channel{notificationdomain.ChannelInApp}
 	if telegramEnabled {
@@ -236,11 +245,18 @@ func run(ctx context.Context, configuration config.Config) error {
 		loop{event: "mail.delivery_failed", message: "Ошибка доставки письма", step: func(ctx context.Context) (bool, error) {
 			return mailService.DispatchOne(ctx, ownerID+":mail", maildomain.DefaultLease)
 		}},
+		// Срок закрытия измеряется сутками, поэтому проход раз в минуту: опоздание не заметно, а холостой опрос дёшев
+		// (частичный индекс по назначенным удалениям).
+		loop{event: "lifecycle.deletion_failed", message: "Ошибка исполнения закрытия учётных записей", every: deletionInterval, step: func(ctx context.Context) (bool, error) {
+			processed, err := lifecycleService.ProcessDueDeletions(ctx)
+			return processed > 0, err
+		}},
 		loop{event: "diagnostics.failed", message: "Ошибка диагностики очередей", every: diagnosticInterval, step: func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
 			logQueueStats(ctx, logger, claimStore, now)
 			logNotificationStats(ctx, logger, deliveryRepository, now)
 			logMailStats(ctx, logger, mailService)
+			logDeletionStats(ctx, logger, lifecycleService)
 			return false, nil
 		}},
 	)
@@ -305,6 +321,21 @@ func logMailStats(ctx context.Context, logger *slog.Logger, service mailapplicat
 		"mail_dead_24h", stats.Dead,
 		"mail_overdue", stats.Overdue,
 		"mail_expired_leases", stats.ExpiredLeases,
+	)
+}
+
+func logDeletionStats(ctx context.Context, logger *slog.Logger, service lifecycleapplication.Service) {
+	stats, err := service.Stats(ctx)
+	if err != nil {
+		logger.Warn("Не удалось прочитать состояние закрытия учётных записей", "event", "lifecycle.deletions.diagnostics_failed", "error", err)
+		return
+	}
+	logger.Info(
+		"Состояние закрытия учётных записей",
+		"event", "lifecycle.deletions.status",
+		"deletions_scheduled", stats.Scheduled,
+		"deletions_due", stats.Due,
+		"deletions_overdue", stats.Overdue,
 	)
 }
 

@@ -65,6 +65,27 @@ var required = []string{
 	"lidradar/backend/internal/identity/infrastructure/TestResetTakesTheUserLockBeforeAnyTokenLock",
 	"lidradar/backend/internal/mail/infrastructure/TestParallelWorkersNeverTakeTheSameMessage",
 	"lidradar/backend/internal/integration/TestPasswordResetEndsEverySessionAndTheLinkWorksOnce",
+	// Выгрузка данных и закрытие учётной записи (ADR 0059): реестр данных сверяется с живой схемой, обезличивание
+	// идёт одной транзакцией в порядке блокировок и не оставляет чужого, выгрузка не выносит секреты и чужие данные.
+	"lidradar/backend/internal/lifecycle/infrastructure/TestRegistryClassifiesEveryReferenceToUsers",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestRegistryClassifiesEveryTenantTable",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestDatasetColumnsAreExactlyTheSchemaColumnsMinusTheExcludedOnes",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestEraseAnonymizesTheUserAndTouchesNobodyElse",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestEraseIsAtomicWhenTheLastStepFails",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestEraseByParallelExecutorsAnonymizesOnce",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestEraseWaitsForTheOrganizationLockAndRechecksTheBlockers",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestSnapshotNeverContainsSecretsOrServiceValues",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestSnapshotReadsEveryDatasetOfTheRequestedOrganizationOnly",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestPersonalExportNeverContainsSecretsOrOtherPeoplesData",
+	"lidradar/backend/internal/identity/infrastructure/TestScheduleDeletionByParallelRequestsCreatesExactlyOneSchedule",
+	"lidradar/backend/internal/identity/infrastructure/TestSessionCreationWaitsForAClosingTransaction",
+	"lidradar/backend/internal/tenant/infrastructure/TestMembershipCreationWaitsForAClosingTransaction",
+	"lidradar/backend/internal/tenant/infrastructure/TestAcceptInvitationDoesNotRestoreAMembershipOfAClosedUser",
+	"lidradar/backend/internal/tenant/infrastructure/TestAcceptInvitationWaitsForAClosingTransaction",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestEraseTakesTheInvitationsOfTheUserBeforeTheMemberships",
+	"lidradar/backend/internal/lifecycle/infrastructure/TestEraseSkipsAUserWhoseRowIsHeldByAnotherTransaction",
+	"lidradar/backend/internal/integration/TestAccountClosureFromRequestToAnonymization",
+	"lidradar/backend/internal/integration/TestOrganizationExportThroughTheWholeStack",
 }
 
 func main() {

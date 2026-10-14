@@ -22,6 +22,11 @@ type stubAuthentication struct {
 	// accountErr — ответ команд безопасности учётной записи (ADR 0058); accountCalls собирает их вызовы.
 	accountErr   error
 	accountCalls *[]accountCall
+	// exportDocument и deletionDue — ответы выгрузки и запроса закрытия учётной записи (ADR 0059).
+	exportDocument []byte
+	deletionDue    time.Time
+	// authenticated, если задан, заменяет пользователя, которого возвращает Authenticate.
+	authenticated *domain.User
 }
 
 // accountCall — один вызов команды безопасности: что именно получила служба.
@@ -53,6 +58,22 @@ func (stub stubAuthentication) VerifyEmail(_ context.Context, token string, clie
 	return stub.recordAccount(accountCall{Name: "verify", First: token, Client: client})
 }
 
+func (stub stubAuthentication) ExportAccountData(_ context.Context, sessionToken, password string, client application.Client) ([]byte, error) {
+	if err := stub.recordAccount(accountCall{Name: "export", Token: sessionToken, First: password, Client: client}); err != nil {
+		return nil, err
+	}
+	return stub.exportDocument, nil
+}
+func (stub stubAuthentication) RequestAccountDeletion(_ context.Context, sessionToken, password string, client application.Client) (time.Time, error) {
+	if err := stub.recordAccount(accountCall{Name: "delete", Token: sessionToken, First: password, Client: client}); err != nil {
+		return time.Time{}, err
+	}
+	return stub.deletionDue, nil
+}
+func (stub stubAuthentication) CancelAccountDeletion(_ context.Context, sessionToken string, client application.Client) error {
+	return stub.recordAccount(accountCall{Name: "cancel", Token: sessionToken, Client: client})
+}
+
 func (stub stubAuthentication) Register(_ context.Context, input application.RegistrationInput, _ application.Client) (application.Authenticated, error) {
 	if stub.registered != nil {
 		*stub.registered = input
@@ -66,6 +87,9 @@ func (stubAuthentication) Login(context.Context, string, string, application.Cli
 	return application.Authenticated{User: domain.User{ID: "user", Email: "u@example.com"}, Token: "opaque-token"}, nil
 }
 func (stub stubAuthentication) Authenticate(context.Context, string) (domain.User, error) {
+	if stub.authenticated != nil {
+		return *stub.authenticated, nil
+	}
 	return domain.User{ID: "user", OrganizationRights: stub.rights}, nil
 }
 func (stubAuthentication) Logout(context.Context, string) error { return nil }

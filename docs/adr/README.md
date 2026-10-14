@@ -66,6 +66,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0056: Сроки хранения и стирание данных](0056-data-retention-and-erasure.md) — Accepted, 2026-10-12.
 - [0057: Регистрация по приглашениям](0057-invitation-only-registration.md) — Accepted, 2026-10-13.
 - [0058: Почта, смена и сброс пароля, подтверждение почты](0058-account-security-and-mail.md) — Accepted, 2026-10-13.
+- [0059: Выгрузка данных и закрытие учётной записи](0059-data-export-and-account-closure.md) — Accepted, 2026-10-14.
 
 ## Workflow
 

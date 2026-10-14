@@ -23,7 +23,8 @@ func (r *PostgresRepository) ListMembers(ctx context.Context, tenantID string) (
 		return nil, domain.ErrInvalid
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT m.id, m.user_id, u.email, u.display_name, m.role, m.status, m.revoked_at, m.created_at, m.updated_at
+		SELECT m.id, m.user_id, CASE WHEN u.deleted_at IS NULL THEN u.email ELSE '' END, u.display_name, m.role, m.status,
+		       m.revoked_at, m.created_at, m.updated_at
 		FROM memberships AS m
 		JOIN users AS u ON u.id = m.user_id
 		WHERE m.tenant_id = $1
@@ -262,6 +263,14 @@ func (r *PostgresRepository) AcceptInvitation(ctx context.Context, command domai
 		return domain.AccountMembership{}, fmt.Errorf("begin invitation acceptance: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Строка принимающего пользователя блокируется первой, как у исполнителя обезличивания (ADR 0059): приём и
+	// закрытие учётной записи не ждут друг друга по кругу, а исполнитель, застав приём в работе, пропускает
+	// пользователя до следующего прохода (FOR UPDATE SKIP LOCKED). Статус читается под блокировкой и проверяется ниже,
+	// после проверок приглашения: порядок ответов прежний. Неизвестный пользователь даёт пустой статус.
+	var userStatus string
+	if err := tx.QueryRow(ctx, `SELECT status FROM users WHERE id = $1::uuid FOR SHARE`, command.UserID).Scan(&userStatus); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return domain.AccountMembership{}, mapPostgresError("lock accepting user", err)
+	}
 	if _, err := tx.Exec(ctx, `SELECT set_config('lidradar.invitation_code_hash', $1, true)`, command.CodeHash); err != nil {
 		return domain.AccountMembership{}, fmt.Errorf("scope invitation lookup: %w", err)
 	}
@@ -296,6 +305,11 @@ func (r *PostgresRepository) AcceptInvitation(ctx context.Context, command domai
 		return domain.AccountMembership{}, mapPostgresError("read invited organization", err)
 	}
 	if !found {
+		return domain.AccountMembership{}, domain.ErrNotFound
+	}
+	// Закрытому или неизвестному пользователю членство не создаётся и не восстанавливается: отозванное членство
+	// обезличенной учётной записи не должно снова стать активным.
+	if userStatus != "ACTIVE" {
 		return domain.AccountMembership{}, domain.ErrNotFound
 	}
 	existing, found, err := scanMembership(tx.QueryRow(ctx, `

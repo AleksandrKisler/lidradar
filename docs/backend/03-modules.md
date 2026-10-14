@@ -26,14 +26,18 @@
 
 ## 1. `identity` — пользователи и сессии
 
-**Владеет:** `users` (включая `organization_rights`, ADR 0057, и
-`email_verified_at`, ADR 0058), `sessions`, `auth_rate_limits`,
-`account_tokens` (ADR 0058). **Не владеет** организациями, ролями и правами:
-`/auth/me` получает членства через узкий контракт `MembershipLister` модуля
-`tenant`. При регистрации читает и погашает `platform_invitations` (таблица
-модуля `admin`), а коды сотрудников проверяет и принимает через узкий контракт
-`MemberInvitations`, который реализует `tenant`. Письма ставит в очередь через
-контракт `Mailer` (`Enqueue`), который реализует модуль `mail`.
+**Владеет:** `users` (включая `organization_rights`, ADR 0057,
+`email_verified_at`, ADR 0058, и колонки закрытия учётной записи
+`deletion_requested_at`, `deletion_due_at`, `deleted_at`, ADR 0059), `sessions`,
+`auth_rate_limits`, `account_tokens` (ADR 0058). **Не владеет** организациями,
+ролями и правами: `/auth/me` получает членства через узкий контракт
+`MembershipLister` модуля `tenant`. При регистрации читает и погашает
+`platform_invitations` (таблица модуля `admin`), а коды сотрудников проверяет и
+принимает через узкий контракт `MemberInvitations`, который реализует `tenant`.
+Письма ставит в очередь через контракт `Mailer` (`Enqueue`), который реализует
+модуль `mail`. Данные для выгрузки личных данных и причины, мешающие закрыть
+учётную запись, получает через контракт `AccountData`, который реализует
+`lifecycle` (ADR 0059).
 
 **Регистрация по приглашениям** (ADR 0057). Режим `RegistrationMode` задаёт
 конфигурация (`open` в `development` и `test`, `invite_only` в `staging` и
@@ -59,8 +63,10 @@
 **Сервис** (`application.Service`): `Register`, `Login`, `Authenticate`,
 `Logout`, `Refresh`, `Mode`, а также команды безопасности учётной записи (ADR 0058):
 `ChangePassword`, `RequestPasswordReset`, `ResetPassword`,
-`RequestEmailVerification`, `VerifyEmail`. Троттлинг в PostgreSQL (ADR 0032),
-отпечаток субъекта — `sha256(lower(trim(value)))`:
+`RequestEmailVerification`, `VerifyEmail`, и команды выгрузки и закрытия учётной
+записи (ADR 0059): `ExportAccountData`, `RequestAccountDeletion`,
+`CancelAccountDeletion`. Троттлинг в PostgreSQL (ADR 0032), отпечаток субъекта —
+`sha256(lower(trim(value)))`:
 
 | Scope | Лимит | Окно | Где |
 |---|---|---|---|
@@ -71,9 +77,11 @@
 | `PASSWORD_RESET_IP` | 10 | 1 ч | запрос сброса |
 | `PASSWORD_RESET_ACCOUNT` | 3 | 1 ч | запрос сброса, субъект — адрес почты, до поиска пользователя |
 | `PASSWORD_RESET_CONFIRM_IP` | 20 | 1 ч | завершение сброса |
-| `PASSWORD_CHANGE_ACCOUNT` | 5 | 15 мин | смена пароля, субъект — пользователь, до проверки пароля, сбрасывается при успехе |
+| `PASSWORD_CHANGE_ACCOUNT` | 5 | 15 мин | смена пароля и подтверждение паролем выгрузки и закрытия (один счётчик на все три команды), субъект — пользователь, до проверки пароля, сбрасывается при успехе |
 | `EMAIL_VERIFICATION_ACCOUNT` | 3 | 1 ч | повторное письмо подтверждения |
 | `EMAIL_VERIFY_IP` | 30 | 1 ч | подтверждение по токену |
+| `ACCOUNT_EXPORT_ACCOUNT` | 3 | 1 ч | выгрузка личных данных, субъект — пользователь (ADR 0059) |
+| `ACCOUNT_DELETION_ACCOUNT` | 5 | 1 ч | запрос и отмена закрытия учётной записи: каждое действие шлёт письмо (ADR 0059) |
 
 Вход по неизвестному email выполняет холостое хеширование пароля, чтобы время
 ответа не выдавало существование учётной записи; неверный пароль и `DISABLED`
@@ -101,8 +109,26 @@
 `EMAIL_VERIFIED` только при изменении). Порядок блокировок во всех командах один —
 строка пользователя, затем строки токенов: взаимная блокировка исключена
 (тест `TestIssueResetAndChangeDoNotDeadlock`). Аудит пишется в
-`auth_audit_log` в той же транзакции (документированная прямая запись, раздел 19);
+`auth_audit_log` в той же транзакции (документированная прямая запись, раздел 20);
 вход, выход и регистрация по-прежнему пишутся после фиксации.
+
+**Выгрузка личных данных и закрытие учётной записи** ([ADR 0059](../adr/0059-data-export-and-account-closure.md)).
+Обе опасные команды подтверждаются текущим паролем (`confirmPassword`: общий предел
+`PASSWORD_CHANGE_ACCOUNT`, счётчик расходуется до проверки). *Личная выгрузка*
+(`ExportAccountData`): пароль, предел `ACCOUNT_EXPORT_ACCOUNT`, запись аудита
+`ACCOUNT_DATA_EXPORTED` **до** выдачи тела, затем документ собирает
+`AccountData.PersonalExport`. *Закрытие* (`RequestAccountDeletion`): пароль, предел
+`ACCOUNT_DELETION_ACCOUNT`; уже назначенное удаление возвращает прежний срок без
+записи и письма; иначе `AccountData.DeletionBlockers` (единственный владелец
+организации, платформенный администратор → `DeletionBlockedError`), затем
+`ScheduleDeletion` одной транзакцией с аудитом `ACCOUNT_DELETION_REQUESTED`: срок —
+`AccountDeletionGrace` (30 суток, константа политики `retention-v1`). Отправка письма
+о запросе — после фиксации, её сбой действие не отменяет. *Отмена*
+(`CancelAccountDeletion`): без пароля, идемпотентна, `CancelDeletion` пишет
+`ACCOUNT_DELETION_CANCELLED` в той же транзакции. Сама работа обезличивания — в
+модуле `lifecycle` (раздел 18). Условие `status = 'ACTIVE'` в `INSERT` сессии
+(`FOR SHARE` на строку пользователя) не даёт параллельному входу оставить сессию у
+пользователя, которого именно сейчас обезличивают.
 
 **Транспорт:** `/api/v1/auth/*`, cookie `lidradar_session` (`HttpOnly`,
 `SameSite=Strict`, `Secure` по конфигурации, `MaxAge = LIDRADAR_SESSION_TTL`,
@@ -139,7 +165,7 @@
 | Право | OWNER | MANAGER |
 |---|---|---|
 | `risks.read`, `risks.manage`, `conversation.read`, `opportunity.manage`, `action.manage`, `outcome.manage`, `revenue.confirm` | ✓ | ✓ |
-| `revenue.read`, `analytics.read`, `integration.manage`, `organization.manage`, `location.manage`, `service.manage`, `notification.manage`, `member.manage` | ✓ | — |
+| `revenue.read`, `analytics.read`, `integration.manage`, `organization.manage`, `location.manage`, `service.manage`, `notification.manage`, `member.manage`, `organization.export` (ADR 0059) | ✓ | — |
 
 `Allowed` требует членство `ACTIVE` **и** организацию `ACTIVE`: приостановленная
 или архивная организация теряет все права разом.
@@ -154,7 +180,8 @@
 (`ML_CONSENT_REVOKED`).
 
 **Команда и приглашения** (ADR 0045, право `member.manage`): `ListMembers`
-(членства с почтой и именем, включая `DISABLED`), `ChangeMemberRole` (аудит
+(членства с почтой и именем, включая `DISABLED`; у обезличенной учётной записи
+адрес пустой, а имя «Удалён», ADR 0059), `ChangeMemberRole` (аудит
 `MEMBER_ROLE_CHANGED`), `RevokeMember` (`DISABLED` + `revoked_at`, аудит
 `MEMBER_REVOKED`, повтор идемпотентен) — обе команды блокируют все членства
 организации `FOR UPDATE` и отклоняют понижение/отзыв последнего активного
@@ -167,7 +194,10 @@
 контекст организации; создаёт членство или восстанавливает отозванное с ролью
 приглашения; активный участник → `ErrAlreadyMember`; аудит
 `INVITATION_ACCEPTED` от имени нового участника). Статус `INVITED` членства
-по-прежнему не присваивается: до приёма кода членства нет.
+по-прежнему не присваивается: до приёма кода членства нет. Вставка и
+восстановление членства (`insertMembership`) выполняются только для пользователя
+со статусом `ACTIVE` (`FOR SHARE` на его строку): приём приглашения не оставит
+членства у учётной записи, которую в этот момент обезличивают (ADR 0059).
 
 **Онбординг:** `Onboarding` (активное членство) — `OnboardingFacts` одним
 запросом и детерминированное правило `OnboardingFrom`: обязательные шаги
@@ -610,9 +640,12 @@ id`, аренда 30 с; истёкшие аренды с исчерпанным
 из сетевых данных только IP ≤ 64 символов). Контракт `Recorder.Tenant` /
 `Recorder.Auth`; чтения по HTTP нет. Имена операций и типов сущностей —
 `^[A-Z][A-Z0-9_]{0,99}$`; оба журнала append-only (триггеры). Кто пишет:
-identity (3 операции входа и 4 операции безопасности учётной записи: `PASSWORD_CHANGED`,
-`PASSWORD_RESET_REQUESTED`, `PASSWORD_RESET_COMPLETED`, `EMAIL_VERIFIED`; ADR 0058), tenant (`ORGANIZATION_UPDATED`, `MEMBER_ADDED`,
-`ML_CONSENT_*`), connector (`INTEGRATION_*`), opportunity
+identity (3 операции входа, 4 операции безопасности учётной записи: `PASSWORD_CHANGED`,
+`PASSWORD_RESET_REQUESTED`, `PASSWORD_RESET_COMPLETED`, `EMAIL_VERIFIED`; ADR 0058, и 3
+операции выгрузки и закрытия: `ACCOUNT_DATA_EXPORTED`, `ACCOUNT_DELETION_REQUESTED`,
+`ACCOUNT_DELETION_CANCELLED`; ADR 0059), lifecycle (`ACCOUNT_DELETION_BLOCKED`,
+`ACCOUNT_ANONYMIZED` в `auth_audit_log`, `ORGANIZATION_DATA_EXPORTED` в `audit_log`;
+ADR 0059), tenant (`ORGANIZATION_UPDATED`, `MEMBER_ADDED`, `ML_CONSENT_*`), connector (`INTEGRATION_*`), opportunity
 (`OPPORTUNITY_STAGE_CHANGED`), risk (`RISK_ACKNOWLEDGED`, `RISK_RESOLVED`,
 `RISK_FEEDBACK_RECORDED`), corrective (`ACTION_RECORDED`, `OUTCOME_RECORDED`),
 revenue (`REVENUE_CONFIRMED`), notification (`NOTIFICATION_POLICY_*`).
@@ -661,7 +694,90 @@ revenue (`REVENUE_CONFIRMED`), notification (`NOTIFICATION_POLICY_*`).
 **Пул и роль.** Таблица без `tenant_id` и RLS: API ставит письма под ролью
 приложения, воркер доставляет под рабочей ролью.
 
-## 18. Вспомогательные пакеты `internal`
+## 18. `lifecycle` — выгрузки и обезличивание
+
+**Владеет:** реестром данных и тремя сценариями ([ADR 0059](../adr/0059-data-export-and-account-closure.md)):
+выгрузкой данных организации, личной выгрузкой пользователя и исполнителем
+обезличивания закрытых учётных записей. Собственных таблиц у модуля нет: он читает и
+пишет таблицы других модулей по реестру (карта — раздел 20). Команды пользователя
+(подтверждение паролем, пределы, письма о запросе и отмене) принадлежат `identity`;
+`lifecycle` реализует его узкий контракт `AccountData` (`DeletionBlockers`,
+`PersonalExport`). Права на выгрузку организации проверяет через
+`tenant.PermissionService`, аудит пишет через `audit.Recorder`, письма ставит в очередь
+контрактом `Mailer` модуля `mail`.
+
+**Реестр данных** (`domain/registry.go`) — код, а не договорённость. Три списка:
+`UserReferences` (31 колонка, указывающая на пользователя или членство, с судьбой
+строк при обезличивании: `ERASE`, `ANONYMIZE`, `REVOKE`, `RETAIN` — и разделом личной
+выгрузки), `OrganizationDatasets` (23 набора выгрузки организации: таблица, файл,
+**явный список колонок**, порядок строк) и `ExcludedTables` (16 таблиц с `tenant_id`) с
+`ExcludedColumns` (секреты и служебные колонки выгружаемых таблиц) и причиной каждого
+исключения. Тесты на живой схеме (`TestRegistryClassifiesEveryReferenceToUsers`,
+`TestRegistryClassifiesEveryTenantTable`,
+`TestDatasetColumnsAreExactlyTheSchemaColumnsMinusTheExcludedOnes`) падают, если
+появилась колонка, указывающая на `users` или на членство, таблица с `tenant_id` или
+колонка выгружаемой таблицы без записи в реестре: новая таблица не остаётся молча вне
+выгрузки и обезличивания, а новая колонка по умолчанию не выгружается. Все три рабочие
+роли имеют полный DML (миграция 000020), поэтому полнота держится на этом коде.
+
+**Личная выгрузка** (`Store.PersonalExport`, платформенный пул, всё по идентификатору
+пользователя). Один JSON-документ `lidradar.account-export/1`: учётная запись,
+членства, сессии без хэшей, события входа и безопасности, настройки уведомлений,
+привязки Telegram, решения по согласию на наборы данных и **числа** записей, внесённых
+пользователем в организациях (содержимое записей принадлежит организации). Каждый
+список ограничен 50 000 строк (`domain.SectionLimit`) и при превышении помечается
+`truncated: true`; пустые разделы всегда `[]`, не `null`. Чтение — одна транзакция
+`REPEATABLE READ` только по чтению.
+
+**Выгрузка организации** (`Service.ExportOrganization`, `transport`: `POST
+/api/v1/organization/export`). Порядок проверок до первого байта: право
+`organization.export` (только `OWNER`), свободный слот (не больше 2 выгрузок в
+процессе, `domain.MaxConcurrentExports`), предел `ORGANIZATION_EXPORT_TENANT` (3 в час
+на организацию, `auth_rate_limits`), запись аудита `ORGANIZATION_DATA_EXPORTED`, открытие
+снимка. Снимок — одна транзакция `REPEATABLE READ` только по чтению под ролью
+приложения в контексте организации (RLS остаётся страховкой к условию `tenant_id`);
+строки читаются потоком (`to_json` от явного списка колонок: порядок полей задан реестром, в отличие от `jsonb`; постоянная память).
+Архив ZIP с Deflate собирается по ходу чтения: `README.txt`, `organization.json`,
+файлы `data/<набор>.jsonl` и `manifest.json` **последним** (число строк, размер и
+SHA-256 каждого файла, момент снимка). `tenant_id`, секреты и служебные колонки в него
+не попадают. Заголовки уходят при первой записи (`streamWriter`), поэтому всё, что
+может отказать заранее, отвечает обычной ошибкой (`403 FORBIDDEN`, `429 RATE_LIMITED` с
+`Retry-After`, `429 EXPORT_BUSY`). Срок записи продлевается на каждый кусок (30 с,
+`http.ResponseController`), общий срок 15 минут (`domain.ExportTimeout`), отключение
+клиента отменяет чтение. Ошибка после первого байта обрывает соединение
+(`panic(http.ErrAbortHandler)`, посредник восстановления её пробрасывает) и пишет
+`organization.export.aborted` в журнал: клиент получает архив без манифеста.
+
+**Исполнитель обезличивания** (`Service.ProcessDueDeletions`, цепочка `worker`
+`lifecycle.deletion_failed` раз в минуту, пачка до 20 пользователей, платформенный
+пул). Пользователь берётся, когда `deletion_due_at <= now()` и `deleted_at` не задан
+(частичный индекс `users_deletion_due_idx`). Одна транзакция на пользователя
+(`PostgresStore.Erase`): `SET LOCAL lock_timeout = '5s'`; строка пользователя `FOR
+UPDATE SKIP LOCKED`; неиспользованные приглашения пользователя; все членства каждой
+организации, где у него есть членство (`ORDER BY tenant_id, id`, как
+`lockMemberships`); перепроверка блокировок (единственный владелец `SOLE_OWNER`,
+платформенный администратор `PLATFORM_ADMIN`). *Есть блокировка:* назначение
+снимается, пишется `ACCOUNT_DELETION_BLOCKED`, после фиксации уходит письмо.
+*Блокировок нет:* удаляются `telegram_*`, `notification_*`, `sessions`,
+`account_tokens`; неиспользованные приглашения пользователя отзываются; членства
+получают `DISABLED` и `revoked_at`; `users` обезличивается (адрес
+`<id>@deleted.invalid`, имя «Удалён», хэш пароля от неизвестного случайного секрета,
+`status = DISABLED`, `email_verified_at` и `organization_rights` обнулены, `deleted_at`
+задан); пишется `ACCOUNT_ANONYMIZED`. После фиксации — письмо `ACCOUNT_DELETED` на
+прежний адрес и событие `account.deletion.anonymized` (идентификатор и режим, без адреса). Сбой
+одного пользователя не мешает остальным (`account.deletion.failed`), он остаётся в
+очереди до следующего прохода. Раз в минуту диагностика пишет
+`lifecycle.deletions.status` (`deletions_scheduled`, `deletions_due`,
+`deletions_overdue`). *Оператор:* `platform-admin erase-user` вызывает тот же код в
+режиме `IMMEDIATE` (без отсрочки, при блокировке ничего не меняет, дополнительно
+пишет `USER_ERASED` в `admin_audit_log`); `--dry-run` исполняет и откатывает
+транзакцию, поэтому счётчики совпадают с боевым запуском.
+
+**Транспорт:** `POST /api/v1/organization/export` (модуль `lifecycle`);
+`/api/v1/auth/account/export` и `/api/v1/auth/account/deletion` — в транспорте
+`identity`.
+
+## 19. Вспомогательные пакеты `internal`
 
 - `testsupport` — изолированные схемы на тест, пулы четырёх ролей,
   трассировщик запросов (см. [11-testing.md](11-testing.md)).
@@ -670,13 +786,14 @@ revenue (`REVENUE_CONFIRMED`), notification (`NOTIFICATION_POLICY_*`).
   `production`.
 - `integration` — сквозные тесты с полным API-стеком в процессе.
 
-## 19. Карта прямых чтений и записей чужих таблиц
+## 20. Карта прямых чтений и записей чужих таблиц
 
 | Модуль | Читает | Пишет | Основание |
 |---|---|---|---|
-| `tenant` | `users` (список команды), `service_catalog_items`, `channel_connections`, `telegram_user_links` (факты онбординга) | `users.organization_rights` (уменьшение в транзакции создания организации) | ADR 0045, ADR 0057 |
-| `identity` | `platform_invitations` (проверка кода) | `platform_invitations.consumed_*` (погашение кода платформы в транзакции регистрации); `auth_audit_log` (записи `PASSWORD_CHANGED`, `PASSWORD_RESET_REQUESTED`, `PASSWORD_RESET_COMPLETED`, `EMAIL_VERIFIED` в транзакциях своих команд) | ADR 0057, ADR 0058 |
+| `tenant` | `users` (список команды; статус и блокировка строки `FOR SHARE` при создании и восстановлении членства), `service_catalog_items`, `channel_connections`, `telegram_user_links` (факты онбординга) | `users.organization_rights` (уменьшение в транзакции создания организации) | ADR 0045, ADR 0057, ADR 0059 |
+| `identity` | `platform_invitations` (проверка кода) | `platform_invitations.consumed_*` (погашение кода платформы в транзакции регистрации); `auth_audit_log` (записи `PASSWORD_CHANGED`, `PASSWORD_RESET_REQUESTED`, `PASSWORD_RESET_COMPLETED`, `EMAIL_VERIFIED`, `ACCOUNT_DELETION_REQUESTED`, `ACCOUNT_DELETION_CANCELLED` в транзакциях своих команд) | ADR 0057, ADR 0058, ADR 0059 |
 | `admin` (команды кодов) | — | `users.organization_rights` (увеличение командой `allow-organization`) | ADR 0057 |
+| `lifecycle` | по реестру данных: `users`, `sessions`, `memberships`, `organizations`, 23 набора выгрузки организации, `platform_admins`, `auth_audit_log` (личная выгрузка и проверка блокировок) | исполнитель: удаляет `telegram_callback_commands`, `telegram_link_tokens`, `telegram_user_links`, `notification_digest_items`, `notification_preferences`, `notifications`, `sessions`, `account_tokens`; отзывает `membership_invitations` и `memberships` пользователя; обезличивает `users`; пишет `auth_audit_log` (`ACCOUNT_DELETION_BLOCKED`, `ACCOUNT_ANONYMIZED`) и `admin_audit_log` (`USER_ERASED`, только операторский режим) | ADR 0059; прецеденты ADR 0039, 0040 |
 | `conversation` | `channel_connections` (блокировка при приёме; снимок канала в списке), `external_identities`, `risk_signals`, `opportunities` (сводка активных рисков списка) | — | ADR 0025, 0044 |
 | `opportunity` | `conversation_summaries`, `messages` (доверенные факты) | — | ADR 0008 |
 | `risk` | таблицы переписок, контактов, каналов, внешних личностей, каталога услуг, сделок, точек, расписаний, фактов, исходов, действий, выручки | — | ADR 0007, 0038, 0044 |

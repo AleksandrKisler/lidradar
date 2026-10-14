@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: 30577de04690d598f8e8a4c9ff54c6a4538283fe60f17058ad6f7e42fa0bb478 -->
+<!-- GENERATED; source-sha256: 5e9cbaa8e6786af53e6db8700d7f9d7404c96391ec49e5832603ccae47a1043e -->
 > Источник: [канонический документ](../backend/04-api.md). Правки вносятся в источник.
 
 # HTTP API
@@ -83,9 +83,11 @@
 | 409 | `MEMBER_DISABLED` | смена роли отозванного членства |
 | 409 | `INVITATION_EXPIRED` / `INVITATION_REVOKED` / `INVITATION_USED` | код приглашения больше не действует |
 | 409 | `ALREADY_MEMBER` | принимающий уже активный участник организации |
+| 409 | `ACCOUNT_DELETION_BLOCKED` | закрытие учётной записи невозможно: единственный владелец организации или платформенный администратор; причины в `details.blockers` (ADR 0059) |
 | 409 | `LEASE_LOST` | API узла: аренда задания потеряна |
 | 413 | `PAYLOAD_TOO_LARGE` | вебхук больше 1 МиБ |
 | 429 | `RATE_LIMITED` | превышен предел по адресу или по учётной записи; есть `Retry-After` |
+| 429 | `EXPORT_BUSY` | в процессе уже идёт предельное число выгрузок организации (2); есть `Retry-After` |
 | 503 | `SERVICE_NOT_READY` | `/health/ready`: база или миграции не совпали |
 | 503 | `CONNECTOR_UNAVAILABLE` | Telegram не настроен или недоступен, подключение отключено |
 | 503 | `UNAVAILABLE` | `GET /events`: шина сигналов не инициализирована в процессе |
@@ -147,8 +149,8 @@
 - Ограничение по адресу клиента: `/api/v1/auth/*` — 120 запросов в минуту,
   `/api/v1/webhooks/*` — 1200, `/internal/v1/ai/*` — 600; правила независимы,
   ответ `429` с `Retry-After`. Отдельно вход ограничивается по учётной записи
-  (5 неудач за 15 минут) и по адресу (20 в минуту) в PostgreSQL; сброс и смена пароля и подтверждение почты имеют
-  собственные пределы (раздел 2.2). Адрес клиента —
+  (5 неудач за 15 минут) и по адресу (20 в минуту) в PostgreSQL; сброс и смена пароля, подтверждение почты, выгрузка
+  личных данных и закрытие учётной записи имеют собственные пределы (раздел 2.2). Адрес клиента —
   адрес соединения; если соединение пришло от узла из `LIDRADAR_TRUSTED_PROXIES`,
   адрес берётся из `X-Forwarded-For` ([ADR 0049](../adr/0049-trusted-proxies-client-address.md)),
   от остальных узлов заголовок игнорируется.
@@ -196,12 +198,15 @@ Silent NOTIFY loss до хаба этим не обнаруживается. П�
 | POST | `/login` | 🔓 | `{email,password}` → `200 {"user"}` + cookie | `401 INVALID_CREDENTIALS`, `429` |
 | POST | `/logout` | 🍪 (необязательно) | → `204`, cookie стирается | |
 | POST | `/refresh` | 🍪 | → `200 {"user"}` + новая cookie (старая отзывается) | `401`, `429` |
-| GET | `/me` | 🍪 | → `200 {"user","memberships":[{tenantId,organizationName,role}],"canCreateOrganization"}` только активные членства активных организаций; `canCreateOrganization` — `true` в `open` и при действующем праве в `invite_only`; `user.emailVerifiedAt` — время подтверждения почты или `null` | `401` |
+| GET | `/me` | 🍪 | → `200 {"user","memberships":[{tenantId,organizationName,role}],"canCreateOrganization"}` только активные членства активных организаций; `canCreateOrganization` — `true` в `open` и при действующем праве в `invite_only`; `user.emailVerifiedAt` — время подтверждения почты или `null`; `user.deletionDueAt` — срок обезличивания, если пользователь запросил закрытие учётной записи, иначе `null` | `401` |
 | POST | `/password/change` | 🍪 | `{currentPassword,newPassword}` → `204`; остальные сессии завершаются, текущая остаётся | `400`, `401`, `403 INVALID_CURRENT_PASSWORD`, `429` |
 | POST | `/password/forgot` | 🔓 | `{email}` → `204` для любого адреса | `400` (только неверное тело), `429` |
 | POST | `/password/reset` | 🔓 | `{token,newPassword}` → `204`; все сессии пользователя завершаются, входа нет | `400 INVALID_ARGUMENT`, `400 RESET_TOKEN_INVALID`, `429` |
 | POST | `/email/verification` | 🍪 | → `204`: письмо поставлено в очередь или адрес уже подтверждён | `401`, `429`, `503 MAIL_UNAVAILABLE` |
 | POST | `/email/verify` | 🔓 | `{token}` → `204` | `400 VERIFICATION_TOKEN_INVALID`, `429` |
+| POST | `/account/export` | 🍪 | `{password}` → `200` файл `lidradar-account-YYYYMMDD.json` (`Content-Disposition: attachment`, формат `lidradar.account-export/1`) | `400`, `401`, `403 INVALID_CURRENT_PASSWORD`, `429` |
+| POST | `/account/deletion` | 🍪 | `{password}` → `200 {"deletionDueAt"}`; повтор при назначенном удалении возвращает прежний срок | `400`, `401`, `403 INVALID_CURRENT_PASSWORD`, `409 ACCOUNT_DELETION_BLOCKED`, `429` |
+| DELETE | `/account/deletion` | 🍪 | → `204`; идемпотентно (без назначенного удаления тоже `204`) | `401`, `429` |
 
 **Регистрация по приглашениям** ([ADR 0057](../adr/0057-invitation-only-registration.md)). Режим задаёт `LIDRADAR_REGISTRATION_MODE`
 (`open` в `development` и `test`, `invite_only` в `staging` и `production`). Поле `inviteCode` принимает
@@ -232,6 +237,27 @@ API, отправляет `worker` (модуль `mail`, см. [../backend/03-mo
   (`/email/verification`, `EMAIL_VERIFICATION_ACCOUNT` — 3 в час); ссылка действует 7 суток. `verify` (предел
   `EMAIL_VERIFY_IP`, 30 в час) работает без сессии; негодный токен — `VERIFICATION_TOKEN_INVALID`.
 
+**Выгрузка личных данных и закрытие учётной записи** ([ADR 0059](../adr/0059-data-export-and-account-closure.md)).
+Обе команды с телом подтверждаются текущим паролем; неверный пароль — `403 INVALID_CURRENT_PASSWORD`, как при смене
+пароля, а предел `PASSWORD_CHANGE_ACCOUNT` (5 за 15 минут) общий с ней и расходуется до проверки.
+
+- **Выгрузка** (`POST /account/export`, дополнительно предел `ACCOUNT_EXPORT_ACCOUNT` — 3 в час на пользователя) отдаёт
+  один JSON-файл: разделы `account`, `memberships`, `sessions` (без хэшей), `authEvents`, `notificationSettings`,
+  `telegramLinks`, `consentDecisions` и `authoredRecords` (только числа записей, внесённых пользователем в
+  организациях). Каждый список ограничен 50 000 строк; при превышении раздел несёт `"truncated": true`. Хэш пароля,
+  хэши токенов, очереди и данные других людей не входят. Запись аудита `ACCOUNT_DATA_EXPORTED` делается до выдачи
+  тела. Содержимое записей организации выгружает её владелец (`POST /api/v1/organization/export`, раздел 2.3).
+- **Закрытие** (`POST /account/deletion`, предел `ACCOUNT_DELETION_ACCOUNT` — 5 в час на пользователя для запроса и
+  отмены вместе) назначает обезличивание через 30 суток. До срока учётная запись работает как обычно; `GET /auth/me`
+  отдаёт `user.deletionDueAt`. Пока пользователь единственный активный владелец организации (`ACTIVE` или
+  `SUSPENDED`) или действующий платформенный администратор, ответ — `409 ACCOUNT_DELETION_BLOCKED` с
+  `details.blockers`: `[{code:"SOLE_OWNER", organizationName, hasOtherMembers}, {code:"PLATFORM_ADMIN"}]`. Блокировки
+  перепроверяются при исполнении: если за срок появилась причина, назначение снимается письмом. Запрос и отмена пишут
+  `ACCOUNT_DELETION_REQUESTED` и `ACCOUNT_DELETION_CANCELLED` в той же транзакции и отправляют письмо (без почты —
+  работают без письма). Отмена (`DELETE`) пароля не требует.
+- После срока воркер обезличивает учётную запись: вход невозможен (`401 INVALID_CREDENTIALS`), сессии удалены, в
+  списке участников организации запись показывается как «Удалён» с пустой почтой и отозванным членством.
+
 ### 2.3. Организация, точки, ML-согласие
 
 | Метод | Путь | Доступ / право | Ответ |
@@ -247,12 +273,13 @@ API, отправляет `worker` (модуль `mail`, см. [../backend/03-mo
 | POST | `/api/v1/organization/ml-consent` | 🍪+T, `organization.manage` | `201` при выдаче, `200` при повторе |
 | DELETE | `/api/v1/organization/ml-consent` | 🍪+T, `organization.manage` | `204` (и без действующего согласия) |
 | GET | `/api/v1/organization/onboarding` | 🍪+T, членство | `200 {"complete","nextStep","steps":[5×{key,required,done}],"facts","computedAt"}` — статус выводится из данных (ADR 0045) |
-| GET | `/api/v1/organization/members` | 🍪+T, `member.manage` | `200 {"items":[Member]}` с почтой и именем, включая `DISABLED` |
+| GET | `/api/v1/organization/members` | 🍪+T, `member.manage` | `200 {"items":[Member]}` с почтой и именем, включая `DISABLED`; у закрытой и обезличенной учётной записи почта пустая, имя «Удалён», членство отозвано |
 | PATCH | `/api/v1/organization/members/{userId}` | 🍪+T, `member.manage` | `{"role"}` → `200 Membership`; `409 LAST_OWNER` / `MEMBER_DISABLED`; аудит `MEMBER_ROLE_CHANGED` |
 | DELETE | `/api/v1/organization/members/{userId}` | 🍪+T, `member.manage` | `204` (`DISABLED`, строка остаётся; повтор идемпотентен); `409 LAST_OWNER`; аудит `MEMBER_REVOKED` |
 | GET | `/api/v1/organization/invitations` | 🍪+T, `member.manage` | `200 {"items":[Invitation]}` со статусом `PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`; кода нет |
 | POST | `/api/v1/organization/invitations` | 🍪+T, `member.manage` | `{"role","note?"}` → `201 {"invitation","code"}`; код 43 символа показывается один раз, хранится SHA-256, срок 7 дней; аудит `MEMBER_INVITED` |
 | DELETE | `/api/v1/organization/invitations/{invitationId}` | 🍪+T, `member.manage` | `204` (повтор идемпотентен); принятое → `409 INVITATION_USED`; аудит `INVITATION_REVOKED` |
+| POST | `/api/v1/organization/export` | 🍪+T, `organization.export` (только OWNER) | без тела → `200` потоковый ZIP `lidradar-organization-YYYYMMDD.zip` (`Content-Disposition: attachment`, `Cache-Control: no-store`): `README.txt`, `organization.json`, `data/*.jsonl` (23 набора), `manifest.json` последним (число строк, размер, SHA-256 каждого файла). `403 FORBIDDEN`, `429 RATE_LIMITED` (3 в час на организацию, `Retry-After`), `429 EXPORT_BUSY` (не больше 2 одновременных выгрузок в процессе); аудит `ORGANIZATION_DATA_EXPORTED` до первого байта. Ошибка после начала потока обрывает соединение: архив без `manifest.json` считается неполным |
 | POST | `/api/v1/invitations/accept` | 🍪 (без `X-Tenant-ID`) | `{"code"}` → `200 {"membership":{tenantId,organizationName,role}}`; создаёт или восстанавливает членство; `404` неизвестный код, `409 INVITATION_EXPIRED`/`INVITATION_REVOKED`/`INVITATION_USED`/`ALREADY_MEMBER`; аудит `INVITATION_ACCEPTED` |
 
 Команда работает по одноразовым кодам, а не по адресам почты: код без адреса не
@@ -396,3 +423,10 @@ API, отправляет `worker` (модуль `mail`, см. [../backend/03-mo
 5. **Личные уведомления:** `POST /notifications/telegram-link-token` →
    открыть `startUrl` в Telegram → `GET /notifications/telegram-link` →
    настроить `PUT /notifications/preferences/{riskType}`.
+7. **Выгрузка и закрытие** (ADR 0059): личные данные — `POST
+   /auth/account/export` с паролем, ответ сохраняется как файл; данные
+   организации (OWNER) — `POST /organization/export` с `X-Tenant-ID`, ответ
+   сохраняется как файл. Закрытие: `POST /auth/account/deletion` с паролем →
+   `deletionDueAt` (напоминание в интерфейсе, пока `GET /auth/me` отдаёт
+   `user.deletionDueAt`) → при передумывании `DELETE /auth/account/deletion`;
+   `409 ACCOUNT_DELETION_BLOCKED` показывает причины из `details.blockers`.

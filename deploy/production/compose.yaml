@@ -62,6 +62,8 @@ services:
     environment:
       LIDRADAR_DOMAIN: ${LIDRADAR_DOMAIN:?задайте LIDRADAR_DOMAIN в .env}
       LIDRADAR_ACME_EMAIL: ${LIDRADAR_ACME_EMAIL:?задайте LIDRADAR_ACME_EMAIL в .env}
+      # Адреса, которым открыт путь AI-узла /internal/v1/ai/* (через пробел). По умолчанию любые.
+      LIDRADAR_AI_NODE_ALLOWED_IPS: "${LIDRADAR_AI_NODE_ALLOWED_IPS:-0.0.0.0/0 ::/0}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

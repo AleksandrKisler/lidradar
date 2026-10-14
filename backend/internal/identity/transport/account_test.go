@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"lidradar/backend/internal/identity/application"
+	"lidradar/backend/internal/identity/domain"
 )
 
 // Транспорт команд безопасности учётной записи (ADR 0058): маршруты, разбор тела, соответствие ошибок
@@ -172,5 +174,209 @@ func TestMeShowsEmailVerificationWithoutSecrets(t *testing.T) {
 		if strings.Contains(response.Body.String(), secret) {
 			t.Fatalf("/me раскрывает %q: %s", secret, response.Body.String())
 		}
+	}
+}
+
+// Выгрузка личных данных и закрытие учётной записи (ADR 0059).
+
+func TestAccountExportReturnsTheDocumentAsANoStoreAttachment(t *testing.T) {
+	var calls []accountCall
+	document := []byte(`{"format":"lidradar.account-export/1"}`)
+	response := call(t, stubAuthentication{accountCalls: &calls, exportDocument: document}, http.MethodPost, "/account/export", `{"password":"current-password-value"}`)
+	if response.Code != http.StatusOK || response.Body.String() != string(document) {
+		t.Fatalf("/account/export: %d %q", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Errorf("Content-Type = %q", got)
+	}
+	disposition := response.Header().Get("Content-Disposition")
+	if !strings.HasPrefix(disposition, `attachment; filename="lidradar-account-`) || !strings.HasSuffix(disposition, `.json"`) {
+		t.Errorf("Content-Disposition = %q", disposition)
+	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
+	if len(calls) != 1 || calls[0].Name != "export" || calls[0].Token != "opaque-token" || calls[0].First != "current-password-value" {
+		t.Errorf("служба получила %+v", calls)
+	}
+	if len(response.Result().Cookies()) != 0 {
+		t.Errorf("выгрузка не должна менять cookie: %+v", response.Result().Cookies())
+	}
+}
+
+func TestAccountDeletionRequestAnswersWithTheDueDate(t *testing.T) {
+	var calls []accountCall
+	due := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	response := call(t, stubAuthentication{accountCalls: &calls, deletionDue: due}, http.MethodPost, "/account/deletion", `{"password":"current-password-value"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("/account/deletion: %d %s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || payload["deletionDueAt"] != "2026-11-13T09:00:00Z" || len(payload) != 1 {
+		t.Fatalf("тело ответа: %s", response.Body.String())
+	}
+	if len(calls) != 1 || calls[0].Name != "delete" || calls[0].First != "current-password-value" || calls[0].Token != "opaque-token" {
+		t.Errorf("служба получила %+v", calls)
+	}
+}
+
+func TestAccountDeletionCancelAnswersWithoutABody(t *testing.T) {
+	var calls []accountCall
+	response := call(t, stubAuthentication{accountCalls: &calls}, http.MethodDelete, "/account/deletion", ``)
+	if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
+		t.Fatalf("DELETE /account/deletion: %d %q, want 204 without a body", response.Code, response.Body.String())
+	}
+	if len(calls) != 1 || calls[0].Name != "cancel" || calls[0].Token != "opaque-token" {
+		t.Errorf("служба получила %+v", calls)
+	}
+}
+
+func TestAccountDeletionBlockedReportsEveryReason(t *testing.T) {
+	blocked := application.DeletionBlockedError{Blockers: []application.DeletionBlocker{
+		{Code: application.BlockerSoleOwner, OrganizationName: "Салон Лотос", HasOtherMembers: true},
+		{Code: application.BlockerPlatformAdmin},
+	}}
+	response := call(t, stubAuthentication{accountErr: blocked}, http.MethodPost, "/account/deletion", `{"password":"current-password-value"}`)
+	if response.Code != http.StatusConflict || errorCode(t, response) != "ACCOUNT_DELETION_BLOCKED" {
+		t.Fatalf("%d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Details struct {
+				Blockers []map[string]any `json:"blockers"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	blockers := payload.Error.Details.Blockers
+	if len(blockers) != 2 || blockers[0]["code"] != "SOLE_OWNER" || blockers[0]["organizationName"] != "Салон Лотос" ||
+		blockers[0]["hasOtherMembers"] != true || blockers[1]["code"] != "PLATFORM_ADMIN" {
+		t.Fatalf("blockers = %v", blockers)
+	}
+	if _, leaked := blockers[1]["organizationName"]; leaked {
+		t.Errorf("пустое название организации не должно выходить наружу: %v", blockers[1])
+	}
+	// Идентификаторы организаций наружу не выходят никогда.
+	for _, field := range []string{"tenantId", "organizationId"} {
+		if strings.Contains(response.Body.String(), field) {
+			t.Errorf("ответ содержит %s: %s", field, response.Body.String())
+		}
+	}
+}
+
+func TestAccountDataCommandsMapErrorsToStableCodes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		method, path, body string
+		err                error
+		status             int
+		code               string
+	}{
+		"выгрузка: неверный пароль — не 401": {
+			http.MethodPost, "/account/export", `{"password":"x"}`,
+			application.ErrInvalidCurrentPassword, http.StatusForbidden, "INVALID_CURRENT_PASSWORD",
+		},
+		"выгрузка без сессии": {
+			http.MethodPost, "/account/export", `{"password":"x"}`,
+			application.ErrUnauthenticated, http.StatusUnauthorized, "UNAUTHENTICATED",
+		},
+		"закрытие: неверный пароль — не 401": {
+			http.MethodPost, "/account/deletion", `{"password":"x"}`,
+			application.ErrInvalidCurrentPassword, http.StatusForbidden, "INVALID_CURRENT_PASSWORD",
+		},
+		"закрытие: пустой пароль": {
+			http.MethodPost, "/account/deletion", `{"password":""}`,
+			application.ErrInvalidInput, http.StatusBadRequest, "INVALID_ARGUMENT",
+		},
+		"отмена без сессии": {
+			http.MethodDelete, "/account/deletion", ``,
+			application.ErrUnauthenticated, http.StatusUnauthorized, "UNAUTHENTICATED",
+		},
+		"сбой хранилища не раскрывает деталей": {
+			http.MethodPost, "/account/export", `{"password":"x"}`,
+			errors.New("connection refused to 10.0.0.5"), http.StatusInternalServerError, "INTERNAL_ERROR",
+		},
+	} {
+		response := call(t, stubAuthentication{accountErr: tc.err}, tc.method, tc.path, tc.body)
+		if response.Code != tc.status || errorCode(t, response) != tc.code {
+			t.Errorf("%s: %d %s, want %d %s", name, response.Code, response.Body.String(), tc.status, tc.code)
+		}
+		if strings.Contains(response.Body.String(), "10.0.0.5") {
+			t.Errorf("%s: внутренняя ошибка попала в ответ: %s", name, response.Body.String())
+		}
+		if response.Header().Get("Content-Disposition") != "" {
+			t.Errorf("%s: отказ не должен выглядеть как вложение", name)
+		}
+	}
+}
+
+func TestAccountDataCommandsReportRateLimitWithRetryAfter(t *testing.T) {
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/account/export", `{"password":"x"}`},
+		{http.MethodPost, "/account/deletion", `{"password":"x"}`},
+		{http.MethodDelete, "/account/deletion", ``},
+	} {
+		response := call(t, stubAuthentication{accountErr: application.RateLimitError{RetryAfter: time.Hour}}, tc.method, tc.path, tc.body)
+		if response.Code != http.StatusTooManyRequests || errorCode(t, response) != "RATE_LIMITED" || response.Header().Get("Retry-After") != "3600" {
+			t.Errorf("%s %s: %d %s Retry-After=%q", tc.method, tc.path, response.Code, response.Body.String(), response.Header().Get("Retry-After"))
+		}
+	}
+}
+
+func TestAccountDataCommandsRejectMalformedBodiesBeforeCallingTheService(t *testing.T) {
+	for _, path := range []string{"/account/export", "/account/deletion"} {
+		for name, body := range map[string]string{
+			"пустое тело":  ``,
+			"не JSON":      `nope`,
+			"лишнее поле":  `{"password":"x","extra":1}`,
+			"два значения": `{} {}`,
+			"массив":       `[]`,
+		} {
+			var calls []accountCall
+			response := call(t, stubAuthentication{accountCalls: &calls}, http.MethodPost, path, body)
+			if response.Code != http.StatusBadRequest || errorCode(t, response) != "INVALID_ARGUMENT" {
+				t.Errorf("%s %s: %d %s", path, name, response.Code, response.Body.String())
+			}
+			if len(calls) != 0 {
+				t.Errorf("%s %s: служба не должна вызываться: %+v", path, name, calls)
+			}
+		}
+	}
+}
+
+func TestAccountDataRoutesAcceptOnlyTheirMethods(t *testing.T) {
+	handler := NewHandler(stubAuthentication{}, nil, CookieConfiguration{TTL: time.Hour}).Router()
+	for path, methods := range map[string][]string{
+		"/account/export":   {http.MethodGet, http.MethodPut, http.MethodDelete},
+		"/account/deletion": {http.MethodGet, http.MethodPut},
+	} {
+		for _, method := range methods {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(method, path, nil))
+			if response.Code != http.StatusMethodNotAllowed && response.Code != http.StatusNotFound {
+				t.Errorf("%s %s: %d", method, path, response.Code)
+			}
+		}
+	}
+}
+
+// Срок закрытия выходит наружу полем user.deletionDueAt, остальные отметки назначения — нет.
+func TestMeShowsTheDeletionDueDateOnly(t *testing.T) {
+	requested := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
+	due := requested.Add(30 * 24 * time.Hour)
+	scheduled := domain.User{ID: "user", DeletionRequestedAt: &requested, DeletionDueAt: &due}
+	response := call(t, stubAuthentication{authenticated: &scheduled}, http.MethodGet, "/me", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"deletionDueAt":"2026-11-13T09:00:00Z"`) {
+		t.Fatalf("/me: %d %s", response.Code, response.Body.String())
+	}
+	for _, hidden := range []string{"deletionRequestedAt", "DeletionRequestedAt", "deletedAt"} {
+		if strings.Contains(response.Body.String(), hidden) {
+			t.Errorf("/me раскрывает %q: %s", hidden, response.Body.String())
+		}
+	}
+	none := call(t, stubAuthentication{}, http.MethodGet, "/me", "")
+	if !strings.Contains(none.Body.String(), `"deletionDueAt":null`) {
+		t.Errorf("без назначения поле должно быть null: %s", none.Body.String())
 	}
 }

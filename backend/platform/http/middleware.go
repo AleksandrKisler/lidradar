@@ -50,6 +50,11 @@ func recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if recovered := recover(); recovered != nil {
+					// http.ErrAbortHandler — осознанный обрыв ответа (оборванная выгрузка, ADR 0059): ответ уже
+					// частично отправлен, и дописывать в него ошибку нельзя. Сервер сам закроет соединение без лога.
+					if recovered == http.ErrAbortHandler {
+						panic(recovered)
+					}
 					logger.Error("HTTP panic recovered", "event", "http.panic", "request_id", RequestID(r.Context()), "trace_id", TraceID(r.Context()))
 					WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error", nil)
 				}

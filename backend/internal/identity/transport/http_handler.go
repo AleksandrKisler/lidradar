@@ -33,6 +33,10 @@ type Authentication interface {
 	ResetPassword(ctx context.Context, token, newPassword string, client application.Client) error
 	RequestEmailVerification(ctx context.Context, sessionToken string, client application.Client) error
 	VerifyEmail(ctx context.Context, token string, client application.Client) error
+	// Выгрузка личных данных и закрытие учётной записи (ADR 0059).
+	ExportAccountData(ctx context.Context, sessionToken, password string, client application.Client) ([]byte, error)
+	RequestAccountDeletion(ctx context.Context, sessionToken, password string, client application.Client) (time.Time, error)
+	CancelAccountDeletion(ctx context.Context, sessionToken string, client application.Client) error
 }
 
 type CookieConfiguration struct {
@@ -63,6 +67,9 @@ func (h Handler) Router() http.Handler {
 	router.Post("/password/reset", h.resetPassword)
 	router.Post("/email/verification", h.resendVerification)
 	router.Post("/email/verify", h.verifyEmail)
+	router.Post("/account/export", h.exportAccount)
+	router.Post("/account/deletion", h.requestAccountDeletion)
+	router.Delete("/account/deletion", h.cancelAccountDeletion)
 	return router
 }
 
@@ -224,6 +231,50 @@ func (h Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Выгрузка личных данных и закрытие учётной записи (ADR 0059). Обе опасные команды подтверждаются паролем в теле
+// запроса: пароль не попадает ни в адрес, ни в журналы.
+
+type passwordConfirmation struct {
+	Password string `json:"password"`
+}
+
+func (h Handler) exportAccount(w http.ResponseWriter, r *http.Request) {
+	var request passwordConfirmation
+	if httpplatform.DecodeJSON(w, r, &request) != nil {
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
+		return
+	}
+	document, err := h.auth.ExportAccountData(r.Context(), sessionToken(r), request.Password, client(r))
+	if handleError(w, r, err) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="lidradar-account-`+time.Now().UTC().Format("20060102")+`.json"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(document)
+}
+
+func (h Handler) requestAccountDeletion(w http.ResponseWriter, r *http.Request) {
+	var request passwordConfirmation
+	if httpplatform.DecodeJSON(w, r, &request) != nil {
+		httpplatform.WriteError(w, r, http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request", nil)
+		return
+	}
+	due, err := h.auth.RequestAccountDeletion(r.Context(), sessionToken(r), request.Password, client(r))
+	if handleError(w, r, err) {
+		return
+	}
+	httpplatform.WriteJSON(w, http.StatusOK, map[string]any{"deletionDueAt": due})
+}
+
+func (h Handler) cancelAccountDeletion(w http.ResponseWriter, r *http.Request) {
+	if handleError(w, r, h.auth.CancelAccountDeletion(r.Context(), sessionToken(r), client(r))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h Handler) setSession(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: SessionCookieName, Value: token, Path: "/",
@@ -275,6 +326,13 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 		httpplatform.WriteError(w, r, http.StatusBadRequest, "RESET_TOKEN_INVALID", "Password reset link is not valid", nil)
 	case errors.Is(err, application.ErrVerificationTokenInvalid):
 		httpplatform.WriteError(w, r, http.StatusBadRequest, "VERIFICATION_TOKEN_INVALID", "Email verification link is not valid", nil)
+	case errors.Is(err, application.ErrDeletionBlocked):
+		var blocked application.DeletionBlockedError
+		details := map[string]any{"blockers": []application.DeletionBlocker{}}
+		if errors.As(err, &blocked) && len(blocked.Blockers) > 0 {
+			details["blockers"] = blocked.Blockers
+		}
+		httpplatform.WriteError(w, r, http.StatusConflict, "ACCOUNT_DELETION_BLOCKED", "Account cannot be closed yet", details)
 	case errors.Is(err, application.ErrMailUnavailable):
 		httpplatform.WriteError(w, r, http.StatusServiceUnavailable, "MAIL_UNAVAILABLE", "Mail is not available", nil)
 	case errors.Is(err, application.ErrInvalidCredentials):

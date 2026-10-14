@@ -1,4 +1,4 @@
-<!-- GENERATED; source-sha256: f822416a66bb710bfdc18a73e822f4dbffadfbc50851f75c3f9d0cd92f969622 -->
+<!-- GENERATED; source-sha256: 0a53d2d39ad0a2ec380389ff2bdc2c98ea4110f9e1994ea43960b5ddf18b6a8a -->
 > Источник: [канонический документ](../adr/README.md). Правки вносятся в источник.
 
 # Architecture decision records
@@ -69,6 +69,7 @@ System Architecture v1.1; later changes must follow the workflow in this file.
 - [0056: Сроки хранения и стирание данных](../adr/0056-data-retention-and-erasure.md) — Accepted, 2026-10-12.
 - [0057: Регистрация по приглашениям](../adr/0057-invitation-only-registration.md) — Accepted, 2026-10-13.
 - [0058: Почта, смена и сброс пароля, подтверждение почты](../adr/0058-account-security-and-mail.md) — Accepted, 2026-10-13.
+- [0059: Выгрузка данных и закрытие учётной записи](../adr/0059-data-export-and-account-closure.md) — Accepted, 2026-10-14.
 
 ## Workflow
 

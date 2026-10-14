@@ -239,6 +239,101 @@ expect 'в очереди не осталось ни адресов, ни ссы
 expect 'в базе нет открытых токенов' "$(pg postgres "SELECT count(*) FROM account_tokens WHERE token_hash IN ('${VERIFY_TOKEN}', '${RESET_TOKEN}')")" 0
 expect 'аудит записал подтверждение, сброс и смену пароля' "$(pg postgres "SELECT string_agg(operation, ',' ORDER BY operation) FROM auth_audit_log WHERE operation IN ('EMAIL_VERIFIED', 'PASSWORD_RESET_REQUESTED', 'PASSWORD_RESET_COMPLETED', 'PASSWORD_CHANGED')")" 'EMAIL_VERIFIED,PASSWORD_CHANGED,PASSWORD_RESET_COMPLETED,PASSWORD_RESET_REQUESTED'
 expect 'worker сообщил состояние очереди писем' "$(grep -c '"event":"mail.queue.status"' "${WORK}/worker.log" | awk '{print ($1 > 0)}')" 1
+# --- 4c. выгрузка данных и закрытие учётной записи (ADR 0059): настоящие api, worker и platform-admin ---
+# Закрываемые пользователи создаются в базе напрямую с хэшем пароля rt@example.test: предел регистраций с адреса уже
+# почти исчерпан. Срок закрытия сдвигается в прошлое SQL-запросом, чтобы не ждать 30 суток; исполняет его настоящий worker.
+RT_PASSWORD=third-secure-password
+password_body() { printf '{"password":"%s"}' "$1"; }
+add_member() { # add_member АДРЕС: активный менеджер RT Studio с паролем rt@example.test
+  pg postgres "WITH created AS (INSERT INTO users(id, email, password_hash, display_name, status) SELECT gen_random_uuid(), '$1', password_hash, 'E2E Member', 'ACTIVE' FROM users WHERE email = 'rt@example.test' RETURNING id) INSERT INTO memberships(id, tenant_id, user_id, role, status) SELECT gen_random_uuid(), '${ORGANIZATION}', id, 'MANAGER', 'ACTIVE' FROM created" >/dev/null
+}
+member_login() { # member_login АДРЕС: вход в отдельную банку cookie
+  curl -sS -c "${WORK}/jar-$1" -X POST "http://127.0.0.1:${API_PORT}/api/v1/auth/login" -H 'Content-Type: application/json' -H "Origin: http://127.0.0.1:${API_PORT}" -d "$(login_body "$1" "${RT_PASSWORD}")" -o /dev/null -w '%{http_code}'
+}
+member_api() { # member_api АДРЕС МЕТОД ПУТЬ [ТЕЛО] [ОРГАНИЗАЦИЯ]
+  curl -sS -b "${WORK}/jar-$1" -c "${WORK}/jar-$1" -X "$2" "http://127.0.0.1:${API_PORT}$3" -H 'Content-Type: application/json' -H "Origin: http://127.0.0.1:${API_PORT}" ${5:+-H "X-Tenant-ID: $5"} ${4:+-d "$4"} -o "${WORK}/response" -w '%{http_code}'
+}
+wait_mail() { # wait_mail АДРЕС ПОДСТРОКА_ТЕМЫ: ждёт письмо, записанное транспортом в журнал воркера, до 60 секунд
+  for _ in $(seq 1 60); do
+    if { grep '"event":"mail.logged"' "${WORK}/worker.log" || true; } | jq -e --arg to "$1" --arg subject "$2" 'select(.to == $to and (.subject | contains($subject)))' >/dev/null 2>&1; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+platform_admin() { env LIDRADAR_DATABASE_URL="${RUNTIME_DSN}" "${WORK}/bin/platform-admin" "$@"; }
+
+expect 'личная выгрузка с неверным паролем: 403' "$(api POST /api/v1/auth/account/export "$(password_body wrong-password-value)")" 403
+expect 'личная выгрузка с верным паролем' "$(api POST /api/v1/auth/account/export "$(password_body "${RT_PASSWORD}")")" 200
+expect 'личная выгрузка: формат и адрес' "$(jq -r '[.format, .account.email] | join(" ")' "${WORK}/response")" 'lidradar.account-export/1 rt@example.test'
+expect 'личная выгрузка не содержит хэшей и идентификаторов организаций' "$({ grep -ciE 'argon2|token_?hash|tenant' "${WORK}/response" || true; } | tr -d ' ')" 0
+expect 'аудит записал личную выгрузку' "$(pg postgres "SELECT count(*) FROM auth_audit_log WHERE operation = 'ACCOUNT_DATA_EXPORTED'")" 1
+
+expect 'владелец единственной организации и администратор платформы не может закрыть аккаунт' "$(api POST /api/v1/auth/account/deletion "$(password_body "${RT_PASSWORD}")")" 409
+expect 'отказ называет блокировки SOLE_OWNER и PLATFORM_ADMIN' "$(jq -r '[.error.code, (.error.details.blockers | map(.code) | sort | join(","))] | join(" ")' "${WORK}/response")" 'ACCOUNT_DELETION_BLOCKED PLATFORM_ADMIN,SOLE_OWNER'
+expect 'в ответе о блокировке нет идентификатора организации' "$({ grep -c "${ORGANIZATION}" "${WORK}/response" || true; } | tr -d ' ')" 0
+
+add_member erase@example.test
+expect 'участник входит под паролем rt' "$(member_login erase@example.test)" 200
+expect 'участник просит закрыть аккаунт' "$(member_api erase@example.test POST /api/v1/auth/account/deletion "$(password_body "${RT_PASSWORD}")")" 200
+expect 'срок закрытия назначен на 30 суток' "$(pg postgres "SELECT deletion_due_at > now() + interval '29 days' AND deletion_due_at < now() + interval '31 days' FROM users WHERE email = 'erase@example.test'")" t
+expect 'до срока аккаунт работает, а /auth/me показывает срок' "$(member_api erase@example.test GET /api/v1/auth/me >/dev/null; jq -r '.user.deletionDueAt != null' "${WORK}/response")" true
+check 'worker отправил письмо о запросе закрытия' wait_mail erase@example.test 'Запрошено удаление аккаунта'
+expect 'участник отменяет закрытие' "$(member_api erase@example.test DELETE /api/v1/auth/account/deletion)" 204
+expect 'после отмены срока нет' "$(pg postgres "SELECT deletion_due_at IS NULL FROM users WHERE email = 'erase@example.test'")" t
+expect 'участник просит закрыть аккаунт снова' "$(member_api erase@example.test POST /api/v1/auth/account/deletion "$(password_body "${RT_PASSWORD}")")" 200
+ERASE_ID="$(pg postgres "SELECT id FROM users WHERE email = 'erase@example.test'")"
+pg postgres "UPDATE users SET deletion_requested_at = now() - interval '31 days', deletion_due_at = now() - interval '1 day' WHERE id = '${ERASE_ID}'" >/dev/null
+# Цепочка исполнителя просыпается раз в минуту.
+for _ in $(seq 1 100); do
+  [ "$(pg postgres "SELECT count(*) FROM users WHERE id = '${ERASE_ID}' AND deleted_at IS NOT NULL")" = 1 ] && break
+  sleep 1
+done
+expect 'worker обезличил учётную запись по сроку' "$(pg postgres "SELECT email = id::text || '@deleted.invalid' AND display_name = 'Удалён' AND status = 'DISABLED' AND email_verified_at IS NULL FROM users WHERE id = '${ERASE_ID}'")" t
+expect 'сессии и токены обезличенного удалены' "$(pg postgres "SELECT (SELECT count(*) FROM sessions WHERE user_id = '${ERASE_ID}') + (SELECT count(*) FROM account_tokens WHERE user_id = '${ERASE_ID}')")" 0
+expect 'членство обезличенного закрыто, а не удалено' "$(pg postgres "SELECT status || ' ' || (revoked_at IS NOT NULL) FROM memberships WHERE user_id = '${ERASE_ID}'")" 'DISABLED true'
+expect 'вход обезличенного невозможен' "$(api POST /api/v1/auth/login "$(login_body erase@example.test "${RT_PASSWORD}")")" 401
+expect 'старая сессия обезличенного недействительна' "$(member_api erase@example.test GET /api/v1/auth/me)" 401
+expect 'аудит записал запрос, отмену и обезличивание' "$(pg postgres "SELECT string_agg(operation, ',' ORDER BY operation) FROM (SELECT DISTINCT operation FROM auth_audit_log WHERE user_id = '${ERASE_ID}' AND operation LIKE 'ACCOUNT_%') AS operations")" 'ACCOUNT_ANONYMIZED,ACCOUNT_DELETION_CANCELLED,ACCOUNT_DELETION_REQUESTED'
+check 'worker отправил письмо «Аккаунт LidRadar удалён» на прежний адрес' wait_mail erase@example.test 'Аккаунт LidRadar удалён'
+expect 'worker сообщил об обезличивании по идентификатору' "$({ grep '"event":"account.deletion.anonymized"' "${WORK}/worker.log" || true; } | jq -r --arg id "${ERASE_ID}" 'select(.user_id == $id) | .user_id' | wc -l | tr -d ' ')" 1
+expect 'в журнале исполнителя нет адреса' "$({ grep '"event":"account.deletion.anonymized"' "${WORK}/worker.log" || true; } | { grep -c 'erase@example.test' || true; } | tr -d ' ')" 0
+expect 'прежний адрес обезличенного освобождён для новой регистрации' "$(pg postgres "SELECT count(*) FROM users WHERE email = 'erase@example.test'")" 0
+
+add_member erase2@example.test
+ERASE2_ID="$(pg postgres "SELECT id FROM users WHERE email = 'erase2@example.test'")"
+expect 'сухой запуск erase-user сообщает, что ничего не изменено' "$(platform_admin erase-user --email erase2@example.test --note e2e --dry-run | { grep -c 'сухой запуск' || true; } | tr -d ' ')" 1
+expect 'после сухого запуска пользователь действующий' "$(pg postgres "SELECT status FROM users WHERE id = '${ERASE2_ID}'")" ACTIVE
+check_fails 'erase-user без повторного адреса отклонён' platform_admin erase-user --email erase2@example.test --note e2e
+check_fails 'erase-user отказывает владельцу единственной организации и администратору платформы' platform_admin erase-user --email rt@example.test --note e2e --confirm-email rt@example.test
+expect 'после отказа rt остаётся действующим' "$(pg postgres "SELECT status FROM users WHERE email = 'rt@example.test'")" ACTIVE
+check 'erase-user обезличивает пользователя по команде оператора' platform_admin erase-user --email erase2@example.test --note e2e --confirm-email erase2@example.test
+expect 'оператор обезличил пользователя на месте' "$(pg postgres "SELECT email = id::text || '@deleted.invalid' AND deleted_at IS NOT NULL FROM users WHERE id = '${ERASE2_ID}'")" t
+expect 'аудит оператора записал USER_ERASED источником CLI с основанием' "$(pg postgres "SELECT count(*) FROM admin_audit_log WHERE source = 'CLI' AND operation = 'USER_ERASED' AND entity_id = '${ERASE2_ID}' AND details ->> 'note' = 'e2e'")" 1
+check_fails 'повторное erase-user по прежнему адресу не находит пользователя' platform_admin erase-user --email erase2@example.test --note e2e --confirm-email erase2@example.test
+
+# Выгрузка организации: потоковый ZIP только для владельца; менеджеру отказ.
+add_member export-manager@example.test
+expect 'менеджер входит' "$(member_login export-manager@example.test)" 200
+expect 'менеджеру выгрузка организации отказана' "$(member_api export-manager@example.test POST /api/v1/organization/export '' "${ORGANIZATION}")" 403
+expect 'владелец скачивает выгрузку организации' "$(curl -sS -b "${WORK}/jar" -X POST "http://127.0.0.1:${API_PORT}/api/v1/organization/export" -H "Origin: http://127.0.0.1:${API_PORT}" -H "X-Tenant-ID: ${ORGANIZATION}" -D "${WORK}/org.headers" -o "${WORK}/org.zip" -w '%{http_code}')" 200
+expect 'выгрузка организации — вложение ZIP без кэша' "$({ grep -ciE '^(content-type: application/zip|cache-control: no-store)' "${WORK}/org.headers" || true; } | tr -d ' ')" 2
+zip_report() { # zip_report ФАЙЛ: первый и последний файлы, полнота манифеста, отсутствие секретов, наличие канала
+  python3 - "$1" <<'PY'
+import json
+import sys
+import zipfile
+
+archive = zipfile.ZipFile(sys.argv[1])
+names = archive.namelist()
+manifest = json.loads(archive.read('manifest.json'))
+listed = [entry['name'] for entry in manifest['files']]
+payload = b''.join(archive.read(name) for name in names)
+markers = (b'encrypted_credentials', b'verification_secret_hash', b'code_hash', b'tenant_id', b'argon2')
+print(names[0], names[-1], listed == names[:-1], not [marker for marker in markers if marker in payload], b'RT webhook' in archive.read('data/channels.jsonl'))
+PY
+}
+expect 'архив: README первым, манифест последним и описывает все файлы, секретов нет, канал выгружен' "$(zip_report "${WORK}/org.zip")" 'README.txt manifest.json True True True'
+expect 'аудит организации записал выгрузку' "$(pg postgres "SELECT count(*) FROM audit_log WHERE tenant_id = '${ORGANIZATION}' AND operation = 'ORGANIZATION_DATA_EXPORTED'")" 1
 sleep 5
 expect 'все соединения процессов приложения идут от рабочего логина' "$(pg postgres "SELECT string_agg(DISTINCT usename, ',') FROM pg_stat_activity WHERE datname = 'lidradar' AND backend_type = 'client backend' AND pid <> pg_backend_pid()")" lidradar_runtime
 expect 'суперпользователей среди клиентов базы нет' "$(pg postgres "SELECT count(*) FROM pg_stat_activity a JOIN pg_roles r ON r.rolname = a.usename WHERE r.rolsuper AND a.backend_type = 'client backend' AND a.pid <> pg_backend_pid()")" 0

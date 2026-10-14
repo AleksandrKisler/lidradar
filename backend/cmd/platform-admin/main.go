@@ -10,20 +10,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"lidradar/backend/internal/admin/application"
 	"lidradar/backend/internal/admin/domain"
 	"lidradar/backend/internal/admin/infrastructure"
+	lifecycleapplication "lidradar/backend/internal/lifecycle/application"
+	lifecycledomain "lidradar/backend/internal/lifecycle/domain"
+	lifecycleinfrastructure "lidradar/backend/internal/lifecycle/infrastructure"
 	"lidradar/backend/platform/bootstrap"
 	"lidradar/backend/platform/config"
+	cryptoplatform "lidradar/backend/platform/crypto"
 	"lidradar/backend/platform/ids"
 	"lidradar/backend/platform/postgres"
 )
 
 const usage = "использование: platform-admin grant|revoke --email адрес [--note заметка] | list | " +
-	"invite [--note заметка] [--days N] | invitations | revoke-invitation --id UUID | allow-organization --email адрес"
+	"invite [--note заметка] [--days N] | invitations | revoke-invitation --id UUID | allow-organization --email адрес | " +
+	"erase-user --email адрес --note основание --confirm-email адрес [--dry-run]"
 
 // command — разобранные аргументы командной строки.
 type command struct {
@@ -32,6 +38,9 @@ type command struct {
 	note   string
 	id     string
 	days   int
+	// confirmEmail и dryRun относятся к erase-user (ADR 0059): необратимую команду подтверждает повторный ввод адреса.
+	confirmEmail string
+	dryRun       bool
 }
 
 // parseArguments разбирает аргументы и проверяет обязательные флаги действия. Ошибка уже содержит
@@ -47,6 +56,8 @@ func parseArguments(args []string, stderr io.Writer) (command, error) {
 	flags.StringVar(&parsed.note, "note", "", "заметка: причина выдачи права или кому предназначен код")
 	flags.StringVar(&parsed.id, "id", "", "идентификатор кода приглашения")
 	flags.IntVar(&parsed.days, "days", domain.PlatformInvitationDefaultDays, "срок действия кода в сутках")
+	flags.StringVar(&parsed.confirmEmail, "confirm-email", "", "erase-user: тот же адрес ещё раз, подтверждение необратимой команды")
+	flags.BoolVar(&parsed.dryRun, "dry-run", false, "erase-user: показать, что будет затронуто, ничего не меняя")
 	if err := flags.Parse(args[1:]); err != nil {
 		return command{}, err
 	}
@@ -56,6 +67,7 @@ func parseArguments(args []string, stderr io.Writer) (command, error) {
 	parsed.email = strings.TrimSpace(parsed.email)
 	parsed.note = strings.TrimSpace(parsed.note)
 	parsed.id = strings.TrimSpace(parsed.id)
+	parsed.confirmEmail = strings.TrimSpace(parsed.confirmEmail)
 	switch parsed.action {
 	case "grant", "revoke", "allow-organization":
 		if parsed.email == "" {
@@ -64,6 +76,17 @@ func parseArguments(args []string, stderr io.Writer) (command, error) {
 	case "revoke-invitation":
 		if parsed.id == "" {
 			return command{}, errors.New("обязателен --id")
+		}
+	case "erase-user":
+		if parsed.email == "" {
+			return command{}, errors.New("обязателен --email")
+		}
+		if parsed.note == "" {
+			return command{}, errors.New("обязателен --note: основание стирания, например номер обращения (без персональных данных)")
+		}
+		// Сухой запуск ничего не меняет и подтверждения не требует; боевой запуск необратим.
+		if !parsed.dryRun && !strings.EqualFold(parsed.confirmEmail, parsed.email) {
+			return command{}, errors.New("необратимая команда: повторите адрес в --confirm-email или проверьте её сначала с --dry-run")
 		}
 	case "invite":
 		if parsed.days < 1 || parsed.days > domain.PlatformInvitationMaxDays {
@@ -96,8 +119,67 @@ func run(ctx context.Context, configuration config.Config, parsed command, stdou
 		return err
 	}
 	defer pool.Close()
+	if parsed.action == "erase-user" {
+		// Платформенное стирание читает и меняет данные пользователя во всех организациях (ADR 0059); логин
+		// оператора входит в роль lidradar_platform, пул приложения не нужен.
+		eraser := lifecycleapplication.NewService(
+			lifecycleinfrastructure.NewPostgresStore(pool, nil), cryptoplatform.PasswordHasher{}, ids.Generator{}, time.Now,
+		)
+		return executeErase(ctx, eraser, parsed, stdout)
+	}
 	service := application.NewService(infrastructure.NewPostgresStore(pool), ids.Generator{}, time.Now)
 	return execute(ctx, service, parsed, stdout)
+}
+
+// userEraser — то, что команда erase-user берёт у модуля lifecycle.
+type userEraser interface {
+	EraseUser(ctx context.Context, email, note string, dryRun bool) (lifecycleapplication.ErasureReport, error)
+}
+
+// executeErase немедленно обезличивает пользователя или, с --dry-run, показывает затрагиваемые строки. Блокировки
+// и пропуск возвращаются ошибкой, чтобы код завершения был ненулевым: оператор не должен принять отказ за успех.
+func executeErase(ctx context.Context, eraser userEraser, parsed command, stdout io.Writer) error {
+	report, err := eraser.EraseUser(ctx, parsed.email, parsed.note, parsed.dryRun)
+	switch {
+	case errors.Is(err, lifecycleapplication.ErrUserNotFound):
+		return errors.New("пользователь с такой почтой не найден")
+	case err != nil:
+		return err
+	}
+	switch report.Outcome {
+	case lifecycledomain.ErasureBlocked:
+		for _, blocker := range report.Blockers {
+			switch blocker.Code {
+			case "SOLE_OWNER":
+				if blocker.HasOtherMembers {
+					fmt.Fprintf(stdout, "блокировка: единственный владелец организации «%s»; сначала нужно передать владение другому участнику\n", blocker.OrganizationName)
+				} else {
+					fmt.Fprintf(stdout, "блокировка: единственный участник организации «%s»; сначала нужно закрыть организацию (ADR 0056, механизм 5)\n", blocker.OrganizationName)
+				}
+			case "PLATFORM_ADMIN":
+				fmt.Fprintln(stdout, "блокировка: действующий администратор платформы; сначала отзовите право командой revoke")
+			default:
+				fmt.Fprintf(stdout, "блокировка: %s\n", blocker.Code)
+			}
+		}
+		return errors.New("пользователя нельзя обезличить, пока действуют блокировки; ничего не изменено")
+	case lifecycledomain.ErasureSkipped:
+		return errors.New("пользователь уже обезличен или занят другой операцией; ничего не изменено, повторите позже")
+	}
+	if report.DryRun {
+		fmt.Fprintf(stdout, "сухой запуск: пользователь %s будет обезличен, ничего не изменено. Затрагивается строк:\n", report.UserID)
+	} else {
+		fmt.Fprintf(stdout, "пользователь обезличен: %s. Затронуто строк:\n", report.UserID)
+	}
+	tables := make([]string, 0, len(report.Counts))
+	for table := range report.Counts {
+		tables = append(tables, table)
+	}
+	sort.Strings(tables)
+	for _, table := range tables {
+		fmt.Fprintf(stdout, "  %s\t%d\n", table, report.Counts[table])
+	}
+	return nil
 }
 
 func execute(ctx context.Context, service application.Service, parsed command, stdout io.Writer) error {

@@ -95,6 +95,22 @@ func TestPermissionServiceUsesMembershipRoleMapping(t *testing.T) {
 			t.Fatalf("OWNER permission %q = %v, %v", permission, allowed, err)
 		}
 	}
+	// Карта проверяется и по явному списку: тест, читающий только её, не заметил бы вычеркнутого права.
+	explicitOwner := []string{
+		PermissionRiskRead, PermissionRiskManage, PermissionConversationRead, PermissionOpportunityManage,
+		PermissionActionManage, PermissionOutcomeManage, PermissionRevenueConfirm, PermissionRevenueRead,
+		PermissionAnalyticsRead, PermissionIntegrationManage, PermissionOrganizationManage, PermissionLocationManage,
+		PermissionServiceManage, PermissionNotificationManage, PermissionMemberManage, PermissionOrganizationExport,
+	}
+	if len(ownerPermissions) != len(explicitOwner) {
+		t.Fatalf("у владельца %d прав, ожидалось %d", len(ownerPermissions), len(explicitOwner))
+	}
+	for _, permission := range explicitOwner {
+		allowed, err := service.Allowed(context.Background(), "user", "tenant", permission)
+		if err != nil || !allowed {
+			t.Fatalf("OWNER explicit permission %q = %v, %v", permission, allowed, err)
+		}
+	}
 
 	repository.membership.Role = domain.RoleManager
 	for permission := range managerPermissions {
@@ -105,7 +121,7 @@ func TestPermissionServiceUsesMembershipRoleMapping(t *testing.T) {
 	}
 	for _, permission := range []string{
 		PermissionOrganizationManage, PermissionLocationManage, PermissionMemberManage,
-		PermissionRevenueRead, PermissionAnalyticsRead,
+		PermissionRevenueRead, PermissionAnalyticsRead, PermissionOrganizationExport,
 	} {
 		allowed, err := service.Allowed(context.Background(), "user", "tenant", permission)
 		if err != nil || allowed {

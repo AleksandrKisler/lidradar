@@ -104,6 +104,7 @@ type Service struct {
 	mode       RegistrationMode
 	invitation MemberInvitations
 	mail       mailSettings
+	data       AccountData
 }
 
 // WithAuditor включает аудит входа, выхода и регистрации (ТЗ §65).
@@ -294,6 +295,10 @@ func (s Service) Login(ctx context.Context, email, password string, client Clien
 		return Authenticated{}, err
 	}
 	if err := s.repository.CreateSession(ctx, session); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			// Учётную запись отключили (закрыли) между проверкой пароля и созданием сессии.
+			return Authenticated{}, ErrInvalidCredentials
+		}
 		return Authenticated{}, err
 	}
 	if err := s.auditAuth(ctx, user.ID, "USER_LOGGED_IN", client, now); err != nil {

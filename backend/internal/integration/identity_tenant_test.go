@@ -42,6 +42,9 @@ import (
 	identitytransport "lidradar/backend/internal/identity/transport"
 	jobsapplication "lidradar/backend/internal/jobs/application"
 	jobsinfrastructure "lidradar/backend/internal/jobs/infrastructure"
+	lifecycleapplication "lidradar/backend/internal/lifecycle/application"
+	lifecycleinfrastructure "lidradar/backend/internal/lifecycle/infrastructure"
+	lifecycletransport "lidradar/backend/internal/lifecycle/transport"
 	mailapplication "lidradar/backend/internal/mail/application"
 	mailinfrastructure "lidradar/backend/internal/mail/infrastructure"
 	notificationapplication "lidradar/backend/internal/notification/application"
@@ -82,6 +85,9 @@ type apiFixture struct {
 	// sent хранит всё, что «ушло по SMTP» (ADR 0058).
 	mailDelivery mailapplication.Service
 	sent         *sentMail
+	// executor исполняет назначенные закрытия учётных записей так, как это делает worker (платформенный пул), но по
+	// часам, ушедшим на 31 сутки вперёд: льготный срок (30 суток) считается наступившим (ADR 0059).
+	executor lifecycleapplication.Service
 }
 
 func newAPIFixture(t *testing.T) apiFixture {
@@ -236,13 +242,21 @@ func buildAPIFixture(t *testing.T, current bool, mode identityapplication.Regist
 			notificationapplication.EscalationJobType:   notificationapplication.EscalationJobHandler(notificationService),
 		}, time.Now, jobsapplication.DefaultLease,
 	)
+	rateLimiter := identityinfrastructure.NewPostgresRateLimiter(pool)
+	lifecycleService := lifecycleapplication.NewService(
+		lifecycleinfrastructure.NewPostgresStore(pools.Platform, pool), cryptoplatform.PasswordHasher{}, ids.Generator{}, time.Now,
+	).WithOrganizationExport(permissions, auditRecorder, rateLimiter)
 	identityService := identityapplication.NewService(
-		identityRepository, identityinfrastructure.NewPostgresRateLimiter(pool), cryptoplatform.PasswordHasher{},
+		identityRepository, rateLimiter, cryptoplatform.PasswordHasher{},
 		ids.Generator{}, identityinfrastructure.SessionTokens{}, time.Now, 24*time.Hour,
-	).WithAuditor(auditRecorder).WithRegistration(mode, tenantService).
+	).WithAuditor(auditRecorder).WithRegistration(mode, tenantService).WithAccountData(lifecycleService).
 		WithMail(mailapplication.NewService(mailinfrastructure.NewPostgresStore(pool), nil, ids.Generator{}, time.Now), integrationWebBaseURL, nil)
 	sent := &sentMail{}
 	mailDelivery := mailapplication.NewService(mailinfrastructure.NewPostgresStore(pools.Worker), sent, ids.Generator{}, time.Now)
+	executor := lifecycleapplication.NewService(
+		lifecycleinfrastructure.NewPostgresStore(pools.Platform, nil), cryptoplatform.PasswordHasher{}, ids.Generator{},
+		func() time.Time { return time.Now().Add(31 * 24 * time.Hour) },
+	).WithMail(mailDelivery, integrationWebBaseURL)
 	resolver := identitytransport.Resolver{Auth: identityService}
 	notificationLinks := notificationapplication.NewLinkService(
 		notificationapplication.NewLinker(notificationRepository, ids.Generator{}, time.Now),
@@ -278,11 +292,12 @@ func buildAPIFixture(t *testing.T, current bool, mode identityapplication.Regist
 	risktransport.NewHandler(riskRadar, resolver, riskEvents).WithFeedback(riskFeedback).RegisterRoutes(router, "/api/v1")
 	correctivetransport.NewHandler(correctiveService, resolver).RegisterRoutes(router, "/api/v1")
 	revenuetransport.NewHandler(revenueService, resolver).RegisterRoutes(router, "/api/v1")
+	lifecycletransport.NewHandler(lifecycleService, resolver).RegisterRoutes(router, "/api/v1")
 	return apiFixture{
 		handler: router, tenantService: tenantService, dispatcher: dispatcher,
 		worker: worker, candidates: candidateProcessor, notifications: deliveryService, pool: pools.Owner,
 		scheduler:    jobsapplication.NewScheduler(claimStore, time.Now),
-		mailDelivery: mailDelivery, sent: sent,
+		mailDelivery: mailDelivery, sent: sent, executor: executor,
 	}
 }
 

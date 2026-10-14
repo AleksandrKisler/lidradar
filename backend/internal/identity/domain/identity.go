@@ -43,6 +43,10 @@ type User struct {
 	// EmailVerifiedAt — когда подтверждён адрес почты (ADR 0058). Подтверждение мягкое: пустое значение
 	// ничего не блокирует.
 	EmailVerifiedAt *time.Time `json:"emailVerifiedAt"`
+	// DeletionRequestedAt и DeletionDueAt — назначенное закрытие учётной записи (ADR 0059); обе пусты, пока
+	// удаление не назначено. Наружу отдаётся только срок, до которого запрос можно отменить.
+	DeletionRequestedAt *time.Time `json:"-"`
+	DeletionDueAt       *time.Time `json:"deletionDueAt"`
 }
 
 func NewUser(id, email, passwordHash, displayName string, at time.Time) (User, error) {
@@ -157,9 +161,32 @@ type PasswordReset struct {
 	Audit     AuditRecord
 }
 
+// DeletionSchedule — назначение обезличивания учётной записи (ADR 0059). Запись аудита пишется в той же
+// транзакции, что и назначение.
+type DeletionSchedule struct {
+	UserID string
+	// At — момент запроса, Due — срок обезличивания (позже At).
+	At    time.Time
+	Due   time.Time
+	Audit AuditRecord
+}
+
+// NewDeletionSchedule проверяет назначение: пользователь задан, срок позже запроса, запись аудита собрана.
+func NewDeletionSchedule(userID string, at, due time.Time, audit AuditRecord) (DeletionSchedule, error) {
+	if userID == "" || at.IsZero() || !due.After(at) || audit.ID == "" {
+		return DeletionSchedule{}, ErrInvalid
+	}
+	return DeletionSchedule{UserID: userID, At: at.UTC(), Due: due.UTC(), Audit: audit}, nil
+}
+
 // Repository owns durable users and opaque sessions. Session token plaintext
 // never crosses this contract.
 type Repository interface {
+	// ScheduleDeletion назначает обезличивание условно: если оно уже назначено, ничего не меняет и возвращает
+	// прежний срок с created=false (аудит при этом не пишется). Отключённый пользователь — ErrNotFound.
+	ScheduleDeletion(context.Context, DeletionSchedule) (due time.Time, created bool, err error)
+	// CancelDeletion снимает назначение вместе с записью аудита; cancelled=false, если назначения не было.
+	CancelDeletion(ctx context.Context, userID string, at time.Time, audit AuditRecord) (cancelled bool, err error)
 	// ChangePassword меняет пароль условно по прежнему хэшу: если он уже другой, возвращает ErrConflict.
 	ChangePassword(context.Context, PasswordChange) error
 	// IssueAccountToken отзывает неиспользованные токены того же назначения и записывает новый; audit

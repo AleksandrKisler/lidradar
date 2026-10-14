@@ -109,6 +109,18 @@ class ProductionComposeTests(unittest.TestCase):
         self.assertTrue(ipaddress.ip_network(dynamic).subnet_of(ipaddress.ip_network(subnet)), dynamic)
         self.assertNotIn(ipaddress.ip_address(edge_ip), ipaddress.ip_network(dynamic))
 
+    def test_ai_node_addresses_default_to_any_and_can_be_narrowed(self):
+        # По умолчанию путь AI-узла открыт любому адресу (узел и так проходит секрет и подпись); оператор сужает его.
+        self.assertEqual(self.services['edge']['environment']['LIDRADAR_AI_NODE_ALLOWED_IPS'], '0.0.0.0/0 ::/0')
+        narrowed = render(COMPLETE_ENV + 'LIDRADAR_AI_NODE_ALLOWED_IPS="203.0.113.7 198.51.100.0/24"\n')
+        self.assertEqual(narrowed.returncode, 0, narrowed.stderr)
+        edge = json.loads(narrowed.stdout)['services']['edge']['environment']
+        self.assertEqual(edge['LIDRADAR_AI_NODE_ALLOWED_IPS'], '203.0.113.7 198.51.100.0/24')
+        # Значение нужно только краю: ни api, ни worker, ни остальные его не получают.
+        for name, service in self.services.items():
+            if name != 'edge':
+                self.assertNotIn('LIDRADAR_AI_NODE_ALLOWED_IPS', service.get('environment', {}), name)
+
     def test_images_are_immutable_and_pinned(self):
         for name, service in self.with_tools.items():
             self.assertNotIn('build', service, f'{name}: в production нет сборки на месте')
@@ -408,6 +420,19 @@ class EdgeConfigurationTests(unittest.TestCase):
         self.assertNotIn('encode', api)
         self.assertIn('reverse_proxy api:8080', api)
         self.assertIn('max_size', api)
+
+    def test_ai_node_path_has_its_own_route_limited_by_address(self):
+        api = self.block('handle @api')
+        self.assertNotIn('/internal/v1/ai', api, 'путь AI-узла не должен попадать в общий маршрут API')
+        node = self.block('handle @ainode')
+        # Запрет стоит раньше проксирования: чужой адрес не доходит до API.
+        self.assertLess(node.index('respond @ainode_denied "forbidden" 403'), node.index('reverse_proxy api:8080'))
+        self.assertIn('not remote_ip {$LIDRADAR_AI_NODE_ALLOWED_IPS:0.0.0.0/0 ::/0}', node)
+        self.assertIn('@ainode path /internal/v1/ai/*', self.text)
+        # Поток и размер тела те же, что у основного маршрута.
+        self.assertIn('flush_interval -1', node)
+        self.assertIn('max_size 2MB', node)
+        self.assertNotIn('encode', node)
 
     def test_only_liveness_is_public(self):
         self.assertIn('handle /health/live', self.text)
