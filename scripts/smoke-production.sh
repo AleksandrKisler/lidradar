@@ -96,7 +96,12 @@ request GET /api/v1/admin/me
 [ "${STATUS}" = 401 ] && pass 'API администратора без сессии даёт 401' || fail "GET /api/v1/admin/me без сессии: HTTP ${STATUS}, ожидалось 401"
 
 request POST /internal/v1/ai/nodes/heartbeat -H 'Content-Type: application/json' -d '{}'
-case "${STATUS}" in 400 | 401) pass "API AI-узла доступен и не пускает без подписи (HTTP ${STATUS})" ;; *) fail "POST /internal/v1/ai/nodes/heartbeat: HTTP ${STATUS}, ожидалось 400 или 401" ;; esac
+# 403 отвечает край, когда путь ограничен адресами узла (LIDRADAR_AI_NODE_ALLOWED_IPS): чужой адрес, а проверка идёт с чужого.
+case "${STATUS}" in
+  400 | 401) pass "API AI-узла доступен и не пускает без подписи (HTTP ${STATUS})" ;;
+  403) pass 'API AI-узла закрыт на краю по адресам (LIDRADAR_AI_NODE_ALLOWED_IPS): с этого адреса HTTP 403' ;;
+  *) fail "POST /internal/v1/ai/nodes/heartbeat: HTTP ${STATUS}, ожидалось 400, 401 или 403" ;;
+esac
 
 request POST /api/v1/webhooks/GENERIC_WEBHOOK/00000000-0000-7000-8000-000000000000/00000000-0000-7000-8000-000000000001 \
   -H 'Content-Type: application/json' -d '{}'

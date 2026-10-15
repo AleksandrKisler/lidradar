@@ -552,6 +552,11 @@ func (c Config) ValidateWorker() error {
 	if smtp.Username == "" || smtp.Password == "" {
 		problems = append(problems, fmt.Sprintf("%s and %s are required", mailSMTPUsernameKey, mailSMTPPasswordKey))
 	}
+	// Письма об исходе закрытия аккаунта строит сам worker (ADR 0059): без адреса веб-клиента ссылка в них
+	// осталась бы путём без домена.
+	if c.Mail.WebBaseURL == "" {
+		problems = append(problems, fmt.Sprintf("%s (or %s) is required to build links in the mail the worker writes", webBaseURLKey, publicBaseURLKey))
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("invalid worker configuration for %s: %s", c.Environment, strings.Join(problems, "; "))
 	}

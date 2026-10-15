@@ -86,6 +86,11 @@ jobs:
             -e LIDRADAR_DOMAIN=app.example.test -e LIDRADAR_ACME_EMAIL=ops@example.test \
             -v "$PWD/deploy/production/Caddyfile:/etc/caddy/Caddyfile:ro" \
             "$image" caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm \
+            -e LIDRADAR_DOMAIN=app.example.test -e LIDRADAR_ACME_EMAIL=ops@example.test \
+            -e "LIDRADAR_AI_NODE_ALLOWED_IPS=203.0.113.7 198.51.100.0/24 2001:db8::/32" \
+            -v "$PWD/deploy/production/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$image" caddy validate --config /etc/caddy/Caddyfile
       - name: Off-host backup pipeline
         run: |
           docker build -f deploy/backup/Dockerfile --build-arg VERSION=ci --build-arg REVISION=${{ github.sha }} -t lidradar-backup:ci .

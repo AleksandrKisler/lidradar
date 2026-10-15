@@ -143,7 +143,9 @@ services:
       LIDRADAR_TELEGRAM_TOKEN: ${LIDRADAR_TELEGRAM_TOKEN:?задайте LIDRADAR_TELEGRAM_TOKEN в .env}
       LIDRADAR_TELEGRAM_BOT_USERNAME: ${LIDRADAR_TELEGRAM_BOT_USERNAME:?задайте LIDRADAR_TELEGRAM_BOT_USERNAME в .env}
       # Почта (ADR 0058): сброс пароля и подтверждение почты. Письма отправляет только worker; без SMTP он не
-      # стартует (журнального транспорта с токенами в production нет). Ссылки строит api из LIDRADAR_PUBLIC_BASE_URL.
+      # стартует (журнального транспорта с токенами в production нет). Ссылки сброса и подтверждения строит api из
+      # LIDRADAR_PUBLIC_BASE_URL, ссылки в письмах об исходе закрытия аккаунта (ADR 0059) строит worker из
+      # LIDRADAR_WEB_BASE_URL: тот же адрес веб-клиента.
       LIDRADAR_MAIL_SMTP_HOST: ${LIDRADAR_MAIL_SMTP_HOST:-smtp.gmail.com}
       LIDRADAR_MAIL_SMTP_PORT: ${LIDRADAR_MAIL_SMTP_PORT:-587}
       LIDRADAR_MAIL_SMTP_SECURITY: ${LIDRADAR_MAIL_SMTP_SECURITY:-starttls}
@@ -151,6 +153,7 @@ services:
       LIDRADAR_MAIL_SMTP_PASSWORD: ${LIDRADAR_MAIL_SMTP_PASSWORD:?задайте LIDRADAR_MAIL_SMTP_PASSWORD в .env}
       LIDRADAR_MAIL_FROM: ${LIDRADAR_MAIL_FROM:?задайте LIDRADAR_MAIL_FROM в .env}
       LIDRADAR_MAIL_FROM_NAME: ${LIDRADAR_MAIL_FROM_NAME:-LidRadar}
+      LIDRADAR_WEB_BASE_URL: ${LIDRADAR_PUBLIC_ORIGIN:-https://${LIDRADAR_DOMAIN:?задайте LIDRADAR_DOMAIN в .env}}
       LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION: ${LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION:-false}
       LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION_AFTER: ${LIDRADAR_NOTIFICATIONS_OWNER_ESCALATION_AFTER:-30m}
       LIDRADAR_AI_MODEL_VERSION: ${LIDRADAR_AI_MODEL_VERSION:-lidradar-main-v1}

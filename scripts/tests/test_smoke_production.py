@@ -67,6 +67,10 @@ if path == "/api/v1/auth/me":
 if path == "/api/v1/admin/me":
     respond(401, api, '{"error":{"code":"UNAUTHENTICATED"}}')
 if path == "/internal/v1/ai/nodes/heartbeat":
+    if "ai_forbidden" in broken:
+        respond(403, {"Content-Type": "text/plain"}, "forbidden")
+    if "ai_500" in broken:
+        respond(500, api, '{"error":{"code":"INTERNAL_ERROR"}}')
     respond(401, api, '{"error":{"code":"UNAUTHORIZED"}}')
 if path.startswith("/api/v1/webhooks/"):
     respond(500 if "webhook_500" in broken else 404, api, '{"error":{"code":"NOT_FOUND"}}')
@@ -137,6 +141,15 @@ class SmokeProductionTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertIn(message, result.stderr)
                 self.assertIn('замечаний', result.stderr)
+
+    def test_an_address_restricted_ai_node_route_is_not_a_defect(self):
+        # LIDRADAR_AI_NODE_ALLOWED_IPS: с чужого адреса край отвечает 403, это ожидаемо; любой другой отказ — дефект.
+        restricted = self.run_script('https://app.example.test', '--closed-ports', '', broken='ai_forbidden')
+        self.assertEqual(restricted.returncode, 0, restricted.stdout + restricted.stderr)
+        self.assertIn('API AI-узла закрыт на краю по адресам', restricted.stdout)
+        broken = self.run_script('https://app.example.test', '--closed-ports', '', broken='ai_500')
+        self.assertEqual(broken.returncode, 1)
+        self.assertIn('ожидалось 400, 401 или 403', broken.stderr)
 
     def test_an_open_internal_port_is_a_remark_and_a_closed_one_is_fine(self):
         with socket.socket() as listener:

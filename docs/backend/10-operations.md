@@ -43,7 +43,7 @@
 | `LIDRADAR_INTEGRATION_ENCRYPTION_KEY` | пусто | base64 ровно 32 байт; только вместе с URL; **обязателен для `api` в `staging`/`production`** | `api` |
 | `LIDRADAR_TELEGRAM_TOKEN` (прежнее имя `LIDAR_TELEGRAM_TOKEN` принимается, новое приоритетнее) | пусто | `^[0-9]{5,20}:[A-Za-z0-9_-]{20,128}$` | `worker` (уведомления), помощник подключения |
 | `LIDRADAR_TELEGRAM_BOT_USERNAME` | `LidRadarDevBot` | `^[A-Za-z0-9_]{5,32}$` | `api` (ссылка `/start`) |
-| `LIDRADAR_WEB_BASE_URL` | `LIDRADAR_PUBLIC_BASE_URL`; в `development`/`test` при пустом обоих — `http://localhost:5173` | origin веб-клиента без пути; `https` в `staging`/`production`; **обязателен для `api` в `staging`/`production`** (достаточно `LIDRADAR_PUBLIC_BASE_URL`) | `api` (ссылки в письмах, ADR 0058) |
+| `LIDRADAR_WEB_BASE_URL` | `LIDRADAR_PUBLIC_BASE_URL`; в `development`/`test` при пустом обоих — `http://localhost:5173` | origin веб-клиента без пути; `https` в `staging`/`production`; **обязателен для `api` и `worker` в `staging`/`production`** (достаточно `LIDRADAR_PUBLIC_BASE_URL`) | `api` (ссылки сброса и подтверждения, ADR 0058), `worker` (ссылка в письме об отменённом закрытии аккаунта, ADR 0059; production-compose передаёт тот же адрес) |
 | `LIDRADAR_MAIL_SMTP_HOST` | пусто | имя хоста без схемы, порта и пути; **обязателен для `worker` в `staging`/`production`**; пусто в `development`/`test` — письма пишутся в журнал воркера (`mail.logged`) | `worker` (ADR 0058) |
 | `LIDRADAR_MAIL_SMTP_PORT` | `587` | 1…65535 | `worker` |
 | `LIDRADAR_MAIL_SMTP_SECURITY` | `starttls`, при порте `465` — `tls` | `starttls` \| `tls` \| `none`; `none` только для loopback-хоста вне `staging`/`production`; пустое значение — ошибка | `worker` |
@@ -178,7 +178,7 @@ Compose, проект `lidradar-prod`, образы выпуска без `build
 
 | Сервис | Образ | Сети | Порты / проверка |
 |---|---|---|---|
-| `edge` | `caddy:2.11.7-alpine` | edge | наружу `80` и `443`; HTTPS (ACME), переход с HTTP, HSTS, маршруты `/api/*`, `/internal/v1/ai/*`, `/health/live`, остальное — `web`; адрес закреплён |
+| `edge` | `caddy:2.11.7-alpine` | edge | наружу `80` и `443`; HTTPS (ACME), переход с HTTP, HSTS, маршруты `/api/*`, `/internal/v1/ai/*` (при заданном `LIDRADAR_AI_NODE_ALLOWED_IPS` — только с перечисленных адресов, остальным `403`), `/health/live`, остальное — `web`; адрес закреплён |
 | `web` | `lidradar-web:<тег>` | edge | только через edge |
 | `api` | `lidradar-api:<тег>` | edge, data | `/health/ready` каждые 10 с; `LIDRADAR_TRUSTED_PROXIES=<адрес edge>/32` |
 | `worker` | `lidradar-worker:<тег>` | egress, data | выход к Telegram и SMTP; токен бота и пароль SMTP только у него (ADR 0058); без SMTP не стартует |
@@ -204,6 +204,7 @@ Compose, проект `lidradar-prod`, образы выпуска без `build
 владения); три пароля в `.env`, смена и переход — [runbook](../runbooks/production-deployment.md#11-роли-базы-данных).
 Копии по расписанию и вне хоста — служба `backup` ([ADR 0051](../adr/0051-offhost-backups.md),
 [runbook](../runbooks/offhost-backup.md)): без хранилища и ключа получателя стек не запускается.
+Проверка нового хоста до первого запуска (система, Docker, ресурсы, порты, DNS, выход к Docker Hub, Let's Encrypt, Telegram, SMTP и хранилищу копий) — `scripts/preflight-host.sh`; пошаговая памятка первого выпуска — [first-release.md](../runbooks/first-release.md).
 Приёмка снаружи и изнутри (включая возраст последней копии) — `scripts/smoke-production.sh`. Инварианты compose и
 Caddyfile закреплены тестами (`scripts/tests/test_production_compose.py`) и
 проверкой Caddy в CI. На настоящем хосте стек не разворачивался; перечень

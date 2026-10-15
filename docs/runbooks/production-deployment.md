@@ -5,7 +5,9 @@
 [`Caddyfile`](../../deploy/production/Caddyfile). Процедура проверена на Docker
 Desktop (Docker Engine 28.1.1, Compose 2.35.1, macOS, arm64) с доменом `localhost`;
 на Linux-хосте с настоящим доменом и сертификатом она не выполнялась, поэтому
-RG-DEPLOY не закрыт (см. «Что не закрыто»).
+RG-DEPLOY не закрыт (см. «Что не закрыто»). Пошаговая памятка первого выпуска на новом
+хосте с проверкой хоста, образами под x86_64 и живой проверкой Telegram — в
+[first-release.md](first-release.md).
 
 ```
 интернет ─ 80, 443 ─▶ edge (Caddy) ─▶ web   (статика веб-клиента)
@@ -39,6 +41,10 @@ RG-DEPLOY не закрыт (см. «Что не закрыто»).
   контейнеров `api` и `worker`, к `api.telegram.org`.
 - Токен бота Telegram для уведомлений и имя бота без `@`.
 
+Всё перечисленное, включая выход хоста к Docker Hub, Let's Encrypt, Telegram, SMTP и хранилищу копий,
+проверяет `scripts/preflight-host.sh --domain <домен> --smtp <хост:порт> --s3-endpoint <адрес>
+--compose-dir deploy/production` (ничего не меняет; код `1` — блокирующее замечание).
+
 ## 1. Сборка и доставка выпуска
 
 На машине сборки, из чистого дерева нужного коммита:
@@ -50,6 +56,12 @@ scripts/build-images.sh --web-dir ../lidradar-web
 Скрипт отказывает на изменённом дереве (в бэкенде и в клиенте), собирает
 `lidradar-<команда>:<тег>` и `lidradar-web:<тег>` и печатает `LIDRADAR_VERSION=<тег>`.
 Тег — первые 12 символов git sha. Образ `lidradar-ai-agent` нужен только узлу AI (`LIDRADAR_AI_AGENT_IMAGE` в `docker-compose.ai.yml`).
+Сборка идёт под архитектуру демона Docker: на Mac с Apple silicon это `linux/arm64`, а сервер обычно
+`x86_64`, поэтому для такого сервера задайте платформу явно: `DOCKER_DEFAULT_PLATFORM=linux/amd64
+scripts/build-images.sh …` (под эмуляцией образ `api` собирается около двух минут, остальные берут общий
+кэш компиляции; запуск образа amd64 проверен). Если Docker Hub с сервера недоступен или нестабилен, сторонние
+образы `caddy:2.11.7-alpine` и `postgres:18-alpine` отправляют тем же архивом (`docker pull --platform
+linux/amd64 …`, `docker save --platform linux/amd64 …`): [first-release.md](first-release.md) § 2.
 Доставка без реестра:
 
 ```bash
@@ -178,6 +190,12 @@ docker compose logs edge | grep 'certificate obtained'
 
    Передайте файл на узел по защищённому каналу и удалите его с хоста. Управление
    узлом: `docker compose run --rm ai-node-manage allow-tenant|rotate|revoke …`.
+5. Если у домашнего узла статичный адрес, закройте путь AI-узла на краю от остальных. **Только после
+   проверки адреса клиента** (раздел 5): задайте в `.env` `LIDRADAR_AI_NODE_ALLOWED_IPS="<адрес узла>"`
+   (несколько адресов или CIDR — через пробел) и примените `docker compose up -d edge`. Проверка с любого другого
+   адреса: `curl -i -X POST https://<домен>/internal/v1/ai/nodes/heartbeat` отвечает `403`, с адреса узла — `401`
+   (нет подписи). Узел сам ходит к API, входящих портов дома не нужно. Если адрес узла сменился, правят значение
+   и снова `up -d edge`; пока список неверен, задания ждут в очереди (`ai_jobs` в `PENDING`).
 
 ### Приглашения клиентов
 

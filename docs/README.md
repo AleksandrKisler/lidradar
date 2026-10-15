@@ -26,6 +26,7 @@
 | Восстановление | [Backup и полное DR](runbooks/backup-restore.md) |
 | Копии вне хоста | [Расписание, шифрование, хранилище, восстановление](runbooks/offhost-backup.md) |
 | Production-стек | [Развёртывание на одном хосте, обновление и откат](runbooks/production-deployment.md) |
+| Первый выпуск | [Памятка дня выпуска: образы под x86_64, хост, AI-узел, проверка Telegram, условия для клиента](runbooks/first-release.md) |
 | Развёртывание за proxy | [Проверка доверительной границы](runbooks/proxy-deployment.md) |
 | Обращения о данных | [Выгрузка, закрытие аккаунта и стирание по обращению](runbooks/data-requests.md) |
 | Нагрузка | [Метод и ограничения](runbooks/capacity-test.md) |

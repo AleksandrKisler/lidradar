@@ -574,7 +574,7 @@ func TestLoadMailSMTPSecurityAndPort(t *testing.T) {
 func TestLoadMailRejectsUnsafeOrInconsistentSMTPSettings(t *testing.T) {
 	valid := map[string]string{
 		mailSMTPHostKey: "smtp.gmail.com", mailSMTPUsernameKey: "bot@gmail.com", mailSMTPPasswordKey: "app-password",
-		mailFromKey: "bot@gmail.com",
+		mailFromKey: "bot@gmail.com", webBaseURLKey: "https://app.example.com",
 	}
 	load := func(environment Environment, overrides map[string]string) (Config, error) {
 		values := map[string]string{environmentKey: string(environment), databaseURLKey: "postgres://example"}
@@ -647,7 +647,7 @@ func TestLoadMailPlainSMTPIsOnlyForLoopbackOutsideProduction(t *testing.T) {
 func TestValidateWorkerRequiresMailOutsideDevelopment(t *testing.T) {
 	complete := map[string]string{
 		databaseURLKey: "postgres://example", mailSMTPHostKey: "smtp.gmail.com", mailSMTPUsernameKey: "bot@gmail.com",
-		mailSMTPPasswordKey: "app-password", mailFromKey: "bot@gmail.com",
+		mailSMTPPasswordKey: "app-password", mailFromKey: "bot@gmail.com", webBaseURLKey: "https://app.example.com",
 	}
 	load := func(environment Environment, drop ...string) Config {
 		t.Helper()
@@ -678,8 +678,9 @@ func TestValidateWorkerRequiresMailOutsideDevelopment(t *testing.T) {
 			t.Errorf("%s без отправителя: Load() error = %v", environment, err)
 		}
 		for name, drop := range map[string][]string{
-			"без хоста": {mailSMTPHostKey, mailSMTPUsernameKey, mailSMTPPasswordKey, mailFromKey},
-			"без входа": {mailSMTPUsernameKey, mailSMTPPasswordKey},
+			"без хоста":              {mailSMTPHostKey, mailSMTPUsernameKey, mailSMTPPasswordKey, mailFromKey},
+			"без входа":              {mailSMTPUsernameKey, mailSMTPPasswordKey},
+			"без адреса веб-клиента": {webBaseURLKey},
 		} {
 			err := load(environment, drop...).ValidateWorker()
 			if err == nil || !strings.Contains(err.Error(), string(environment)) {

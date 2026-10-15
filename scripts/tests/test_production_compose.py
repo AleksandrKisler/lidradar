@@ -109,6 +109,17 @@ class ProductionComposeTests(unittest.TestCase):
         self.assertTrue(ipaddress.ip_network(dynamic).subnet_of(ipaddress.ip_network(subnet)), dynamic)
         self.assertNotIn(ipaddress.ip_address(edge_ip), ipaddress.ip_network(dynamic))
 
+    def test_worker_builds_mail_links_for_the_same_origin_as_the_api(self):
+        # Письма о закрытии аккаунта (ADR 0059) строит worker; без адреса веб-клиента ссылка в них вышла бы без домена.
+        api = self.services['api']['environment']
+        worker = self.services['worker']['environment']
+        self.assertEqual(worker['LIDRADAR_WEB_BASE_URL'], api['LIDRADAR_PUBLIC_BASE_URL'])
+        self.assertEqual(worker['LIDRADAR_WEB_BASE_URL'], 'https://app.example.test')
+        pinned = render(COMPLETE_ENV + 'LIDRADAR_PUBLIC_ORIGIN=https://pilot.example.test\n')
+        self.assertEqual(pinned.returncode, 0, pinned.stderr)
+        environment = json.loads(pinned.stdout)['services']['worker']['environment']
+        self.assertEqual(environment['LIDRADAR_WEB_BASE_URL'], 'https://pilot.example.test')
+
     def test_ai_node_addresses_default_to_any_and_can_be_narrowed(self):
         # По умолчанию путь AI-узла открыт любому адресу (узел и так проходит секрет и подпись); оператор сужает его.
         self.assertEqual(self.services['edge']['environment']['LIDRADAR_AI_NODE_ALLOWED_IPS'], '0.0.0.0/0 ::/0')
@@ -159,7 +170,7 @@ class ProductionComposeTests(unittest.TestCase):
         for name in ['worker', 'scheduler', 'migrate', 'web', 'edge']:
             self.assertNotIn(key, keys(name), name)
         self.assertEqual(keys('web'), set())
-        self.assertEqual(keys('edge'), {'LIDRADAR_DOMAIN', 'LIDRADAR_ACME_EMAIL'})
+        self.assertEqual(keys('edge'), {'LIDRADAR_DOMAIN', 'LIDRADAR_ACME_EMAIL', 'LIDRADAR_AI_NODE_ALLOWED_IPS'})
         # Пароли базы (ADR 0052): администратор — только базе, владелец — базе и migrate, рабочий
         # логин — базе, процессам приложения, копиям и инструментам; не больше, чем нужно каждому.
         def holders(secret):
@@ -422,8 +433,10 @@ class EdgeConfigurationTests(unittest.TestCase):
         self.assertIn('max_size', api)
 
     def test_ai_node_path_has_its_own_route_limited_by_address(self):
-        api = self.block('handle @api')
-        self.assertNotIn('/internal/v1/ai', api, 'путь AI-узла не должен попадать в общий маршрут API')
+        code = re.sub(r'#.*', '', self.text)
+        matcher = re.search(r'^\s*@api path (.+)$', code, re.M)
+        self.assertIsNotNone(matcher)
+        self.assertEqual(matcher.group(1).strip(), '/api/*', 'путь AI-узла не должен попадать в общий маршрут API')
         node = self.block('handle @ainode')
         # Запрет стоит раньше проксирования: чужой адрес не доходит до API.
         self.assertLess(node.index('respond @ainode_denied "forbidden" 403'), node.index('reverse_proxy api:8080'))
